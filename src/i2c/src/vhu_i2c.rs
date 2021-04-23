@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::i2c::*;
+use std::mem::size_of;
 use std::sync::{Arc, RwLock};
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -14,7 +15,7 @@ use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_V
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 const QUEUE_SIZE: usize = 1024;
@@ -30,6 +31,22 @@ pub enum Error {
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
     HandleEventUnknownEvent,
+    /// Guest gave us a write only descriptor that protocol says to read from.
+    UnexpectedWriteOnlyDescriptor,
+    /// Guest gave us a readable descriptor that protocol says to only write to.
+    UnexpectedReadDescriptor,
+    /// Invalid descriptor count
+    UnexpectedDescriptorCount,
+    /// Invalid descriptor
+    UnexpectedDescriptorSize,
+    /// Descriptor not found
+    DescriptorNotFound,
+    /// Descriptor read failed
+    DescriptorReadFailed,
+    /// Descriptor write failed
+    DescriptorWriteFailed,
+    /// Descriptor send failed
+    DescriptorSendFailed,
 }
 impl error::Error for Error {}
 
@@ -44,6 +61,28 @@ impl convert::From<Error> for io::Error {
         io::Error::new(io::ErrorKind::Other, e)
     }
 }
+
+/// I2C definitions from Virtio Spec
+
+/// The final status written by the device
+const VIRTIO_I2C_MSG_OK: u8 = 0;
+const VIRTIO_I2C_MSG_ERR: u8 = 1;
+
+#[derive(Copy, Clone, Default)]
+#[repr(C)]
+struct VirtioI2cOutHdr {
+    addr: Le16,
+    padding: Le16,
+    flags: Le32,
+}
+unsafe impl ByteValued for VirtioI2cOutHdr {}
+
+#[derive(Copy, Clone, Default)]
+#[repr(C)]
+struct VirtioI2cInHdr {
+    status: u8,
+}
+unsafe impl ByteValued for VirtioI2cInHdr {}
 
 pub struct VhostUserI2cBackend<A: I2cAdapterTrait> {
     i2c_map: Arc<I2cMap<A>>,
@@ -62,8 +101,123 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
         })
     }
 
-    /// Process the messages in the vring and dispatch replies
-    fn process_queue(&self, _vring: &mut Vring) -> Result<bool> {
+    /// Process the requests in the vring and dispatch replies
+    fn process_queue(&self, vring: &mut Vring) -> Result<bool> {
+        let mut reqs: Vec<I2cReq> = Vec::new();
+
+        let requests: Vec<_> = vring
+            .mut_queue()
+            .iter()
+            .map_err(|_| Error::DescriptorNotFound)?
+            .collect();
+
+        if requests.is_empty() {
+            return Ok(true);
+        }
+
+        // Iterate over each I2C request and push it to "reqs" vector.
+        for desc_chain in requests.clone() {
+            let descriptors: Vec<_> = desc_chain.clone().collect();
+
+            if descriptors.len() != 3 {
+                return Err(Error::UnexpectedDescriptorCount);
+            }
+
+            let desc_out_hdr = descriptors[0];
+            if desc_out_hdr.is_write_only() {
+                return Err(Error::UnexpectedWriteOnlyDescriptor);
+            }
+
+            if desc_out_hdr.len() as usize != size_of::<VirtioI2cOutHdr>() {
+                return Err(Error::UnexpectedDescriptorSize);
+            }
+
+            let desc_buf = descriptors[1];
+            if desc_buf.len() == 0 {
+                return Err(Error::UnexpectedDescriptorSize);
+            }
+
+            let desc_in_hdr = descriptors[2];
+            if !desc_in_hdr.is_write_only() {
+                return Err(Error::UnexpectedReadDescriptor);
+            }
+
+            if desc_in_hdr.len() as usize != size_of::<u8>() {
+                return Err(Error::UnexpectedDescriptorSize);
+            }
+
+            let mut buf: Vec<u8> = vec![0; desc_buf.len() as usize];
+
+            let mut flags: u16 = 0;
+
+            if desc_buf.is_write_only() {
+                flags = I2C_M_RD;
+            } else {
+                desc_chain
+                    .memory()
+                    .read(&mut buf, desc_buf.addr())
+                    .map_err(|_| Error::DescriptorReadFailed)?;
+            }
+
+            let out_hdr = desc_chain
+                .memory()
+                .read_obj::<VirtioI2cOutHdr>(desc_out_hdr.addr())
+                .map_err(|_| Error::DescriptorReadFailed)?;
+
+            reqs.push(I2cReq {
+                addr: out_hdr.addr.to_native() >> 1,
+                flags,
+                len: desc_buf.len() as u16,
+                buf,
+            });
+        }
+
+        let in_hdr = {
+            VirtioI2cInHdr {
+                status: match self.i2c_map.transfer(&mut reqs) {
+                    Ok(()) => VIRTIO_I2C_MSG_OK,
+                    Err(_) => VIRTIO_I2C_MSG_ERR,
+                },
+            }
+        };
+
+        for desc_chain in requests {
+            let descriptors: Vec<_> = desc_chain.clone().collect();
+            let desc_buf = descriptors[1];
+            let desc_in_hdr = descriptors[2];
+            let mut len = size_of::<VirtioI2cInHdr>() as u32;
+
+            // Write the data read from the I2C device
+            if desc_buf.is_write_only() {
+                desc_chain
+                    .memory()
+                    .write(&reqs.remove(0).buf, desc_buf.addr())
+                    .map_err(|_| Error::DescriptorWriteFailed)?;
+            }
+
+            // Write the transfer status
+            desc_chain
+                .memory()
+                .write_obj::<VirtioI2cInHdr>(in_hdr, desc_in_hdr.addr())
+                .map_err(|_| Error::DescriptorWriteFailed)?;
+
+            if in_hdr.status == VIRTIO_I2C_MSG_OK {
+                len += desc_buf.len();
+            }
+
+            if vring
+                .mut_queue()
+                .add_used(desc_chain.head_index(), len)
+                .is_err()
+            {
+                println!("Couldn't return used descriptors to the ring");
+            }
+        }
+
+        // Send notification once all the requests are processed
+        vring
+            .signal_used_queue()
+            .map_err(|_| Error::DescriptorSendFailed)?;
         Ok(true)
     }
 }

@@ -1,41 +1,64 @@
-# Crate Name
+# vhost-device-i2c - I2C emulation backend daemon
 
-## Design
+## Description
+This program is a vhost-user backend that emulates a VirtIO I2C bus.
+This program takes the layout of the i2c bus and its devices on the host
+OS and then talks to them via the /dev/i2c-X interface when a request
+comes from the guest OS for an I2C or SMBUS device.
 
-TODO: This section should have a high-level design of the crate.
+This program is tested with QEMU's `-device vhost-user-i2c-pci` but should
+work with any virtual machine monitor (VMM) that supports vhost-user. See the
+Examples section below.
 
-Some questions that might help in writing this section:
-- What is the purpose of this crate?
-- What are the main components of the crate? How do they interact which each
-  other?
+## Synopsis
 
-## Usage
+**vhost-device-i2c** [*OPTIONS*]
 
-TODO: This section describes how the crate is used.
+## Options
 
-Some questions that might help in writing this section:
-- What traits do users need to implement?
-- Does the crate have any default/optional features? What is each feature
-  doing?
-- Is this crate used by other rust-vmm components? If yes, how?
+.. program:: vhost-device-i2c
+
+.. option:: -h, --help
+
+  Print help.
+
+.. option:: -s, --socket-path=PATH
+
+  Location of vhost-user Unix domain sockets, this path will be suffixed with
+  0,1,2..socket_count-1.
+
+.. option:: -c, --socket-count=INT
+
+  Number of guests (sockets) to attach to, default set to 1.
+
+.. option:: -l, --device-list=I2C-DEVICES
+
+  I2c device list at the host OS in the format:
+      <bus>:<client_addr>[:<client_addr>],[<bus>:<client_addr>[:<client_addr>]]
+
+      Example: --device-list "2:32:21,3:10:23"
+
+  Here,
+      bus (decimal): adatper bus number. e.g. 2 for /dev/i2c-2, 3 for /dev/i2c-3.
+      client_addr (decimal): address for client device, 32 == 0x20.
 
 ## Examples
 
-TODO: Usage examples.
+The daemon should be started first:
 
-```rust
-use my_crate;
+::
 
-...
-```
+  host# vhost-device-i2c --socket-path=vi2c.sock --socket-count=1 --device-list 0:32
 
-## License
+The QEMU invocation needs to create a chardev socket the device can
+use to communicate as well as share the guests memory over a memfd.
 
-**!!!NOTICE**: The BSD-3-Clause license is not included in this template.
-The license needs to be manually added because the text of the license file
-also includes the copyright. The copyright can be different for different
-crates. If the crate contains code from CrosVM, the crate must add the
-CrosVM copyright which can be found
-[here](https://chromium.googlesource.com/chromiumos/platform/crosvm/+/master/LICENSE).
-For crates developed from scratch, the copyright is different and depends on
-the contributors.
+::
+
+  host# qemu-system \
+      -chardev socket,path=vi2c.sock,id=vi2c \
+      -device vhost-user-i2c-pci,chardev=vi2c,id=i2c \
+      -m 4096 \
+      -object memory-backend-file,id=mem,size=4G,mem-path=/dev/shm,share=on \
+      -numa node,memdev=mem \
+      ...

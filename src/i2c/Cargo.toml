@@ -12,3 +12,12 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+clap = { version = "=3.0.0-beta.2",  features = ["yaml"] }
+epoll = "4.3"
+libc = ">=0.2.95"
+log = ">=0.4.6"
+vhost = { git = "https://github.com/rust-vmm/vhost", features = ["vhost-user-slave"] }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend" }
+virtio-bindings = ">=0.1"
+vm-memory = ">=0.3.0"
+vmm-sys-util = ">=0.8.0"

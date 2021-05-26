@@ -1,0 +1,12 @@
+[package]
+name = "crate-template"
+version = "0.1.0"
+authors = ["TODO"]
+description = "This is a template for creating rust-vmm repositories."
+repository = "https://github.com/rust-vmm/crate-template"
+readme = "README.md"
+keywords = ["virt"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2018"
+
+[dependencies]

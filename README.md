@@ -8,6 +8,7 @@ crates.
 
 Here is the list of device backends that we support:
 
+- [GPIO](https://github.com/rust-vmm/vhost-device/blob/master/src/gpio/README.md)
 - [I2C](https://github.com/rust-vmm/vhost-device/blob/master/src/i2c/README.md)
 
 ## Separation of Concerns

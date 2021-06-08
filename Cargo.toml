@@ -4,4 +4,5 @@ members = [
     "gpio",
     "i2c",
     "rng",
+    "vsock",
 ]

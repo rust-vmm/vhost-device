@@ -1,0 +1,36 @@
+name: vhost-device-vsock
+version: "0.1.0"
+author: "Harshavardhan Unnibhavi <harshanavkis@gmail.com>"
+about: Virtio VSOCK backend daemon.
+
+settings:
+    - ArgRequiredElseHelp
+
+args:
+  # CID of the guest
+  - guest_cid:
+      long: guest-cid
+      value_name: INT
+      takes_value: true
+      help: Context identifier of the guest which uniquely identifies the device for its lifetime. Defaults to 3 if not specified.
+  # Socket paths
+  - uds_path:
+      long: uds-path
+      value_name: FILE
+      takes_value: true
+      help: Unix socket to which a host-side application connects to.
+  - socket:
+      long: socket
+      value_name: FILE
+      takes_value: true
+      help: Unix socket to which a hypervisor conencts to and sets up the control path with the device.
+
+groups:
+  - required_args:
+      args:
+        - guest_cid
+      args:
+        - uds_path
+      args:
+        - socket
+      required: true

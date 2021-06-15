@@ -1,0 +1,41 @@
+name: vhost-device-gpio
+version: "0.1.0"
+author: "Viresh Kumar <viresh.kumar@linaro.org>"
+about: Virtio GPIO backend daemon.
+
+settings:
+    - ArgRequiredElseHelp
+
+args:
+  # Connection to sockets
+  - socket_path:
+      short: s
+      long: socket-path
+      value_name: FILE
+      takes_value: true
+      about: Location of vhost-user Unix domain socket. This is suffixed by
+             0,1,2..socket_count-1.
+  - socket_count:
+      short: c
+      long: socket-count
+      value_name: INT
+      takes_value: true
+      about: Number of guests (sockets) to connect to. Default = 1.
+  # GPIO device list on the host
+  - devices:
+      short: l
+      long: device-list
+      value_name: PATH
+      takes_value: true
+      about: List of GPIO devices, one for each guest, in the format
+             <N1>[:<N2>]. The first entry is for Guest0, next one for Guest1,
+             and so on. Each device number here will be used to access the
+             corresponding /dev/gpiochipX. Example, "-c 4 -l 3:4:6:1"
+
+groups:
+  - required_args:
+      args:
+        - socket_path
+      args:
+        - devices
+      required: true

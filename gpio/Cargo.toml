@@ -22,3 +22,5 @@ vhost-user-backend = "0.3"
 virtio-bindings = ">=0.1"
 vm-memory = "0.7"
 vmm-sys-util = "=0.9.0"
+
+libgpiod = { git = "https://github.com/vireshk/libgpiod" }

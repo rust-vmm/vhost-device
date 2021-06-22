@@ -15,6 +15,7 @@ edition = "2018"
 clap = { version = "3.0.0-beta.2",  features = ["yaml"] }
 env_logger = ">=0.9"
 libc = ">=0.2.95"
+libgpiod = { git = "https://github.com/vireshk/libgpiod" }
 log = ">=0.4.6"
 thiserror = "1.0"
 vhost = { version = "0.2", features = ["vhost-user-slave"] }

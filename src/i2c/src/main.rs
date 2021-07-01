@@ -16,7 +16,7 @@ use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vhu_i2c::VhostUserI2cBackend;
 
-fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches) -> Result<(), String> {
+fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches, dryrun: bool) -> Result<(), String> {
     let mut handles = Vec::new();
 
     let path = cmd_args
@@ -44,6 +44,10 @@ fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches) -> Result<(), String>
                 VhostUserI2cBackend::new(i2c_map.clone()).unwrap(),
             ));
             let listener = Listener::new(socket.clone(), true).unwrap();
+
+            if dryrun {
+                return;
+            }
 
             let mut daemon =
                 VhostUserDaemon::new(String::from("vhost-device-i2c-backend"), backend.clone())
@@ -88,5 +92,56 @@ fn main() -> Result<(), String> {
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 
-    start_backend::<I2cAdapter>(cmd_args)
+    start_backend::<I2cAdapter>(cmd_args, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use i2c::tests::I2cMockAdapter;
+
+    fn get_cmd_args(name: &str, devices: &str, count: u32) -> ArgMatches {
+        let yaml = load_yaml!("cli.yaml");
+        let app = App::from(yaml);
+
+        if count != 0 {
+            app.try_get_matches_from(vec![
+                "prog",
+                "-s",
+                name,
+                "-l",
+                devices,
+                "-c",
+                &count.to_string(),
+            ])
+            .unwrap()
+        } else {
+            app.try_get_matches_from(vec!["prog", "-s", name, "-l", devices])
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn test_backend_single() {
+        let cmd_args = get_cmd_args("vi2c.sock_single", "1:4,2:32:21,5:5:23", 0);
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_ok());
+    }
+
+    #[test]
+    fn test_backend_multiple() {
+        let cmd_args = get_cmd_args("vi2c.sock", "1:4,2:32:21,5:5:23", 5);
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_ok());
+    }
+
+    #[test]
+    fn test_backend_failure() {
+        let cmd_args = get_cmd_args("vi2c.sock_failure", "1:4d", 5);
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_err());
+    }
+
+    #[test]
+    fn test_backend_failure_duplicate_device4() {
+        let cmd_args = get_cmd_args("vi2c.sock_duplicate", "1:4,2:32:21,5:4:23", 5);
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_err());
+    }
 }

@@ -466,3 +466,208 @@ impl<A: I2cAdapterTrait> I2cMap<A> {
         }
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub struct I2cMockAdapter {
+        bus: u32,
+        smbus: bool,
+        result: Result<()>,
+    }
+
+    impl I2cAdapterTrait for I2cMockAdapter {
+        fn new(bus: &str) -> Result<I2cMockAdapter> {
+            Ok(I2cMockAdapter {
+                bus: bus.parse::<u32>().map_err(|_| Error::new(EINVAL))?,
+                smbus: false,
+                result: Ok(()),
+            })
+        }
+
+        fn bus(&self) -> u32 {
+            self.bus
+        }
+
+        fn is_smbus(&self) -> bool {
+            self.smbus
+        }
+
+        fn set_device_addr(&self, _addr: usize) -> Result<()> {
+            Ok(())
+        }
+
+        fn get_func(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn do_i2c_transfer(&self, _data: &I2cRdwrIoctlData, _addr: u16) -> Result<()> {
+            println!("In i2c-transfer");
+            self.result
+        }
+
+        fn do_smbus_transfer(&self, _data: &I2cSmbusIoctlData, _addr: u16) -> Result<()> {
+            println!("In smbus-transfer");
+            self.result
+        }
+    }
+
+    fn assert_results(
+        i2c_map: &mut I2cMap<I2cMockAdapter>,
+        reqs: &mut Vec<I2cReq>,
+        before: bool,
+        after: bool,
+    ) {
+        i2c_map.adapters[0].result = Ok(());
+        assert_eq!(i2c_map.transfer(reqs).is_err(), before);
+        i2c_map.adapters[0].result = Err(Error::new(EINVAL));
+        assert_eq!(i2c_map.transfer(reqs).is_err(), after);
+
+        reqs.clear();
+    }
+
+    #[test]
+    fn test_i2c_map_duplicate_device4() {
+        assert!(I2cMap::<I2cMockAdapter>::new("1:4,2:32:21,5:4:23").is_err());
+    }
+
+    #[test]
+    fn test_i2c_map() {
+        let i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:4,2:32:21,5:10:23").unwrap();
+
+        assert_eq!(i2c_map.adapters.len(), 3);
+        assert_eq!(i2c_map.adapters[0].bus, 1);
+        assert_eq!(i2c_map.adapters[1].bus, 2);
+        assert_eq!(i2c_map.adapters[2].bus, 5);
+
+        assert_eq!(i2c_map.device_map[4], 0);
+        assert_eq!(i2c_map.device_map[32], 1);
+        assert_eq!(i2c_map.device_map[21], 1);
+        assert_eq!(i2c_map.device_map[10], 2);
+        assert_eq!(i2c_map.device_map[23], 2);
+    }
+
+    #[test]
+    fn test_i2c_transfer() {
+        let mut i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:3").unwrap();
+        i2c_map.adapters[0].smbus = false;
+
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 2,
+            buf: [7, 4].to_vec(),
+        }];
+
+        assert_results(&mut i2c_map, &mut reqs, false, true);
+    }
+
+    #[test]
+    fn test_smbus_transfer() {
+        let mut i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:3").unwrap();
+        i2c_map.adapters[0].smbus = true;
+
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 2,
+            buf: [7, 4].to_vec(),
+        }];
+
+        // I2C_SMBUS_WRITE (I2C_SMBUS_BYTE_DATA) operation
+        assert_results(&mut i2c_map, &mut reqs, false, true);
+
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) operation
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 1,
+            buf: [34].to_vec(),
+        });
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 1,
+            len: 2,
+            buf: [3, 4].to_vec(),
+        });
+
+        assert_results(&mut i2c_map, &mut reqs, false, true);
+    }
+
+    #[test]
+    fn test_smbus_transfer_failure() {
+        let mut i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:3").unwrap();
+        i2c_map.adapters[0].smbus = true;
+
+        let mut reqs: Vec<I2cReq> = vec![
+            I2cReq {
+                addr: 0x3,
+                // Will cause failure
+                flags: 0x1,
+                len: 1,
+                buf: [34].to_vec(),
+            },
+            I2cReq {
+                addr: 0x3,
+                flags: 1,
+                len: 2,
+                buf: [3, 4].to_vec(),
+            },
+        ];
+
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
+        assert_results(&mut i2c_map, &mut reqs, true, true);
+
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 1,
+            buf: [34].to_vec(),
+        });
+        reqs.push(I2cReq {
+            addr: 0x3,
+            // Will cause failure
+            flags: 0,
+            len: 2,
+            buf: [3, 4].to_vec(),
+        });
+
+        assert_results(&mut i2c_map, &mut reqs, true, true);
+
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 0,
+            // Will cause failure
+            len: 2,
+            buf: [3, 4].to_vec(),
+        });
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 1,
+            len: 2,
+            buf: [3, 4].to_vec(),
+        });
+
+        assert_results(&mut i2c_map, &mut reqs, true, true);
+
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 1,
+            buf: [34].to_vec(),
+        });
+        reqs.push(I2cReq {
+            addr: 0x3,
+            flags: 1,
+            // Will cause failure
+            len: 3,
+            buf: [3, 4, 5].to_vec(),
+        });
+
+        assert_results(&mut i2c_map, &mut reqs, true, true);
+    }
+}

@@ -1,3 +1,4 @@
+pub mod emulation;
 mod sense;
 
 use std::io::{self, Read, Write};

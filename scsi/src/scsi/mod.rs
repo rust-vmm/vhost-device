@@ -1,5 +1,6 @@
 pub mod emulation;
 mod sense;
+mod tests;
 
 use std::io::{self, Read, Write};
 

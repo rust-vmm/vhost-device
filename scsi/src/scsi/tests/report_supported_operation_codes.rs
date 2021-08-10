@@ -1,6 +1,4 @@
-use std::path::Path;
-
-use super::{do_command_fail, do_command_in};
+use super::{do_command_fail, do_command_in, null_image};
 use crate::scsi::{
     emulation::{block_device::BlockDevice, EmulatedTarget},
     sense,
@@ -9,7 +7,7 @@ use crate::scsi::{
 #[test]
 fn test_all() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test is going to break whenever we add a command, which isn't
@@ -43,7 +41,7 @@ fn test_all() {
 #[test]
 fn test_all_timeouts() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test is going to break whenever we add a command, which isn't
@@ -86,7 +84,7 @@ fn test_all_timeouts() {
 #[test]
 fn test_one_command() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -110,7 +108,7 @@ fn test_one_command() {
 #[test]
 fn test_one_command_with_timeout_descriptor() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -135,7 +133,7 @@ fn test_one_command_with_timeout_descriptor() {
 #[test]
 fn test_one_command_unsupported() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -158,7 +156,7 @@ fn test_one_command_unsupported() {
 #[test]
 fn test_one_command_valid_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail(
@@ -178,7 +176,7 @@ fn test_one_command_valid_service_action() {
 #[test]
 fn test_one_command_invalid_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail(
@@ -198,7 +196,7 @@ fn test_one_command_invalid_service_action() {
 #[test]
 fn test_one_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -223,7 +221,7 @@ fn test_one_service_action() {
 #[test]
 fn test_one_service_action_with_timeout_descriptor() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -249,7 +247,7 @@ fn test_one_service_action_with_timeout_descriptor() {
 #[test]
 fn test_one_service_action_unknown_opcode() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     // not entirely sure this behavior is correct; see comment in implementation
@@ -270,7 +268,7 @@ fn test_one_service_action_unknown_opcode() {
 #[test]
 fn test_one_service_action_unknown_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -293,7 +291,7 @@ fn test_one_service_action_unknown_service_action() {
 #[test]
 fn test_one_service_action_not_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail(
@@ -317,7 +315,7 @@ fn test_one_service_action_not_service_action() {
 #[test]
 fn test_mode_3_opcode_without_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -341,7 +339,7 @@ fn test_mode_3_opcode_without_service_action() {
 #[test]
 fn test_mode_3_with_timeout_descriptor() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -366,7 +364,7 @@ fn test_mode_3_with_timeout_descriptor() {
 #[test]
 fn test_mode_3_opcode_with_unnecessary_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -389,7 +387,7 @@ fn test_mode_3_opcode_with_unnecessary_service_action() {
 #[test]
 fn test_mode_3_invalid_opcode() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -412,7 +410,7 @@ fn test_mode_3_invalid_opcode() {
 #[test]
 fn test_mode_3_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -437,7 +435,7 @@ fn test_mode_3_service_action() {
 #[test]
 fn test_mode_3_service_action_with_timeout_descriptor() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -463,7 +461,7 @@ fn test_mode_3_service_action_with_timeout_descriptor() {
 #[test]
 fn test_mode_3_invalid_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(

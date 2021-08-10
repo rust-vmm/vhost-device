@@ -9,6 +9,7 @@ mod virtio;
 
 use std::{
     convert::TryInto,
+    fs::File,
     io::{self, ErrorKind, Read},
     path::PathBuf,
     process::exit,
@@ -343,7 +344,7 @@ fn main() {
     }
 
     for image in opt.images {
-        let mut dev = BlockDevice::new(&image).expect("Opening image");
+        let mut dev = BlockDevice::new(File::open(image).expect("Opening image"));
         dev.set_write_protected(opt.read_only);
         dev.set_solid_state(opt.solid_state);
         target.add_lun(Box::new(dev));

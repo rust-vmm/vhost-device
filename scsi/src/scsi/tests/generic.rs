@@ -1,8 +1,8 @@
 //! Tests for stuff shared between commands.
 
-use std::{io::ErrorKind, path::Path};
+use std::io::ErrorKind;
 
-use super::do_command_fail;
+use super::{do_command_fail, test_image};
 use crate::scsi::{
     emulation::{block_device::BlockDevice, EmulatedTarget},
     sense, CmdError, Request, Target, TaskAttr,
@@ -11,7 +11,7 @@ use crate::scsi::{
 #[test]
 fn test_invalid_opcode() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail(
@@ -27,7 +27,7 @@ fn test_invalid_opcode() {
 #[test]
 fn test_invalid_service_action() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail(
@@ -44,7 +44,7 @@ fn test_invalid_service_action() {
 #[test]
 fn test_short_data_out_buffer() {
     let mut target: EmulatedTarget<&mut [u8], &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     let mut data_in: &mut [u8] = &mut [];
@@ -80,7 +80,7 @@ fn test_short_data_out_buffer() {
 #[test]
 fn test_short_cdb() {
     let mut target: EmulatedTarget<&mut [u8], &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     let mut data_in: &mut [u8] = &mut [];

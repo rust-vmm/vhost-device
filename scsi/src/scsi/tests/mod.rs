@@ -4,7 +4,7 @@ mod bad_lun;
 mod generic;
 mod report_supported_operation_codes;
 
-use std::path::Path;
+use std::{fs::File, io::Write};
 
 use super::{
     emulation::{block_device::BlockDevice, EmulatedTarget},
@@ -12,6 +12,17 @@ use super::{
     Request, Target,
 };
 use crate::scsi::CmdOutput;
+use tempfile::tempfile;
+
+fn null_image() -> File {
+    File::open("/dev/null").unwrap()
+}
+
+fn test_image() -> File {
+    let mut f = tempfile().unwrap();
+    f.write_all(include_bytes!("./test.img")).unwrap();
+    f
+}
 
 fn do_command_in_lun(
     target: &mut EmulatedTarget<Vec<u8>, &[u8]>,
@@ -80,7 +91,7 @@ fn do_command_fail(
 #[test]
 fn test_test_unit_ready() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(&mut target, &[0, 0, 0, 0, 0, 0], &[]);
@@ -90,7 +101,7 @@ fn test_test_unit_ready() {
 fn test_report_luns() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
     for _ in 0..5 {
-        let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+        let dev = BlockDevice::new(null_image());
         target.add_lun(Box::new(dev));
     }
 
@@ -119,7 +130,7 @@ fn test_report_luns() {
 #[test]
 fn test_read_10() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test relies on the default logical block size of 512. We should
@@ -142,7 +153,7 @@ fn test_read_10() {
 #[test]
 fn test_read_10_last_block() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test relies on the default logical block size of 512. We should
@@ -165,7 +176,7 @@ fn test_read_10_last_block() {
 #[test]
 fn test_read_10_out_of_range() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test relies on the default logical block size of 512. We should
@@ -188,7 +199,7 @@ fn test_read_10_out_of_range() {
 #[test]
 fn test_read_10_cross_out() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test relies on the default logical block size of 512. We should
@@ -211,7 +222,7 @@ fn test_read_10_cross_out() {
 #[test]
 fn test_read_capacity_10() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test relies on the default logical block size of 512. We should
@@ -237,7 +248,7 @@ fn test_read_capacity_10() {
 #[test]
 fn test_read_capacity_16() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("src/scsi/tests/test.img")).unwrap();
+    let dev = BlockDevice::new(test_image());
     target.add_lun(Box::new(dev));
 
     // TODO: this test relies on the default logical block size of 512. We should
@@ -267,7 +278,7 @@ fn test_read_capacity_16() {
 #[test]
 fn test_inquiry() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -310,7 +321,7 @@ fn test_inquiry() {
 #[test]
 fn test_request_sense() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in(
@@ -333,7 +344,7 @@ fn test_request_sense() {
 #[test]
 fn test_request_sense_descriptor_format() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail(

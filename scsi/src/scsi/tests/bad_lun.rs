@@ -1,6 +1,4 @@
-use std::path::Path;
-
-use super::{do_command_fail_lun, do_command_in_lun};
+use super::{do_command_fail_lun, do_command_in_lun, null_image};
 use crate::scsi::{
     emulation::{block_device::BlockDevice, EmulatedTarget},
     sense,
@@ -10,7 +8,7 @@ use crate::scsi::{
 fn test_report_luns() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
     for _ in 0..5 {
-        let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+        let dev = BlockDevice::new(null_image());
         target.add_lun(Box::new(dev));
     }
 
@@ -45,7 +43,7 @@ fn test_report_luns() {
 fn test_report_luns_empty() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
     for _ in 0..5 {
-        let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+        let dev = BlockDevice::new(null_image());
         target.add_lun(Box::new(dev));
     }
 
@@ -76,7 +74,7 @@ fn test_report_luns_empty() {
 #[test]
 fn test_request_sense() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in_lun(
@@ -96,7 +94,7 @@ fn test_request_sense() {
 #[test]
 fn test_request_sense_descriptor_format() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail_lun(
@@ -116,7 +114,7 @@ fn test_request_sense_descriptor_format() {
 #[test]
 fn test_inquiry() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_in_lun(
@@ -160,7 +158,7 @@ fn test_inquiry() {
 #[test]
 fn test_other_command() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail_lun(
@@ -179,7 +177,7 @@ fn test_other_command() {
 #[test]
 fn test_invalid_command() {
     let mut target: EmulatedTarget<Vec<u8>, &[u8]> = EmulatedTarget::new();
-    let dev = BlockDevice::new(Path::new("/dev/null")).unwrap();
+    let dev = BlockDevice::new(null_image());
     target.add_lun(Box::new(dev));
 
     do_command_fail_lun(

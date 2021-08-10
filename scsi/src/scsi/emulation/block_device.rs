@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     os::unix::prelude::*,
-    path::Path,
 };
 
 use log::{debug, error, warn};
@@ -29,15 +28,15 @@ pub struct BlockDevice {
 }
 
 impl BlockDevice {
-    pub fn new(path: &Path) -> io::Result<Self> {
+    pub const fn new(file: File) -> Self {
         // TODO: trying 4096 logical/physical for now. May need to fall
         // back to 512 logical/4096 physical for back compat.
-        Ok(Self {
-            file: File::open(path)?,
+        Self {
+            file,
             block_size: 512,
             write_protected: false,
             solid_state: false,
-        })
+        }
     }
 
     fn read_blocks(&self, lba: u64, blocks: u64) -> io::Result<Vec<u8>> {

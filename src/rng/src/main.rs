@@ -15,7 +15,7 @@ use vhost::vhost_user::Listener;
 use vhost_user_backend::VhostUserDaemon;
 use vhu_rng::VuRngBackend;
 
-fn start_backend(cmd_args: clap::ArgMatches) {
+fn start_backend(cmd_args: clap::ArgMatches, dry_run: bool) -> Result<(), String> {
     let mut handles = Vec::new();
 
     let path = cmd_args.value_of("socket_path").ok_or("Invalid socket path")?;
@@ -50,6 +50,10 @@ fn start_backend(cmd_args: clap::ArgMatches) {
                                         VuRngBackend::new(source.clone().as_str(),
                                         period_ms, max_bytes).unwrap()));
 
+                if dry_run == true {
+                    return;
+                }
+
                 let listener = Listener::new(socket.clone(), true).unwrap();
                 let mut daemon = VhostUserDaemon::new(String::from("vhost-user-RNG-daemon"),
                                                       vu_rng_backend.clone()).unwrap();
@@ -74,11 +78,29 @@ fn start_backend(cmd_args: clap::ArgMatches) {
     for handle in handles {
         handle.join().unwrap();
     }
+
+    Ok(())
 }
 
-fn main() {
+fn main() -> Result<(), String> {
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 
-    start_backend(cmd_args);
+    start_backend(cmd_args, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn invalid_random_file_input() {
+        let yaml = load_yaml!("cli.yaml");
+        let cmd_args = App::from(yaml).get_matches_from(vec!["vhost-device-rng", "-s",
+                                                             "socket.file", "-n",
+                                                             "/dev/doesnotexist"]);
+
+        let _ = start_backend(cmd_args, true);
+    }
 }

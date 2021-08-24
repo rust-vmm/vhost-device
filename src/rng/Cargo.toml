@@ -1,0 +1,22 @@
+[package]
+name = "vhost-device-rng"
+version = "0.1.0"
+authors = ["Mathieu Poirier <mathieu.poirier@linaro.org>"]
+description = "vhost RNG backend device"
+repository = "https://github.com/rust-vmm/vhost-device"
+readme = "README.md"
+keywords = ["rng", "vhost", "virt", "backend"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2018"
+
+[dependencies]
+clap = { version = "3.0.0-beta.2",  features = ["yaml"] }
+epoll = "4.3"
+libc = ">=0.2.95"
+log = ">=0.4.6"
+tempfile = "3.2.0"
+vhost = { version = "0.1", features = ["vhost-user-slave"] }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend", rev = "70f668a699d865f13ba40498897ad181a409bd41" }
+virtio-bindings = ">=0.1"
+vm-memory = ">=0.6"
+vmm-sys-util = ">=0.8.0"

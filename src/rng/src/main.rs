@@ -17,7 +17,7 @@ use vhost_user_backend::VhostUserDaemon;
 use vhu_rng::VuRngBackend;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-fn start_backend(cmd_args: clap::ArgMatches) -> Result<(), String> {
+fn start_backend(cmd_args: clap::ArgMatches, dry_run: bool) -> Result<(), String> {
     let mut handles = Vec::new();
 
     let path = cmd_args
@@ -95,6 +95,10 @@ fn start_backend(cmd_args: clap::ArgMatches) -> Result<(), String> {
 
             let vu_rng_backend = Arc::new(RwLock::new(rng_backend));
 
+            if dry_run {
+                return;
+            }
+
             let listener = match Listener::new(socket.clone(), true) {
                 Ok(listener) => listener,
                 Err(_) => {
@@ -153,5 +157,36 @@ fn main() -> Result<(), String> {
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 
-    start_backend(cmd_args)
+    start_backend(cmd_args, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn get_cmd_args(option: &str, value: &str) -> clap::ArgMatches {
+        let yaml = load_yaml!("cli.yaml");
+        App::from(yaml).get_matches_from(vec![
+            "vhost-device-rng",
+            "-s",
+            "socket.file",
+            option,
+            value,
+        ])
+    }
+
+    #[test]
+    fn invalid_random_file_input() {
+        assert!(start_backend(get_cmd_args("-f", "/dev/doesnotexists"), true).is_err());
+    }
+
+    #[test]
+    fn invalid_period_too_big() {
+        assert!(start_backend(get_cmd_args("-p", "100000"), true).is_err());
+    }
+
+    #[test]
+    fn invalid_period_malformed() {
+        assert!(start_backend(get_cmd_args("-p", "invalid"), true).is_err());
+    }
 }

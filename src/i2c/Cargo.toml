@@ -17,7 +17,7 @@ epoll = "4.3"
 libc = ">=0.2.95"
 log = ">=0.4.6"
 vhost = { git = "https://github.com/rust-vmm/vhost", features = ["vhost-user-slave"] }
-vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend" }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend", rev = "89fa48e000a5a1a743c00c61b16492116ac86117" }
 virtio-bindings = ">=0.1"
 vm-memory = ">=0.3.0"
 vmm-sys-util = ">=0.8.0"

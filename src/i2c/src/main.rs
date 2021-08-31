@@ -15,6 +15,7 @@ use std::thread::spawn;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vhu_i2c::VhostUserI2cBackend;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches, dryrun: bool) -> Result<(), String> {
     let mut handles = Vec::new();
@@ -49,9 +50,12 @@ fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches, dryrun: bool) -> Resu
                 return;
             }
 
-            let mut daemon =
-                VhostUserDaemon::new(String::from("vhost-device-i2c-backend"), backend.clone())
-                    .unwrap();
+            let mut daemon = VhostUserDaemon::new(
+                String::from("vhost-device-i2c-backend"),
+                backend.clone(),
+                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+            )
+            .unwrap();
 
             daemon.start(listener).unwrap();
 

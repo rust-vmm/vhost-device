@@ -7,10 +7,10 @@
 
 use crate::i2c::*;
 use std::mem::size_of;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackend, Vring};
+use vhost_user_backend::{VhostUserBackendMut, Vring};
 use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
@@ -102,11 +102,12 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
     }
 
     /// Process the requests in the vring and dispatch replies
-    fn process_queue(&self, vring: &mut Vring) -> Result<bool> {
+    fn process_queue(&self, vring: &Vring) -> Result<bool> {
         let mut reqs: Vec<I2cReq> = Vec::new();
 
         let requests: Vec<_> = vring
-            .mut_queue()
+            .get_mut()
+            .get_queue_mut()
             .iter()
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
@@ -205,11 +206,7 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
                 len += desc_buf.len();
             }
 
-            if vring
-                .mut_queue()
-                .add_used(desc_chain.head_index(), len)
-                .is_err()
-            {
+            if vring.add_used(desc_chain.head_index(), len).is_err() {
                 println!("Couldn't return used descriptors to the ring");
             }
         }
@@ -222,8 +219,8 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
     }
 }
 
-/// VhostUserBackend trait methods
-impl<A: I2cAdapterTrait> VhostUserBackend for VhostUserI2cBackend<A> {
+/// VhostUserBackendMut trait methods
+impl<A: I2cAdapterTrait> VhostUserBackendMut for VhostUserI2cBackend<A> {
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -258,10 +255,10 @@ impl<A: I2cAdapterTrait> VhostUserBackend for VhostUserI2cBackend<A> {
     }
 
     fn handle_event(
-        &self,
+        &mut self,
         device_event: u16,
         evset: epoll::Events,
-        vrings: &[Arc<RwLock<Vring>>],
+        vrings: &[Vring],
         _thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
@@ -270,7 +267,7 @@ impl<A: I2cAdapterTrait> VhostUserBackend for VhostUserI2cBackend<A> {
 
         match device_event {
             0 => {
-                let mut vring = vrings[0].write().unwrap();
+                let vring = &vrings[0];
 
                 if self.event_idx {
                     // vm-virtio's Queue implementation only checks avail_index
@@ -278,15 +275,15 @@ impl<A: I2cAdapterTrait> VhostUserBackend for VhostUserI2cBackend<A> {
                     // calling process_queue() until it stops finding new
                     // requests on the queue.
                     loop {
-                        vring.mut_queue().disable_notification().unwrap();
-                        self.process_queue(&mut vring)?;
-                        if !vring.mut_queue().enable_notification().unwrap() {
+                        vring.disable_notification().unwrap();
+                        self.process_queue(vring)?;
+                        if !vring.enable_notification().unwrap() {
                             break;
                         }
                     }
                 } else {
                     // Without EVENT_IDX, a single call is enough.
-                    self.process_queue(&mut vring)?;
+                    self.process_queue(vring)?;
                 }
             }
 
@@ -298,10 +295,10 @@ impl<A: I2cAdapterTrait> VhostUserBackend for VhostUserI2cBackend<A> {
         Ok(false)
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<(EventFd, Option<u16>)> {
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventFd, u16)> {
         Some((
             self.exit_event.try_clone().expect("Cloning exit eventfd"),
-            None,
+            NUM_QUEUES as u16,
         ))
     }
 }

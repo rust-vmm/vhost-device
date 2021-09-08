@@ -17,7 +17,46 @@ use vhost_user_backend::VhostUserDaemon;
 use vhu_i2c::VhostUserI2cBackend;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches, dryrun: bool) -> Result<(), String> {
+fn start_daemon<T: I2cAdapterTrait>(
+    backend: Arc<RwLock<VhostUserI2cBackend<T>>>,
+    listener: Listener,
+) -> bool {
+    let mut daemon = VhostUserDaemon::new(
+        String::from("vhost-device-i2c-backend"),
+        backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .unwrap();
+
+    daemon.start(listener).unwrap();
+
+    match daemon.wait() {
+        Ok(()) => {
+            println!("Stopping cleanly.");
+        }
+        Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
+            println!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
+        }
+        Err(e) => {
+            println!("Error running daemon: {:?}", e);
+        }
+    }
+
+    // No matter the result, we need to shut down the worker thread.
+    backend
+        .read()
+        .unwrap()
+        .exit_event
+        .write(1)
+        .expect("Shutting down worker thread");
+
+    false
+}
+
+fn start_backend<T: I2cAdapterTrait>(
+    cmd_args: ArgMatches,
+    start_daemon: fn(Arc<RwLock<VhostUserI2cBackend<T>>>, Listener) -> bool,
+) -> Result<(), String> {
     let mut handles = Vec::new();
 
     let path = cmd_args
@@ -46,40 +85,9 @@ fn start_backend<T: I2cAdapterTrait>(cmd_args: ArgMatches, dryrun: bool) -> Resu
             ));
             let listener = Listener::new(socket.clone(), true).unwrap();
 
-            if dryrun {
-                return;
+            if start_daemon(backend, listener) {
+                break;
             }
-
-            let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-device-i2c-backend"),
-                backend.clone(),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .unwrap();
-
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    println!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage,
-                )) => {
-                    println!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    println!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            backend
-                .read()
-                .unwrap()
-                .exit_event
-                .write(1)
-                .expect("Shutting down worker thread");
         });
 
         handles.push(handle);
@@ -96,7 +104,7 @@ fn main() -> Result<(), String> {
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 
-    start_backend::<I2cAdapter>(cmd_args, false)
+    start_backend::<I2cAdapter>(cmd_args, start_daemon)
 }
 
 #[cfg(test)]
@@ -125,27 +133,34 @@ mod tests {
         }
     }
 
+    fn mock_start_daemon<T: I2cAdapterTrait>(
+        _backend: Arc<RwLock<VhostUserI2cBackend<T>>>,
+        _listener: Listener,
+    ) -> bool {
+        true
+    }
+
     #[test]
     fn test_backend_single() {
         let cmd_args = get_cmd_args("vi2c.sock_single", "1:4,2:32:21,5:5:23", 0);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_ok());
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_ok());
     }
 
     #[test]
     fn test_backend_multiple() {
         let cmd_args = get_cmd_args("vi2c.sock", "1:4,2:32:21,5:5:23", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_ok());
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_ok());
     }
 
     #[test]
     fn test_backend_failure() {
         let cmd_args = get_cmd_args("vi2c.sock_failure", "1:4d", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_err());
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_err());
     }
 
     #[test]
     fn test_backend_failure_duplicate_device4() {
         let cmd_args = get_cmd_args("vi2c.sock_duplicate", "1:4,2:32:21,5:4:23", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, true).is_err());
+        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_err());
     }
 }

@@ -10,7 +10,7 @@ use std::mem::size_of;
 use std::sync::Arc;
 use std::{convert, error, fmt, io};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackendMut, Vring};
+use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
@@ -102,7 +102,7 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
     }
 
     /// Process the requests in the vring and dispatch replies
-    fn process_queue(&self, vring: &Vring) -> Result<bool> {
+    fn process_queue(&self, vring: &VringRwLock) -> Result<bool> {
         let mut reqs: Vec<I2cReq> = Vec::new();
 
         let requests: Vec<_> = vring
@@ -220,7 +220,7 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
 }
 
 /// VhostUserBackendMut trait methods
-impl<A: I2cAdapterTrait> VhostUserBackendMut for VhostUserI2cBackend<A> {
+impl<A: I2cAdapterTrait> VhostUserBackendMut<VringRwLock, ()> for VhostUserI2cBackend<A> {
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -258,7 +258,7 @@ impl<A: I2cAdapterTrait> VhostUserBackendMut for VhostUserI2cBackend<A> {
         &mut self,
         device_event: u16,
         evset: epoll::Events,
-        vrings: &[Vring],
+        vrings: &[VringRwLock],
         _thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
         if evset != epoll::Events::EPOLLIN {
@@ -295,10 +295,7 @@ impl<A: I2cAdapterTrait> VhostUserBackendMut for VhostUserI2cBackend<A> {
         Ok(false)
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<(EventFd, u16)> {
-        Some((
-            self.exit_event.try_clone().expect("Cloning exit eventfd"),
-            NUM_QUEUES as u16,
-        ))
+    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
+        Some(self.exit_event.try_clone().expect("Cloning exit eventfd"))
     }
 }

@@ -299,3 +299,26 @@ impl<A: I2cAdapterTrait> VhostUserBackendMut<VringRwLock, ()> for VhostUserI2cBa
         Some(self.exit_event.try_clone().expect("Cloning exit eventfd"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i2c::tests::I2cMockAdapter;
+
+    #[test]
+    fn verify_backend() {
+        let i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:4,2:32:21,5:10:23").unwrap();
+        let mut backend = VhostUserI2cBackend::new(Arc::new(i2c_map)).unwrap();
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_eq!(backend.features(), 0x171000000);
+        assert_eq!(backend.protocol_features(), VhostUserProtocolFeatures::MQ);
+
+        assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
+        assert_eq!(backend.get_config(0, 0), vec![]);
+
+        backend.set_event_idx(true);
+        assert!(backend.event_idx);
+    }
+}

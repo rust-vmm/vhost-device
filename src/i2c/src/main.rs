@@ -8,14 +8,18 @@
 mod i2c;
 mod vhu_i2c;
 
-use clap::{load_yaml, App, ArgMatches};
-use i2c::{I2cAdapter, I2cAdapterTrait, I2cMap};
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
+
+use clap::{load_yaml, App, ArgMatches};
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vhu_i2c::VhostUserI2cBackend;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+use i2c::{I2cAdapter, I2cAdapterTrait, I2cMap};
+use std::convert::TryFrom;
+use std::num::ParseIntError;
+use vhu_i2c::VhostUserI2cBackend;
 
 fn start_daemon<T: I2cAdapterTrait>(
     backend: Arc<RwLock<VhostUserI2cBackend<T>>>,

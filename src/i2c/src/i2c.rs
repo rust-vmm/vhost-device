@@ -5,9 +5,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use libc::{c_ulong, ioctl, EADDRINUSE, EADDRNOTAVAIL, EINVAL};
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
+
+use libc::{c_ulong, ioctl, EADDRINUSE, EADDRNOTAVAIL, EINVAL};
 use vmm_sys_util::errno::{errno_result, Error, Result};
 
 // The type of the `req` parameter is different for the `musl` library. This will enable

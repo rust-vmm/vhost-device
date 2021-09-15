@@ -243,10 +243,6 @@ pub trait I2cAdapterTrait: Send + Sync + 'static {
     /// Sets device's address for an I2C adapter.
     fn set_device_addr(&self, addr: usize) -> Result<()>;
 
-    /// Gets adapter's functionality
-    //TODO: this needs to be called as part of new because otherwise is_smbus is invalid.
-    fn get_func(&mut self) -> Result<()>;
-
     /// Transfer data
     fn do_i2c_transfer(&self, data: &I2cRdwrIoctlData, addr: u16) -> Result<()>;
 
@@ -308,15 +304,43 @@ pub struct I2cAdapter {
     smbus: bool,
 }
 
+impl I2cAdapter {
+
+    // Helper function for reading the adaptor functionalities.
+    fn read_func(&mut self) -> Result<()> {
+        let func: u64 = I2C_FUNC_SMBUS_ALL;
+
+        let ret = unsafe { ioctl(self.fd.as_raw_fd(), I2C_FUNCS, &func) };
+
+        if ret == -1 {
+            println!("Failed to get I2C function");
+            return errno_result();
+        }
+
+        if (func & I2C_FUNC_I2C) != 0 {
+            self.smbus = false;
+        } else if (func & I2C_FUNC_SMBUS_ALL) != 0 {
+            self.smbus = true;
+        } else {
+            println!("Invalid functionality {:x}", func);
+            return Err(Error::new(EINVAL));
+        }
+
+        Ok(())
+    }
+}
+
 impl I2cAdapterTrait for I2cAdapter {
     fn new(adapter_no: u32) -> Result<I2cAdapter> {
         let i2cdev = format!("/dev/i2c-{}", adapter_no);
-
-        Ok(I2cAdapter {
+        let mut adapter = I2cAdapter {
             adapter_no,
             smbus: false,
-            fd: OpenOptions::new().read(true).write(true).open(i2cdev)?,
-        })
+            fd: OpenOptions::new().read(true).write(true).open(i2cdev)?
+        };
+        adapter.read_func()?;
+
+        Ok(adapter)
     }
 
     fn adapter_no(&self) -> u32 {
@@ -337,29 +361,6 @@ impl I2cAdapterTrait for I2cAdapter {
         } else {
             Ok(())
         }
-    }
-
-    /// Gets adapter's functionality
-    fn get_func(&mut self) -> Result<()> {
-        let func: u64 = I2C_FUNC_SMBUS_ALL;
-
-        let ret = unsafe { ioctl(self.fd.as_raw_fd(), I2C_FUNCS, &func) };
-
-        if ret == -1 {
-            println!("Failed to get I2C function");
-            return errno_result();
-        }
-
-        if (func & I2C_FUNC_I2C) != 0 {
-            self.smbus = false;
-        } else if (func & I2C_FUNC_SMBUS_ALL) != 0 {
-            self.smbus = true;
-        } else {
-            println!("Invalid functionality {:x}", func);
-            return Err(Error::new(EINVAL));
-        }
-
-        Ok(())
     }
 
     /// Transfer data
@@ -409,8 +410,6 @@ impl<A: I2cAdapterTrait> I2cMap<A> {
             let adapter_no = list[0].parse::<u32>().map_err(|_| Error::new(EINVAL))?;
             let mut adapter = A::new(adapter_no)?;
             let devices = &list[1..];
-
-            adapter.get_func()?;
 
             for device in devices {
                 let device = device.parse::<usize>().map_err(|_| Error::new(EINVAL))?;
@@ -498,10 +497,6 @@ pub mod tests {
         }
 
         fn set_device_addr(&self, _addr: usize) -> Result<()> {
-            Ok(())
-        }
-
-        fn get_func(&mut self) -> Result<()> {
             Ok(())
         }
 

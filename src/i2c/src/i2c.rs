@@ -232,7 +232,7 @@ pub struct I2cReq {
 
 /// I2C adapter and helpers
 pub trait I2cAdapterTrait: Send + Sync + 'static {
-    fn new(bus: &str) -> Result<Self>
+    fn new(bus: u32) -> Result<Self>
     where
         Self: Sized;
 
@@ -307,11 +307,11 @@ pub struct I2cAdapter {
 }
 
 impl I2cAdapterTrait for I2cAdapter {
-    fn new(bus: &str) -> Result<I2cAdapter> {
-        let i2cdev = String::from("/dev/i2c-") + bus;
+    fn new(bus: u32) -> Result<I2cAdapter> {
+        let i2cdev = format!("/dev/i2c-{}", bus);
 
         Ok(I2cAdapter {
-            bus: bus.parse::<u32>().map_err(|_| Error::new(EINVAL))?,
+            bus,
             smbus: false,
             fd: OpenOptions::new().read(true).write(true).open(i2cdev)?,
         })
@@ -404,7 +404,8 @@ impl<A: I2cAdapterTrait> I2cMap<A> {
 
         for (i, businfo) in busses.iter().enumerate() {
             let list: Vec<&str> = businfo.split(':').collect();
-            let mut adapter = A::new(list[0])?;
+            let bus_addr = list[0].parse::<u32>().map_err(|_| Error::new(EINVAL))?;
+            let mut adapter = A::new(bus_addr)?;
             let devices = &list[1..];
 
             adapter.get_func()?;
@@ -478,9 +479,9 @@ pub mod tests {
     }
 
     impl I2cAdapterTrait for I2cMockAdapter {
-        fn new(bus: &str) -> Result<I2cMockAdapter> {
+        fn new(bus: u32) -> Result<I2cMockAdapter> {
             Ok(I2cMockAdapter {
-                bus: bus.parse::<u32>().map_err(|_| Error::new(EINVAL))?,
+                bus,
                 smbus: false,
                 result: Ok(()),
             })

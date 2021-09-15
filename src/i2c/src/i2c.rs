@@ -232,17 +232,18 @@ pub struct I2cReq {
 
 /// I2C adapter and helpers
 pub trait I2cAdapterTrait: Send + Sync + 'static {
-    fn new(bus: u32) -> Result<Self>
+    fn new(adapter_no: u32) -> Result<Self>
     where
         Self: Sized;
 
-    fn bus(&self) -> u32;
+    fn adapter_no(&self) -> u32;
     fn is_smbus(&self) -> bool;
 
     /// Sets device's address for an I2C adapter.
     fn set_device_addr(&self, addr: usize) -> Result<()>;
 
     /// Gets adapter's functionality
+    //TODO: this needs to be called as part of new because otherwise is_smbus is invalid.
     fn get_func(&mut self) -> Result<()>;
 
     /// Transfer data
@@ -302,23 +303,23 @@ pub trait I2cAdapterTrait: Send + Sync + 'static {
 
 pub struct I2cAdapter {
     fd: File,
-    bus: u32,
+    adapter_no: u32,
     smbus: bool,
 }
 
 impl I2cAdapterTrait for I2cAdapter {
-    fn new(bus: u32) -> Result<I2cAdapter> {
-        let i2cdev = format!("/dev/i2c-{}", bus);
+    fn new(adapter_no: u32) -> Result<I2cAdapter> {
+        let i2cdev = format!("/dev/i2c-{}", adapter_no);
 
         Ok(I2cAdapter {
-            bus,
+            adapter_no,
             smbus: false,
             fd: OpenOptions::new().read(true).write(true).open(i2cdev)?,
         })
     }
 
-    fn bus(&self) -> u32 {
-        self.bus
+    fn adapter_no(&self) -> u32 {
+        self.adapter_no
     }
 
     fn is_smbus(&self) -> bool {
@@ -404,8 +405,8 @@ impl<A: I2cAdapterTrait> I2cMap<A> {
 
         for (i, businfo) in busses.iter().enumerate() {
             let list: Vec<&str> = businfo.split(':').collect();
-            let bus_addr = list[0].parse::<u32>().map_err(|_| Error::new(EINVAL))?;
-            let mut adapter = A::new(bus_addr)?;
+            let adapter_no = list[0].parse::<u32>().map_err(|_| Error::new(EINVAL))?;
+            let mut adapter = A::new(adapter_no)?;
             let devices = &list[1..];
 
             adapter.get_func()?;
@@ -422,7 +423,7 @@ impl<A: I2cAdapterTrait> I2cMap<A> {
                     println!(
                         "Client address {} is already used by {}",
                         device,
-                        adapters[device_map[device] as usize].bus()
+                        adapters[device_map[device] as usize].adapter_no()
                     );
                     return Err(Error::new(EADDRINUSE));
                 }
@@ -433,7 +434,7 @@ impl<A: I2cAdapterTrait> I2cMap<A> {
 
             println!(
                 "Added I2C master with bus id: {:x} for devices: {:?}",
-                adapter.bus(),
+                adapter.adapter_no(),
                 devices
             );
 
@@ -487,7 +488,7 @@ pub mod tests {
             })
         }
 
-        fn bus(&self) -> u32 {
+        fn adapter_no(&self) -> u32 {
             self.bus
         }
 

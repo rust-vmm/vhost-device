@@ -245,7 +245,9 @@ pub struct I2cAdapter<D: I2cDevice> {
 /// functionality without the need of a physical device.
 pub trait I2cDevice {
     // Open the device specified by path.
-    fn open(device_path: String) -> Result<Self> where Self: Sized;
+    fn open(device_path: String) -> Result<Self>
+    where
+        Self: Sized;
 
     // Corresponds to the I2C_FUNCS ioctl call.
     fn funcs(&mut self, func: u64) -> i32;
@@ -269,7 +271,10 @@ pub struct PhysDevice {
 impl I2cDevice for PhysDevice {
     fn open(device_path: String) -> Result<Self> {
         Ok(PhysDevice {
-            file: OpenOptions::new().read(true).write(true).open(device_path)?
+            file: OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(device_path)?,
         })
     }
 
@@ -297,7 +302,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
         let mut adapter = I2cAdapter {
             adapter_no,
             smbus: false,
-            device: D::open(i2cdev)?
+            device: D::open(i2cdev)?,
         };
         adapter.read_func()?;
 
@@ -362,7 +367,10 @@ impl<D: I2cDevice> I2cAdapter<D> {
 
         let ret = self.device.smbus(&smbus_data);
         if ret == -1 {
-            println!("Failed to transfer smbus data to device addr to {:x}", reqs[0].addr);
+            println!(
+                "Failed to transfer smbus data to device addr to {:x}",
+                reqs[0].addr
+            );
             return errno_result();
         }
 

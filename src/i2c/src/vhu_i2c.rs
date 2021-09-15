@@ -220,7 +220,9 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
 }
 
 /// VhostUserBackendMut trait methods
-impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for VhostUserI2cBackend<D> {
+impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
+    for VhostUserI2cBackend<D>
+{
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }

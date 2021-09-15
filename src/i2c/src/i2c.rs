@@ -416,7 +416,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
 }
 
 /// I2C map and helpers
-const MAX_I2C_VDEV: usize = 1 << 7;
+pub(crate) const MAX_I2C_VDEV: usize = 1 << 7;
 const I2C_INVALID_ADAPTER: u32 = 0xFFFFFFFF;
 
 pub struct I2cMap<D: I2cDevice> {
@@ -424,46 +424,46 @@ pub struct I2cMap<D: I2cDevice> {
     device_map: [u32; MAX_I2C_VDEV],
 }
 
+pub(crate) struct DeviceConfig {
+    pub(crate) adapter_no: u32,
+    pub(crate) addr: Vec<usize>,
+}
+
+pub(crate) struct I2cConfiguration {
+    pub(crate) socket_path: String,
+    pub(crate) socket_count: usize,
+    pub(crate) devices: Vec<DeviceConfig>,
+}
+
 impl<D: I2cDevice> I2cMap<D> {
-    pub fn new(list: &str) -> Result<Self>
+    pub(crate) fn new(list: &Vec<DeviceConfig>) -> Result<Self>
     where
         Self: Sized,
     {
         let mut device_map: [u32; MAX_I2C_VDEV] = [I2C_INVALID_ADAPTER; MAX_I2C_VDEV];
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
-        let busses: Vec<&str> = list.split(',').collect();
 
-        for (i, businfo) in busses.iter().enumerate() {
-            let list: Vec<&str> = businfo.split(':').collect();
-            let adapter_no = list[0].parse::<u32>().map_err(|_| Error::new(EINVAL))?;
-            let mut adapter = I2cAdapter::new(adapter_no)?;
-            let devices = &list[1..];
+        for (i, device_cfg) in list.iter().enumerate() {
+            let adapter = I2cAdapter::new(device_cfg.adapter_no)?;
 
-            for device in devices {
-                let device = device.parse::<usize>().map_err(|_| Error::new(EINVAL))?;
-
-                if device > MAX_I2C_VDEV {
-                    println!("Invalid device address {}", device);
-                    return Err(Error::new(EADDRNOTAVAIL));
-                }
-
-                if device_map[device] != I2C_INVALID_ADAPTER {
+            for addr in &device_cfg.addr {
+                if device_map[*addr as usize] != I2C_INVALID_ADAPTER {
                     println!(
                         "Client address {} is already used by {}",
-                        device,
-                        adapters[device_map[device] as usize].adapter_no()
+                        *addr,
+                        adapters[device_map[*addr as usize] as usize].adapter_no()
                     );
                     return Err(Error::new(EADDRINUSE));
                 }
 
-                adapter.set_device_addr(device)?;
-                device_map[device] = i as u32;
+                // Calling this to check that the `addr` is valid.
+                adapter.set_device_addr(*addr)?;
+                device_map[*addr as usize] = i as u32;
             }
 
             println!(
-                "Added I2C master with bus id: {:x} for devices: {:?}",
+                "Added I2C master with bus id: {:x} for devices",
                 adapter.adapter_no(),
-                devices
             );
 
             adapters.push(adapter);

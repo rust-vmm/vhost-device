@@ -8,6 +8,8 @@
 mod i2c;
 mod vhu_i2c;
 
+use std::convert::TryFrom;
+use std::num::ParseIntError;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
 
@@ -16,10 +18,62 @@ use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use i2c::{I2cDevice, I2cMap, PhysDevice};
-use std::convert::TryFrom;
-use std::num::ParseIntError;
+use i2c::{DeviceConfig, I2cConfiguration, I2cDevice, I2cMap, PhysDevice, MAX_I2C_VDEV};
 use vhu_i2c::VhostUserI2cBackend;
+
+impl TryFrom<ArgMatches> for I2cConfiguration {
+    type Error = String;
+
+    fn try_from(cmd_args: ArgMatches) -> Result<Self, Self::Error> {
+        let socket_path = cmd_args
+            .value_of("socket_path")
+            .ok_or("Invalid socket path")?
+            .to_string();
+
+        let socket_count = cmd_args
+            .value_of("socket_count")
+            .unwrap_or("1")
+            .parse::<usize>()
+            .map_err(|_| "Invalid socket_count")?;
+
+        let list = cmd_args.value_of("devices").ok_or("Invalid devices list")?;
+        let busses: Vec<&str> = list.split(',').collect();
+
+        let mut devices = Vec::new();
+
+        for businfo in busses.iter() {
+            let list: Vec<&str> = businfo.split(':').collect();
+            let bus_addr = list[0].parse::<u32>().map_err(|_| "Invalid bus address")?;
+            let bus_devices = list[1..]
+                .iter()
+                .map(|str| str.parse::<usize>())
+                .collect::<Result<Vec<usize>, ParseIntError>>()
+                .map_err(|_| "Invalid device")?;
+
+            // Check if any of the devices has a size > the maximum allowed one.
+            if bus_devices
+                .iter()
+                .filter(|addr| **addr > MAX_I2C_VDEV)
+                .count()
+                > 0
+            {
+                // TODO: if needed we can show which one is actually not respecting the max size.
+                return Err("Invalid addr.".to_string());
+            }
+
+            devices.push(DeviceConfig {
+                adapter_no: bus_addr,
+                addr: bus_devices,
+            })
+        }
+
+        Ok(I2cConfiguration {
+            socket_path,
+            socket_count,
+            devices,
+        })
+    }
+}
 
 fn start_daemon<D: 'static + I2cDevice + Send + Sync>(
     backend: Arc<RwLock<VhostUserI2cBackend<D>>>,
@@ -63,24 +117,16 @@ fn start_backend<D: I2cDevice + Sync + Send + 'static>(
 ) -> Result<(), String> {
     let mut handles = Vec::new();
 
-    let path = cmd_args
-        .value_of("socket_path")
-        .ok_or("Invalid socket path")?;
-
-    let count = cmd_args
-        .value_of("socket_count")
-        .unwrap_or("1")
-        .parse::<u32>()
-        .map_err(|_| "Invalid socket_count")?;
-
-    let list = cmd_args.value_of("devices").ok_or("Invalid devices list")?;
+    let i2c_config = I2cConfiguration::try_from(cmd_args)?;
 
     // The same i2c_map structure instance is shared between all the guests
-    let i2c_map =
-        Arc::new(I2cMap::<D>::new(list).map_err(|e| format!("Failed to create i2c_map ({})", e))?);
+    let i2c_map = Arc::new(
+        I2cMap::<D>::new(&i2c_config.devices)
+            .map_err(|e| format!("Failed to create i2c_map ({})", e))?,
+    );
 
-    for i in 0..count {
-        let socket = path.to_owned() + &i.to_string();
+    for i in 0..i2c_config.socket_count {
+        let socket = i2c_config.socket_path.to_owned() + &i.to_string();
         let i2c_map = i2c_map.clone();
 
         let handle = spawn(move || loop {

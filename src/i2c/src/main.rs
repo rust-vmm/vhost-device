@@ -162,7 +162,7 @@ fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use i2c::tests::I2cMockAdapter;
+    use i2c::tests::DummyDevice;
 
     fn get_cmd_args(name: &str, devices: &str, count: u32) -> ArgMatches {
         let yaml = load_yaml!("cli.yaml");
@@ -191,29 +191,28 @@ mod tests {
     ) -> bool {
         true
     }
-    /*
+
     #[test]
     fn test_backend_single() {
         let cmd_args = get_cmd_args("vi2c.sock_single", "1:4,2:32:21,5:5:23", 0);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_ok());
+        assert!(start_backend::<DummyDevice>(cmd_args, mock_start_daemon).is_ok());
     }
 
     #[test]
     fn test_backend_multiple() {
         let cmd_args = get_cmd_args("vi2c.sock", "1:4,2:32:21,5:5:23", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_ok());
+        assert!(start_backend::<DummyDevice>(cmd_args, mock_start_daemon).is_ok());
     }
 
     #[test]
     fn test_backend_failure() {
         let cmd_args = get_cmd_args("vi2c.sock_failure", "1:4d", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_err());
+        assert!(start_backend::<DummyDevice>(cmd_args, mock_start_daemon).is_err());
     }
 
     #[test]
     fn test_backend_failure_duplicate_device4() {
         let cmd_args = get_cmd_args("vi2c.sock_duplicate", "1:4,2:32:21,5:4:23", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_err());
+        assert!(start_backend::<DummyDevice>(cmd_args, mock_start_daemon).is_err());
     }
-     */
 }

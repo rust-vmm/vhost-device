@@ -305,12 +305,13 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::i2c::tests::I2cMockAdapter;
+    use crate::i2c::tests::DummyDevice;
+    use std::convert::TryFrom;
 
-    /*
     #[test]
     fn verify_backend() {
-        let i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:4,2:32:21,5:10:23").unwrap();
+        let device_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
+        let i2c_map: I2cMap<DummyDevice> = I2cMap::new(&device_config).unwrap();
         let mut backend = VhostUserI2cBackend::new(Arc::new(i2c_map)).unwrap();
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);
@@ -323,5 +324,5 @@ mod tests {
 
         backend.set_event_idx(true);
         assert!(backend.event_idx);
-    }*/
+    }
 }

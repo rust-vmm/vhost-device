@@ -432,6 +432,7 @@ pub struct I2cMap<D: I2cDevice> {
     device_map: [u32; MAX_I2C_VDEV],
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct DeviceConfig {
     adapter_no: u32,
     addr: Vec<u16>,
@@ -459,6 +460,7 @@ impl DeviceConfig {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct AdapterConfig {
     inner: Vec<DeviceConfig>,
 }
@@ -547,6 +549,18 @@ impl<D: I2cDevice> I2cMap<D> {
 pub mod tests {
     use super::*;
     use std::convert::TryFrom;
+
+    impl DeviceConfig {
+        pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
+            DeviceConfig { adapter_no, addr }
+        }
+    }
+
+    impl AdapterConfig {
+        pub fn new_with(devices: Vec<DeviceConfig>) -> Self {
+            AdapterConfig { inner: devices }
+        }
+    }
 
     #[derive(Debug, Default)]
     pub struct DummyDevice {

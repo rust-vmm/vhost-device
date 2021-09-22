@@ -8,7 +8,7 @@
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 
-use libc::{c_ulong, ioctl, EADDRINUSE, EADDRNOTAVAIL, EINVAL};
+use libc::{c_ulong, ioctl, EINVAL};
 use vmm_sys_util::errno::{errno_result, Error, Result};
 
 // The type of the `req` parameter is different for the `musl` library. This will enable
@@ -433,39 +433,79 @@ pub struct I2cMap<D: I2cDevice> {
 }
 
 pub(crate) struct DeviceConfig {
-    pub(crate) adapter_no: u32,
-    pub(crate) addr: Vec<usize>,
+    adapter_no: u32,
+    addr: Vec<u16>,
 }
 
-pub(crate) struct I2cConfiguration {
-    pub(crate) socket_path: String,
-    pub(crate) socket_count: usize,
-    pub(crate) devices: Vec<DeviceConfig>,
+impl DeviceConfig {
+    pub fn new(adapter_no: u32) -> Self {
+        DeviceConfig {
+            adapter_no,
+            addr: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, addr: u16) -> std::result::Result<(), String> {
+        if addr as usize > MAX_I2C_VDEV {
+            return Err(format!("Invalid address: {} (> maximum allowed)", addr));
+        }
+
+        if self.addr.contains(&addr) {
+            return Err(format!("Address already in use: {}", addr));
+        }
+
+        self.addr.push(addr);
+        Ok(())
+    }
+}
+
+pub(crate) struct AdapterConfig {
+    inner: Vec<DeviceConfig>,
+}
+
+impl AdapterConfig {
+    pub fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    fn contains_adapter_no(&self, adapter_no: u32) -> bool {
+        self.inner.iter().any(|elem| elem.adapter_no == adapter_no)
+    }
+
+    fn contains_addr(&self, addr: u16) -> bool {
+        self.inner.iter().any(|elem| elem.addr.contains(&addr))
+    }
+
+    pub fn push(&mut self, device: DeviceConfig) -> std::result::Result<(), String> {
+        if self.contains_adapter_no(device.adapter_no) {
+            return Err("Duplicated adapter number".to_string());
+        }
+
+        for addr in device.addr.iter() {
+            if self.contains_addr(*addr) {
+                return Err(format!("Address already in use: {}", addr));
+            }
+        }
+
+        self.inner.push(device);
+        Ok(())
+    }
 }
 
 impl<D: I2cDevice> I2cMap<D> {
-    pub(crate) fn new(list: &Vec<DeviceConfig>) -> Result<Self>
+    pub(crate) fn new(device_config: &AdapterConfig) -> Result<Self>
     where
         Self: Sized,
     {
         let mut device_map: [u32; MAX_I2C_VDEV] = [I2C_INVALID_ADAPTER; MAX_I2C_VDEV];
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
 
-        for (i, device_cfg) in list.iter().enumerate() {
+        for (i, device_cfg) in device_config.inner.iter().enumerate() {
             let adapter = I2cAdapter::new(device_cfg.adapter_no)?;
 
+            // Check that all addresses corresponding to the adapter are valid.
             for addr in &device_cfg.addr {
-                if device_map[*addr as usize] != I2C_INVALID_ADAPTER {
-                    println!(
-                        "Client address {} is already used by {}",
-                        *addr,
-                        adapters[device_map[*addr as usize] as usize].adapter_no()
-                    );
-                    return Err(Error::new(EADDRINUSE));
-                }
-
-                // Calling this to check that the `addr` is valid.
-                adapter.set_device_addr(*addr)?;
+                adapter.set_device_addr(*addr as usize)?;
                 device_map[*addr as usize] = i as u32;
             }
 

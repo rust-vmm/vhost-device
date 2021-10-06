@@ -299,37 +299,30 @@ impl<D: I2cDevice> I2cAdapter<D> {
     // Creates a new adapter corresponding to the specified number.
     fn new(adapter_no: u32) -> Result<I2cAdapter<D>> {
         let i2cdev = format!("/dev/i2c-{}", adapter_no);
-        let mut adapter = I2cAdapter {
-            adapter_no,
-            smbus: false,
-            device: D::open(i2cdev)?,
-        };
-        adapter.read_func()?;
-
-        Ok(adapter)
-    }
-
-    // Helper function for reading the adaptor functionalities.
-    fn read_func(&mut self) -> Result<()> {
         let func: u64 = I2C_FUNC_SMBUS_ALL;
+        let mut device = D::open(i2cdev)?;
+        let smbus;
 
-        let ret = self.device.funcs(func);
-
+        let ret = device.funcs(func);
         if ret == -1 {
             println!("Failed to get I2C function");
             return errno_result();
         }
 
         if (func & I2C_FUNC_I2C) != 0 {
-            self.smbus = false;
+            smbus = false;
         } else if (func & I2C_FUNC_SMBUS_ALL) != 0 {
-            self.smbus = true;
+            smbus = true;
         } else {
             println!("Invalid functionality {:x}", func);
             return Err(Error::new(EINVAL));
         }
 
-        Ok(())
+        Ok(I2cAdapter {
+            device,
+            adapter_no,
+            smbus,
+        })
     }
 
     /// Perform I2C_RDWR transfer

@@ -11,6 +11,8 @@ use std::os::unix::io::AsRawFd;
 use libc::{c_ulong, ioctl, EINVAL};
 use vmm_sys_util::errno::{errno_result, Error, Result};
 
+use super::AdapterConfig;
+
 // The type of the `req` parameter is different for the `musl` library. This will enable
 // successful build for other non-musl libraries.
 #[cfg(target_env = "musl")]
@@ -231,12 +233,6 @@ pub struct I2cReq {
     pub buf: Vec<u8>,
 }
 
-pub struct I2cAdapter<D: I2cDevice> {
-    device: D,
-    adapter_no: u32,
-    smbus: bool,
-}
-
 /// Trait that represents an I2C Device.
 ///
 /// This trait is introduced for development purposes only, and should not
@@ -293,6 +289,12 @@ impl I2cDevice for PhysDevice {
     fn slave(&self, addr: u64) -> i32 {
         unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, addr as c_ulong) }
     }
+}
+
+pub struct I2cAdapter<D: I2cDevice> {
+    device: D,
+    adapter_no: u32,
+    smbus: bool,
 }
 
 impl<D: I2cDevice> I2cAdapter<D> {
@@ -425,68 +427,6 @@ pub struct I2cMap<D: I2cDevice> {
     device_map: [u32; MAX_I2C_VDEV],
 }
 
-#[derive(Debug, PartialEq)]
-pub(crate) struct DeviceConfig {
-    adapter_no: u32,
-    addr: Vec<u16>,
-}
-
-impl DeviceConfig {
-    pub fn new(adapter_no: u32) -> Self {
-        DeviceConfig {
-            adapter_no,
-            addr: Vec::new(),
-        }
-    }
-
-    pub fn push(&mut self, addr: u16) -> std::result::Result<(), String> {
-        if addr as usize > MAX_I2C_VDEV {
-            return Err(format!("Invalid address: {} (> maximum allowed)", addr));
-        }
-
-        if self.addr.contains(&addr) {
-            return Err(format!("Address already in use: {}", addr));
-        }
-
-        self.addr.push(addr);
-        Ok(())
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub(crate) struct AdapterConfig {
-    inner: Vec<DeviceConfig>,
-}
-
-impl AdapterConfig {
-    pub fn new() -> Self {
-        Self { inner: Vec::new() }
-    }
-
-    fn contains_adapter_no(&self, adapter_no: u32) -> bool {
-        self.inner.iter().any(|elem| elem.adapter_no == adapter_no)
-    }
-
-    fn contains_addr(&self, addr: u16) -> bool {
-        self.inner.iter().any(|elem| elem.addr.contains(&addr))
-    }
-
-    pub fn push(&mut self, device: DeviceConfig) -> std::result::Result<(), String> {
-        if self.contains_adapter_no(device.adapter_no) {
-            return Err("Duplicated adapter number".to_string());
-        }
-
-        for addr in device.addr.iter() {
-            if self.contains_addr(*addr) {
-                return Err(format!("Address already in use: {}", addr));
-            }
-        }
-
-        self.inner.push(device);
-        Ok(())
-    }
-}
-
 impl<D: I2cDevice> I2cMap<D> {
     pub(crate) fn new(device_config: &AdapterConfig) -> Result<Self>
     where
@@ -529,7 +469,7 @@ impl<D: I2cDevice> I2cMap<D> {
             return Err(Error::new(EINVAL));
         }
 
-        // get the corresponding adapter based on teh device config.
+        // get the corresponding adapter based on the device config.
         let adapter = &self.adapters[index as usize];
 
         // Set device's address
@@ -542,18 +482,6 @@ impl<D: I2cDevice> I2cMap<D> {
 pub mod tests {
     use super::*;
     use std::convert::TryFrom;
-
-    impl DeviceConfig {
-        pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
-            DeviceConfig { adapter_no, addr }
-        }
-    }
-
-    impl AdapterConfig {
-        pub fn new_with(devices: Vec<DeviceConfig>) -> Self {
-            AdapterConfig { inner: devices }
-        }
-    }
 
     #[derive(Debug, Default)]
     pub struct DummyDevice {

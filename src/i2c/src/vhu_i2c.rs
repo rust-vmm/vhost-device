@@ -5,10 +5,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::i2c::*;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::{convert, error, fmt, io};
+
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
@@ -17,6 +17,8 @@ use virtio_bindings::bindings::virtio_ring::{
 };
 use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+
+use crate::i2c::*;
 
 const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 1;
@@ -306,6 +308,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 mod tests {
     use super::*;
     use crate::i2c::tests::DummyDevice;
+    use crate::AdapterConfig;
     use std::convert::TryFrom;
 
     #[test]

@@ -17,15 +17,69 @@ use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::i2c::DeviceConfig;
-use i2c::{AdapterConfig, I2cDevice, I2cMap, PhysDevice};
+use i2c::{I2cDevice, I2cMap, PhysDevice, MAX_I2C_VDEV};
 use vhu_i2c::VhostUserI2cBackend;
 
-#[derive(PartialEq, Debug)]
-struct I2cConfiguration {
-    socket_path: String,
-    socket_count: usize,
-    devices: AdapterConfig,
+#[derive(Debug, PartialEq)]
+struct DeviceConfig {
+    adapter_no: u32,
+    addr: Vec<u16>,
+}
+
+impl DeviceConfig {
+    fn new(adapter_no: u32) -> Self {
+        DeviceConfig {
+            adapter_no,
+            addr: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, addr: u16) -> std::result::Result<(), String> {
+        if addr as usize > MAX_I2C_VDEV {
+            return Err(format!("Invalid address: {} (> maximum allowed)", addr));
+        }
+
+        if self.addr.contains(&addr) {
+            return Err(format!("Address already in use: {}", addr));
+        }
+
+        self.addr.push(addr);
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) struct AdapterConfig {
+    inner: Vec<DeviceConfig>,
+}
+
+impl AdapterConfig {
+    fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    fn contains_adapter_no(&self, adapter_no: u32) -> bool {
+        self.inner.iter().any(|elem| elem.adapter_no == adapter_no)
+    }
+
+    fn contains_addr(&self, addr: u16) -> bool {
+        self.inner.iter().any(|elem| elem.addr.contains(&addr))
+    }
+
+    fn push(&mut self, device: DeviceConfig) -> std::result::Result<(), String> {
+        if self.contains_adapter_no(device.adapter_no) {
+            return Err("Duplicated adapter number".to_string());
+        }
+
+        for addr in device.addr.iter() {
+            if self.contains_addr(*addr) {
+                return Err(format!("Address already in use: {}", addr));
+            }
+        }
+
+        self.inner.push(device);
+        Ok(())
+    }
 }
 
 impl TryFrom<&str> for AdapterConfig {
@@ -51,6 +105,13 @@ impl TryFrom<&str> for AdapterConfig {
         }
         Ok(devices)
     }
+}
+
+#[derive(PartialEq, Debug)]
+struct I2cConfiguration {
+    socket_path: String,
+    socket_count: usize,
+    devices: AdapterConfig,
 }
 
 impl TryFrom<ArgMatches> for I2cConfiguration {
@@ -152,6 +213,18 @@ fn main() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl DeviceConfig {
+        pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
+            DeviceConfig { adapter_no, addr }
+        }
+    }
+
+    impl AdapterConfig {
+        pub fn new_with(devices: Vec<DeviceConfig>) -> Self {
+            AdapterConfig { inner: devices }
+        }
+    }
 
     fn get_cmd_args(name: &str, devices: &str, count: u32) -> ArgMatches {
         let yaml = load_yaml!("cli.yaml");

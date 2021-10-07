@@ -8,75 +8,150 @@
 mod i2c;
 mod vhu_i2c;
 
-use clap::{load_yaml, App, ArgMatches};
-use i2c::{I2cAdapter, I2cAdapterTrait, I2cMap};
+use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
+
+use clap::{load_yaml, App, ArgMatches};
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vhu_i2c::VhostUserI2cBackend;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-fn start_daemon<T: I2cAdapterTrait>(
-    backend: Arc<RwLock<VhostUserI2cBackend<T>>>,
-    listener: Listener,
-) -> bool {
-    let mut daemon = VhostUserDaemon::new(
-        String::from("vhost-device-i2c-backend"),
-        backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .unwrap();
+use i2c::{I2cDevice, I2cMap, PhysDevice, MAX_I2C_VDEV};
+use vhu_i2c::VhostUserI2cBackend;
 
-    daemon.start(listener).unwrap();
+#[derive(Debug, PartialEq)]
+struct DeviceConfig {
+    adapter_no: u32,
+    addr: Vec<u16>,
+}
 
-    match daemon.wait() {
-        Ok(()) => {
-            println!("Stopping cleanly.");
-        }
-        Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-            println!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-        }
-        Err(e) => {
-            println!("Error running daemon: {:?}", e);
+impl DeviceConfig {
+    fn new(adapter_no: u32) -> Self {
+        DeviceConfig {
+            adapter_no,
+            addr: Vec::new(),
         }
     }
 
-    // No matter the result, we need to shut down the worker thread.
-    backend
-        .read()
-        .unwrap()
-        .exit_event
-        .write(1)
-        .expect("Shutting down worker thread");
+    fn push(&mut self, addr: u16) -> std::result::Result<(), String> {
+        if addr as usize > MAX_I2C_VDEV {
+            return Err(format!("Invalid address: {} (> maximum allowed)", addr));
+        }
 
-    false
+        if self.addr.contains(&addr) {
+            return Err(format!("Address already in use: {}", addr));
+        }
+
+        self.addr.push(addr);
+        Ok(())
+    }
 }
 
-fn start_backend<T: I2cAdapterTrait>(
-    cmd_args: ArgMatches,
-    start_daemon: fn(Arc<RwLock<VhostUserI2cBackend<T>>>, Listener) -> bool,
+#[derive(Debug, PartialEq)]
+pub(crate) struct AdapterConfig {
+    inner: Vec<DeviceConfig>,
+}
+
+impl AdapterConfig {
+    fn new() -> Self {
+        Self { inner: Vec::new() }
+    }
+
+    fn contains_adapter_no(&self, adapter_no: u32) -> bool {
+        self.inner.iter().any(|elem| elem.adapter_no == adapter_no)
+    }
+
+    fn contains_addr(&self, addr: u16) -> bool {
+        self.inner.iter().any(|elem| elem.addr.contains(&addr))
+    }
+
+    fn push(&mut self, device: DeviceConfig) -> std::result::Result<(), String> {
+        if self.contains_adapter_no(device.adapter_no) {
+            return Err("Duplicated adapter number".to_string());
+        }
+
+        for addr in device.addr.iter() {
+            if self.contains_addr(*addr) {
+                return Err(format!("Address already in use: {}", addr));
+            }
+        }
+
+        self.inner.push(device);
+        Ok(())
+    }
+}
+
+impl TryFrom<&str> for AdapterConfig {
+    type Error = String;
+
+    fn try_from(list: &str) -> Result<Self, Self::Error> {
+        let busses: Vec<&str> = list.split(',').collect();
+        let mut devices = AdapterConfig::new();
+
+        for businfo in busses.iter() {
+            let list: Vec<&str> = businfo.split(':').collect();
+            let bus_addr = list[0].parse::<u32>().map_err(|_| "Invalid bus address")?;
+            let mut adapter = DeviceConfig::new(bus_addr);
+
+            for device_str in list[1..].iter() {
+                let addr = device_str
+                    .parse::<u16>()
+                    .map_err(|_| "Invalid device addr: {}")?;
+                adapter.push(addr)?;
+            }
+
+            devices.push(adapter)?;
+        }
+        Ok(devices)
+    }
+}
+
+#[derive(PartialEq, Debug)]
+struct I2cConfiguration {
+    socket_path: String,
+    socket_count: usize,
+    devices: AdapterConfig,
+}
+
+impl TryFrom<ArgMatches> for I2cConfiguration {
+    type Error = String;
+
+    fn try_from(cmd_args: ArgMatches) -> Result<Self, Self::Error> {
+        let socket_path = cmd_args
+            .value_of("socket_path")
+            .ok_or("Invalid socket path")?
+            .to_string();
+
+        let socket_count = cmd_args
+            .value_of("socket_count")
+            .unwrap_or("1")
+            .parse::<usize>()
+            .map_err(|_| "Invalid socket_count")?;
+
+        let list = cmd_args.value_of("devices").ok_or("Invalid devices list")?;
+        let devices = AdapterConfig::try_from(list)?;
+        Ok(I2cConfiguration {
+            socket_path,
+            socket_count,
+            devices,
+        })
+    }
+}
+
+fn start_backend<D: 'static + I2cDevice + Send + Sync>(
+    config: I2cConfiguration,
 ) -> Result<(), String> {
+    // The same i2c_map structure instance is shared between all the guests
+    let i2c_map = Arc::new(
+        I2cMap::<D>::new(&config.devices)
+            .map_err(|e| format!("Failed to create i2c_map ({})", e))?,
+    );
+
     let mut handles = Vec::new();
 
-    let path = cmd_args
-        .value_of("socket_path")
-        .ok_or("Invalid socket path")?;
-
-    let count = cmd_args
-        .value_of("socket_count")
-        .unwrap_or("1")
-        .parse::<u32>()
-        .map_err(|_| "Invalid socket_count")?;
-
-    let list = cmd_args.value_of("devices").ok_or("Invalid devices list")?;
-
-    // The same i2c_map structure instance is shared between all the guests
-    let i2c_map =
-        Arc::new(I2cMap::<T>::new(list).map_err(|e| format!("Failed to create i2c_map ({})", e))?);
-
-    for i in 0..count {
-        let socket = path.to_owned() + &i.to_string();
+    for i in 0..config.socket_count {
+        let socket = config.socket_path.to_owned() + &i.to_string();
         let i2c_map = i2c_map.clone();
 
         let handle = spawn(move || loop {
@@ -85,9 +160,36 @@ fn start_backend<T: I2cAdapterTrait>(
             ));
             let listener = Listener::new(socket.clone(), true).unwrap();
 
-            if start_daemon(backend, listener) {
-                break;
+            let mut daemon = VhostUserDaemon::new(
+                String::from("vhost-device-i2c-backend"),
+                backend.clone(),
+                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+            )
+            .unwrap();
+
+            daemon.start(listener).unwrap();
+
+            match daemon.wait() {
+                Ok(()) => {
+                    println!("Stopping cleanly.");
+                }
+                Err(vhost_user_backend::Error::HandleRequest(
+                    vhost_user::Error::PartialMessage,
+                )) => {
+                    println!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
+                }
+                Err(e) => {
+                    println!("Error running daemon: {:?}", e);
+                }
             }
+
+            // No matter the result, we need to shut down the worker thread.
+            backend
+                .read()
+                .unwrap()
+                .exit_event
+                .write(1)
+                .expect("Shutting down worker thread");
         });
 
         handles.push(handle);
@@ -104,13 +206,25 @@ fn main() -> Result<(), String> {
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 
-    start_backend::<I2cAdapter>(cmd_args, start_daemon)
+    let config = I2cConfiguration::try_from(cmd_args).unwrap();
+    start_backend::<PhysDevice>(config)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use i2c::tests::I2cMockAdapter;
+
+    impl DeviceConfig {
+        pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
+            DeviceConfig { adapter_no, addr }
+        }
+    }
+
+    impl AdapterConfig {
+        pub fn new_with(devices: Vec<DeviceConfig>) -> Self {
+            AdapterConfig { inner: devices }
+        }
+    }
 
     fn get_cmd_args(name: &str, devices: &str, count: u32) -> ArgMatches {
         let yaml = load_yaml!("cli.yaml");
@@ -133,34 +247,34 @@ mod tests {
         }
     }
 
-    fn mock_start_daemon<T: I2cAdapterTrait>(
-        _backend: Arc<RwLock<VhostUserI2cBackend<T>>>,
-        _listener: Listener,
-    ) -> bool {
-        true
-    }
-
     #[test]
-    fn test_backend_single() {
-        let cmd_args = get_cmd_args("vi2c.sock_single", "1:4,2:32:21,5:5:23", 0);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_ok());
-    }
-
-    #[test]
-    fn test_backend_multiple() {
-        let cmd_args = get_cmd_args("vi2c.sock", "1:4,2:32:21,5:5:23", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_ok());
-    }
-
-    #[test]
-    fn test_backend_failure() {
+    fn test_parse_failure() {
         let cmd_args = get_cmd_args("vi2c.sock_failure", "1:4d", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_err());
+        // TODO: Check against the actual error instead of `is_err`.
+        assert!(I2cConfiguration::try_from(cmd_args).is_err());
+
+        let cmd_args = get_cmd_args("vi2c.sock_duplicate", "1:4,2:32:21,5:4:23", 5);
+        // TODO: Check against the actual error instead of `is_err`.
+        assert!(I2cConfiguration::try_from(cmd_args).is_err());
     }
 
     #[test]
-    fn test_backend_failure_duplicate_device4() {
-        let cmd_args = get_cmd_args("vi2c.sock_duplicate", "1:4,2:32:21,5:4:23", 5);
-        assert!(start_backend::<I2cMockAdapter>(cmd_args, mock_start_daemon).is_err());
+    fn test_parse_successful() {
+        let cmd_args = get_cmd_args("vi2c.sock_single", "1:4,2:32:21,5:5:23", 5);
+        let config = I2cConfiguration::try_from(cmd_args).unwrap();
+
+        let expected_devices = AdapterConfig::new_with(vec![
+            DeviceConfig::new_with(1, vec![4]),
+            DeviceConfig::new_with(2, vec![32, 21]),
+            DeviceConfig::new_with(5, vec![5, 23]),
+        ]);
+
+        let expected_config = I2cConfiguration {
+            socket_count: 5,
+            socket_path: String::from("vi2c.sock_single"),
+            devices: expected_devices,
+        };
+
+        assert_eq!(config, expected_config);
     }
 }

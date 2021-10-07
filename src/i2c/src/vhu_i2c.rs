@@ -5,10 +5,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::i2c::*;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::{convert, error, fmt, io};
+
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
@@ -17,6 +17,8 @@ use virtio_bindings::bindings::virtio_ring::{
 };
 use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+
+use crate::i2c::*;
 
 const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 1;
@@ -84,15 +86,15 @@ struct VirtioI2cInHdr {
 }
 unsafe impl ByteValued for VirtioI2cInHdr {}
 
-pub struct VhostUserI2cBackend<A: I2cAdapterTrait> {
-    i2c_map: Arc<I2cMap<A>>,
+pub struct VhostUserI2cBackend<D: I2cDevice> {
+    i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub exit_event: EventFd,
 }
 
-impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
-    pub fn new(i2c_map: Arc<I2cMap<A>>) -> Result<Self> {
+impl<D: I2cDevice> VhostUserI2cBackend<D> {
+    pub fn new(i2c_map: Arc<I2cMap<D>>) -> Result<Self> {
         Ok(VhostUserI2cBackend {
             i2c_map,
             event_idx: false,
@@ -220,7 +222,9 @@ impl<A: I2cAdapterTrait> VhostUserI2cBackend<A> {
 }
 
 /// VhostUserBackendMut trait methods
-impl<A: I2cAdapterTrait> VhostUserBackendMut<VringRwLock, ()> for VhostUserI2cBackend<A> {
+impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
+    for VhostUserI2cBackend<D>
+{
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -303,11 +307,14 @@ impl<A: I2cAdapterTrait> VhostUserBackendMut<VringRwLock, ()> for VhostUserI2cBa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::i2c::tests::I2cMockAdapter;
+    use crate::i2c::tests::DummyDevice;
+    use crate::AdapterConfig;
+    use std::convert::TryFrom;
 
     #[test]
     fn verify_backend() {
-        let i2c_map: I2cMap<I2cMockAdapter> = I2cMap::new("1:4,2:32:21,5:10:23").unwrap();
+        let device_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
+        let i2c_map: I2cMap<DummyDevice> = I2cMap::new(&device_config).unwrap();
         let mut backend = VhostUserI2cBackend::new(Arc::new(i2c_map)).unwrap();
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);

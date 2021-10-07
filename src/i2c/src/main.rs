@@ -129,6 +129,10 @@ impl TryFrom<ArgMatches> for I2cConfiguration {
             .parse::<usize>()
             .map_err(|_| "Invalid socket_count")?;
 
+        if socket_count == 0 {
+            return Err("Socket count can't be 0".to_string());
+        }
+
         let list = cmd_args.value_of("devices").ok_or("Invalid devices list")?;
         let devices = AdapterConfig::try_from(list)?;
         Ok(I2cConfiguration {
@@ -248,6 +252,13 @@ mod tests {
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             "Invalid device addr"
+        );
+
+        // Invalid socket count
+        let cmd_args = get_cmd_args(socket_name, "1:4", Some(0));
+        assert_eq!(
+            I2cConfiguration::try_from(cmd_args).unwrap_err(),
+            "Socket count can't be 0"
         );
 
         // Duplicate client address: 4

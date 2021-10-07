@@ -97,7 +97,7 @@ impl TryFrom<&str> for AdapterConfig {
             for device_str in list[1..].iter() {
                 let addr = device_str
                     .parse::<u16>()
-                    .map_err(|_| "Invalid device addr: {}")?;
+                    .map_err(|_| "Invalid device addr")?;
                 adapter.push(addr)?;
             }
 
@@ -226,41 +226,48 @@ mod tests {
         }
     }
 
-    fn get_cmd_args(name: &str, devices: &str, count: u32) -> ArgMatches {
+    fn get_cmd_args(name: &str, devices: &str, count: Option<u32>) -> ArgMatches {
+        let mut args = vec!["prog", "-s", name, "-l", devices];
         let yaml = load_yaml!("cli.yaml");
         let app = App::from(yaml);
+        let socket_count_str;
 
-        if count != 0 {
-            app.try_get_matches_from(vec![
-                "prog",
-                "-s",
-                name,
-                "-l",
-                devices,
-                "-c",
-                &count.to_string(),
-            ])
-            .unwrap()
-        } else {
-            app.try_get_matches_from(vec!["prog", "-s", name, "-l", devices])
-                .unwrap()
+        if let Some(count) = count {
+            socket_count_str = count.to_string();
+            args.extend_from_slice(&["-c", &socket_count_str]);
         }
+        app.try_get_matches_from(args).unwrap()
     }
 
     #[test]
     fn test_parse_failure() {
-        let cmd_args = get_cmd_args("vi2c.sock_failure", "1:4d", 5);
-        // TODO: Check against the actual error instead of `is_err`.
-        assert!(I2cConfiguration::try_from(cmd_args).is_err());
+        let socket_name = "vi2c.sock";
 
-        let cmd_args = get_cmd_args("vi2c.sock_duplicate", "1:4,2:32:21,5:4:23", 5);
-        // TODO: Check against the actual error instead of `is_err`.
-        assert!(I2cConfiguration::try_from(cmd_args).is_err());
+        // Invalid device list
+        let cmd_args = get_cmd_args(socket_name, "1:4d", Some(5));
+        assert_eq!(
+            I2cConfiguration::try_from(cmd_args).unwrap_err(),
+            "Invalid device addr"
+        );
+
+        // Duplicate client address: 4
+        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:4:23", Some(5));
+        assert_eq!(
+            I2cConfiguration::try_from(cmd_args).unwrap_err(),
+            "Address already in use: 4"
+        );
     }
 
     #[test]
     fn test_parse_successful() {
-        let cmd_args = get_cmd_args("vi2c.sock_single", "1:4,2:32:21,5:5:23", 5);
+        let socket_name = "vi2c.sock";
+
+        // Missing socket count, default (1) should be used.
+        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:5:23", None);
+        let config = I2cConfiguration::try_from(cmd_args).unwrap();
+        assert_eq!(config.socket_count, 1);
+
+        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:5:23", Some(5));
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
 
         let expected_devices = AdapterConfig::new_with(vec![
@@ -271,7 +278,7 @@ mod tests {
 
         let expected_config = I2cConfiguration {
             socket_count: 5,
-            socket_path: String::from("vi2c.sock_single"),
+            socket_path: String::from(socket_name),
             devices: expected_devices,
         };
 

@@ -264,7 +264,7 @@ pub trait I2cDevice {
         Self: Sized;
 
     // Corresponds to the I2C_FUNCS ioctl call.
-    fn funcs(&mut self, func: u64) -> Result<()>;
+    fn funcs(&mut self) -> Result<u64>;
 
     // Corresponds to the I2C_RDWR ioctl call.
     fn rdwr(&self, data: &I2cRdwrIoctlData) -> Result<()>;
@@ -299,13 +299,17 @@ impl I2cDevice for PhysDevice {
         })
     }
 
-    fn funcs(&mut self, func: u64) -> Result<()> {
-        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_FUNCS, &func) };
+    fn funcs(&mut self) -> Result<u64> {
+        let mut func: u64 = 0;
+
+        // Safe as the file is a valid I2C adapter, the kernel will only
+        // update the correct amount of memory in func.
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_FUNCS, &mut func) };
 
         if ret == -1 {
             Err(Error::IoctlFailure("funcs", IoError::last()))
         } else {
-            Ok(())
+            Ok(func)
         }
     }
 
@@ -353,11 +357,9 @@ pub struct I2cAdapter<D: I2cDevice> {
 impl<D: I2cDevice> I2cAdapter<D> {
     // Creates a new adapter corresponding to `device`.
     fn new(mut device: D) -> Result<I2cAdapter<D>> {
-        let func: u64 = I2C_FUNC_SMBUS_ALL;
-
-        device.funcs(func)?;
-
         let smbus;
+
+        let func = device.funcs()?;
         if (func & I2C_FUNC_I2C) != 0 {
             smbus = false;
         } else if (func & I2C_FUNC_SMBUS_ALL) != 0 {
@@ -510,11 +512,23 @@ pub mod tests {
 
     #[derive(Debug)]
     pub struct DummyDevice {
-        funcs_result: Result<()>,
+        funcs_result: Result<u64>,
         rdwr_result: Result<()>,
         smbus_result: Result<()>,
         slave_result: Result<()>,
         adapter_no: u32,
+    }
+
+    impl Default for DummyDevice {
+        fn default() -> Self {
+            Self {
+                funcs_result: Ok(I2C_FUNC_I2C),
+                rdwr_result: Ok(()),
+                smbus_result: Ok(()),
+                slave_result: Ok(()),
+                adapter_no: 0,
+            }
+        }
     }
 
     impl I2cDevice for DummyDevice {
@@ -524,14 +538,11 @@ pub mod tests {
         {
             Ok(DummyDevice {
                 adapter_no,
-                funcs_result: Ok(()),
-                rdwr_result: Ok(()),
-                smbus_result: Ok(()),
-                slave_result: Ok(()),
+                ..Default::default()
             })
         }
 
-        fn funcs(&mut self, _func: u64) -> Result<()> {
+        fn funcs(&mut self) -> Result<u64> {
             self.funcs_result
         }
 
@@ -555,14 +566,14 @@ pub mod tests {
     #[test]
     fn test_funcs() {
         let i2c_device = DummyDevice {
-            funcs_result: I2C_FUNC_SMBUS_ALL as i32,
+            funcs_result: Ok(I2C_FUNC_SMBUS_ALL),
             ..Default::default()
         };
         let adapter = I2cAdapter::new(i2c_device).unwrap();
         assert_eq!(adapter.smbus, true);
 
         let i2c_device = DummyDevice {
-            funcs_result: I2C_FUNC_I2C as i32,
+            funcs_result: Ok(I2C_FUNC_I2C),
             ..Default::default()
         };
         let adapter = I2cAdapter::new(i2c_device).unwrap();

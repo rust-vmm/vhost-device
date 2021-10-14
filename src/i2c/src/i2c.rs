@@ -45,7 +45,7 @@ pub enum Error {
 }
 
 /// Linux I2C/SMBUS definitions
-/// IOCTL commands
+/// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further details.
 
 /// NOTE: Slave address is 7 or 10 bits, but 10-bit addresses are NOT supported!
 /// (due to code brokenness)
@@ -141,6 +141,18 @@ union I2cSmbusData {
     block: [u8; I2C_SMBUS_BLOCK_MAX + 2],
 }
 
+impl I2cSmbusData {
+    fn read_byte(&self) -> u8 {
+        // Safe as we will only read the relevant bytes
+        unsafe { self.byte }
+    }
+
+    fn read_word(&self) -> u16 {
+        // Safe as we will only read the relevant bytes
+        unsafe { self.word }
+    }
+}
+
 /// This is the structure as used in the I2C_SMBUS ioctl call
 #[repr(C)]
 pub struct I2cSmbusIoctlData {
@@ -150,22 +162,29 @@ pub struct I2cSmbusIoctlData {
     data: *mut I2cSmbusData,
 }
 
-impl I2cSmbusIoctlData {
+pub struct SmbusMsg {
+    read_write: u8,
+    command: u8,
+    size: u32,
+    data: Option<I2cSmbusData>,
+}
+
+impl SmbusMsg {
     /// Based on Linux's drivers/i2c/i2c-core-smbus.c:i2c_smbus_xfer_emulated().
     ///
     /// These smbus related functions try to reverse what Linux does, only
     /// support basic modes (up to word transfer).
-    fn new(reqs: &mut [I2cReq]) -> Result<I2cSmbusIoctlData> {
+    fn new(reqs: &mut [I2cReq]) -> Result<SmbusMsg> {
         let mut data = I2cSmbusData {
             block: [0; I2C_SMBUS_BLOCK_MAX + 2],
         };
         let read_write: u8;
-        let size: u32;
+        let mut smbus_data = None;
 
         // Write messages have only one request message, while read messages
         // will have two (except for few special cases of I2C_SMBUS_QUICK and
         // I2C_SMBUS_BYTE, where only one request messages is sent).
-        match reqs.len() {
+        let size = match reqs.len() {
             // Write requests (with some exceptions as mentioned above)
             1 => {
                 if (reqs[0].flags & I2C_M_RD) != 0 {
@@ -178,7 +197,7 @@ impl I2cSmbusIoctlData {
                     read_write = I2C_SMBUS_WRITE;
                 }
 
-                size = match reqs[0].len {
+                match reqs[0].len {
                     // Special Read requests
                     0 => I2C_SMBUS_QUICK,
                     1 => I2C_SMBUS_BYTE,
@@ -186,10 +205,12 @@ impl I2cSmbusIoctlData {
                     // Write requests
                     2 => {
                         data.byte = reqs[0].buf[1];
+                        smbus_data = Some(data);
                         I2C_SMBUS_BYTE_DATA
                     }
                     3 => {
                         data.word = reqs[0].buf[1] as u16 | ((reqs[0].buf[2] as u16) << 8);
+                        smbus_data = Some(data);
                         I2C_SMBUS_WORD_DATA
                     }
                     _ => {
@@ -218,11 +239,12 @@ impl I2cSmbusIoctlData {
                     ));
                 }
                 read_write = I2C_SMBUS_READ;
+                smbus_data = Some(data);
 
                 if reqs[1].len == 1 {
-                    size = I2C_SMBUS_BYTE_DATA;
+                    I2C_SMBUS_BYTE_DATA
                 } else {
-                    size = I2C_SMBUS_WORD_DATA;
+                    I2C_SMBUS_WORD_DATA
                 }
             }
 
@@ -233,13 +255,13 @@ impl I2cSmbusIoctlData {
                     reqs[1].len,
                 ));
             }
-        }
+        };
 
-        Ok(I2cSmbusIoctlData {
+        Ok(SmbusMsg {
             read_write,
             command: reqs[0].buf[0],
             size,
-            data: &mut data,
+            data: smbus_data,
         })
     }
 }
@@ -268,10 +290,10 @@ pub trait I2cDevice {
     fn funcs(&mut self) -> Result<u64>;
 
     // Corresponds to the I2C_RDWR ioctl call.
-    fn rdwr(&self, data: &I2cRdwrIoctlData) -> Result<()>;
+    fn rdwr(&self, reqs: &mut [I2cReq]) -> Result<()>;
 
     // Corresponds to the I2C_SMBUS ioctl call.
-    fn smbus(&self, data: &I2cSmbusIoctlData) -> Result<()>;
+    fn smbus(&self, msg: &mut SmbusMsg) -> Result<()>;
 
     // Corresponds to the I2C_SLAVE ioctl call.
     fn slave(&self, addr: u64) -> Result<()>;
@@ -314,8 +336,27 @@ impl I2cDevice for PhysDevice {
         }
     }
 
-    fn rdwr(&self, data: &I2cRdwrIoctlData) -> Result<()> {
-        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_RDWR, data) };
+    fn rdwr(&self, reqs: &mut [I2cReq]) -> Result<()> {
+        let mut msgs: Vec<I2cMsg> = Vec::with_capacity(reqs.len());
+        let len = reqs.len();
+
+        for req in reqs {
+            msgs.push(I2cMsg {
+                addr: req.addr,
+                flags: req.flags,
+                len: req.len,
+                buf: req.buf.as_mut_ptr(),
+            });
+        }
+
+        let mut data = I2cRdwrIoctlData {
+            msgs: msgs.as_mut_ptr(),
+            nmsgs: len as u32,
+        };
+
+        // Safe as the file is a valid I2C adapter, the kernel will only
+        // update the correct amount of memory in data.
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_RDWR, &mut data) };
 
         if ret == -1 {
             Err(Error::IoctlFailure("rdwr", IoError::last()))
@@ -324,8 +365,20 @@ impl I2cDevice for PhysDevice {
         }
     }
 
-    fn smbus(&self, data: &I2cSmbusIoctlData) -> Result<()> {
-        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SMBUS, data) };
+    fn smbus(&self, msg: &mut SmbusMsg) -> Result<()> {
+        let mut smbus_data = I2cSmbusIoctlData {
+            read_write: msg.read_write,
+            command: msg.command,
+            size: msg.size,
+            data: match &mut msg.data {
+                Some(data) => data,
+                _ => std::ptr::null_mut(),
+            },
+        };
+
+        // Safe as the file is a valid I2C adapter, the kernel will only
+        // update the correct amount of memory in data.
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SMBUS, &mut smbus_data) };
 
         if ret == -1 {
             Err(Error::IoctlFailure("smbus", IoError::last()))
@@ -335,6 +388,7 @@ impl I2cDevice for PhysDevice {
     }
 
     fn slave(&self, addr: u64) -> Result<()> {
+        // Safe as the file is a valid I2C adapter.
         let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, addr as c_ulong) };
 
         if ret == -1 {
@@ -378,45 +432,30 @@ impl<D: I2cDevice> I2cAdapter<D> {
 
     /// Perform I2C_RDWR transfer
     fn i2c_transfer(&self, reqs: &mut [I2cReq]) -> Result<()> {
-        let mut msgs: Vec<I2cMsg> = Vec::with_capacity(reqs.len());
-        let len = reqs.len();
-
-        for req in reqs {
-            msgs.push(I2cMsg {
-                addr: req.addr,
-                flags: req.flags,
-                len: req.len,
-                buf: req.buf.as_mut_ptr(),
-            });
-        }
-
-        let data = I2cRdwrIoctlData {
-            msgs: msgs.as_mut_ptr(),
-            nmsgs: len as u32,
-        };
-
-        self.device.rdwr(&data)
+        self.device.rdwr(reqs)
     }
 
     /// Perform I2C_SMBUS transfer
     fn smbus_transfer(&self, reqs: &mut [I2cReq]) -> Result<()> {
-        let smbus_data = I2cSmbusIoctlData::new(reqs)?;
+        let mut msg = SmbusMsg::new(reqs)?;
+        self.device.smbus(&mut msg)?;
 
-        self.device.smbus(&smbus_data)?;
+        if msg.read_write == I2C_SMBUS_READ {
+            // data is guaranteed to be valid here.
+            let data = msg.data.unwrap();
 
-        if smbus_data.read_write == I2C_SMBUS_READ {
-            unsafe {
-                match smbus_data.size {
-                    I2C_SMBUS_BYTE => reqs[0].buf[0] = (*smbus_data.data).byte,
-                    I2C_SMBUS_BYTE_DATA => reqs[1].buf[0] = (*smbus_data.data).byte,
-                    I2C_SMBUS_WORD_DATA => {
-                        reqs[1].buf[0] = ((*smbus_data.data).word & 0xff) as u8;
-                        reqs[1].buf[1] = ((*smbus_data.data).word >> 8) as u8;
-                    }
+            match msg.size {
+                I2C_SMBUS_BYTE => reqs[0].buf[0] = data.read_byte(),
+                I2C_SMBUS_BYTE_DATA => reqs[1].buf[0] = data.read_byte(),
+                I2C_SMBUS_WORD_DATA => {
+                    let word = data.read_word();
 
-                    _ => {
-                        return Err(Error::SMBusCommandInvalid(smbus_data.size));
-                    }
+                    reqs[1].buf[0] = (word & 0xff) as u8;
+                    reqs[1].buf[1] = (word >> 8) as u8;
+                }
+
+                _ => {
+                    return Err(Error::SMBusCommandInvalid(msg.size));
                 }
             }
         }
@@ -546,11 +585,11 @@ pub mod tests {
             self.funcs_result
         }
 
-        fn rdwr(&self, _data: &I2cRdwrIoctlData) -> Result<()> {
+        fn rdwr(&self, _reqs: &mut [I2cReq]) -> Result<()> {
             self.rdwr_result
         }
 
-        fn smbus(&self, _data: &I2cSmbusIoctlData) -> Result<()> {
+        fn smbus(&self, _msg: &mut SmbusMsg) -> Result<()> {
             self.smbus_result
         }
 

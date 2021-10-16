@@ -184,7 +184,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
             }
         };
 
-        for desc_chain in requests {
+        for (i, desc_chain) in requests.iter().enumerate() {
             let descriptors: Vec<_> = desc_chain.clone().collect();
             let desc_buf = descriptors[1];
             let desc_in_hdr = descriptors[2];
@@ -194,7 +194,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
             if desc_buf.is_write_only() {
                 desc_chain
                     .memory()
-                    .write(&reqs.remove(0).buf, desc_buf.addr())
+                    .write(&reqs[i].buf, desc_buf.addr())
                     .map_err(|_| Error::DescriptorWriteFailed)?;
             }
 

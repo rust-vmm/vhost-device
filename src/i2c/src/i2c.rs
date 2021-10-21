@@ -34,6 +34,8 @@ pub enum Error {
     SMBusCommandInvalid(u32),
     #[error("Invalid SMBus transfer, request-count: {0}, req[0].len: {1}, req[1].len: {2}")]
     SMBusTransferInvalid(usize, u16, u16),
+    #[error("Invalid I2C transfer, request with invalid count: {0}")]
+    I2cTransferInvalid(usize),
     #[error("Failed to open adapter at /dev/i2c-{0}")]
     DeviceOpenFailed(u32),
     #[error("Ioctl command failed for {0} operation: {1}")]
@@ -194,7 +196,7 @@ impl SmbusMsg {
                     // Special Read requests
                     0 => Ok(SmbusMsg {
                         read_write,
-                        command: reqs[0].buf[0],
+                        command: 0,
                         size: I2C_SMBUS_QUICK,
                         data: None,
                     }),
@@ -356,6 +358,10 @@ impl I2cDevice for PhysDevice {
         let len = reqs.len();
 
         for req in reqs {
+            if req.len == 0 {
+                return Err(Error::I2cTransferInvalid(0));
+            }
+
             msgs.push(I2cMsg {
                 addr: req.addr,
                 flags: req.flags,
@@ -745,7 +751,7 @@ pub mod tests {
             addr: 0x3,
             flags: 0,
             len: 0,
-            buf: vec![0],
+            buf: Vec::<u8>::new(),
         }];
 
         i2c_map.transfer(&mut reqs).unwrap();
@@ -1024,6 +1030,18 @@ pub mod tests {
         assert_eq!(
             dev.rdwr(&mut reqs).unwrap_err(),
             Error::IoctlFailure("rdwr", IoError::last())
+        );
+
+        // rdwr failure - missing buffer
+        let mut reqs = [I2cReq {
+            addr: 0x4,
+            flags: 0,
+            len: 0,
+            buf: Vec::<u8>::new(),
+        }];
+        assert_eq!(
+            dev.rdwr(&mut reqs).unwrap_err(),
+            Error::I2cTransferInvalid(0)
         );
 
         // smbus failure

@@ -627,6 +627,7 @@ pub mod tests {
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
         i2c_map.adapters[0].smbus = true;
 
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs: Vec<I2cReq> = vec![
             I2cReq {
                 addr: 0x3,
@@ -642,12 +643,10 @@ pub mod tests {
                 buf: [3, 4].to_vec(),
             },
         ];
-
-        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
-        // TODO: check the actual error once we have an error type defined.
-        // TODO-continued: otherwise this test is unreliable because it might
-        // fail for another reason than the expected one.
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 1, 2)
+        );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs = vec![
@@ -665,7 +664,10 @@ pub mod tests {
                 buf: [3, 4].to_vec(),
             },
         ];
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 1, 2)
+        );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs = vec![
@@ -683,7 +685,10 @@ pub mod tests {
                 buf: [3, 4].to_vec(),
             },
         ];
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 2, 2)
+        );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs = vec![
@@ -701,6 +706,9 @@ pub mod tests {
                 buf: [3, 4, 5].to_vec(),
             },
         ];
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 1, 3)
+        );
     }
 }

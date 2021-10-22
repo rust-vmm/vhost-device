@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use log::warn;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::{convert, error, fmt, io};
@@ -209,7 +210,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
             }
 
             if vring.add_used(desc_chain.head_index(), len).is_err() {
-                println!("Couldn't return used descriptors to the ring");
+                warn!("Couldn't return used descriptors to the ring");
             }
         }
 
@@ -292,7 +293,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
             }
 
             _ => {
-                dbg!("unhandled device_event:", device_event);
+                warn!("unhandled device_event: {}", device_event);
                 return Err(Error::HandleEventUnknownEvent.into());
             }
         }

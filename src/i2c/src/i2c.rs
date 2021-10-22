@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use log::info;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 
@@ -452,7 +453,7 @@ impl<D: I2cDevice> I2cMap<D> {
                 device_map[*addr as usize] = i as u32;
             }
 
-            println!(
+            info!(
                 "Added I2C master with bus id: {:x} for devices",
                 adapter.adapter_no(),
             );

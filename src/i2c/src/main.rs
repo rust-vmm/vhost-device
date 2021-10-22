@@ -8,6 +8,7 @@
 mod i2c;
 mod vhu_i2c;
 
+use log::{info, warn};
 use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
@@ -175,15 +176,15 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(
 
             match daemon.wait() {
                 Ok(()) => {
-                    println!("Stopping cleanly.");
+                    info!("Stopping cleanly.");
                 }
                 Err(vhost_user_backend::Error::HandleRequest(
                     vhost_user::Error::PartialMessage,
                 )) => {
-                    println!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
+                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
                 }
                 Err(e) => {
-                    println!("Error running daemon: {:?}", e);
+                    warn!("Error running daemon: {:?}", e);
                 }
             }
 

@@ -122,9 +122,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.103"
+version = "0.2.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd8f7255a17a627354f321ef0055d63b898c6fb27eff628af4d1b66b7331edf6"
+checksum = "869d572136620d55835903746bcb5cdc54cb2851fd0aeec53220b4bb65ef3013"
 
 [[package]]
 name = "linked-hash-map"
@@ -263,7 +263,7 @@ dependencies = [
  "bitflags",
  "libc",
  "vm-memory",
- "vmm-sys-util 0.8.0",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -278,7 +278,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "vm-memory",
- "vmm-sys-util 0.9.0",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -293,7 +293,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util 0.9.0",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -309,7 +309,7 @@ source = "git+https://github.com/rust-vmm/vm-virtio?rev=6013dd9#6013dd91b2e6eb77
 dependencies = [
  "log",
  "vm-memory",
- "vmm-sys-util 0.8.0",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -321,16 +321,6 @@ dependencies = [
  "arc-swap",
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "vmm-sys-util"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01cf11afbc4ebc0d5c7a7748a77d19e2042677fc15faa2f4ccccb27c18a60605"
-dependencies = [
- "bitflags",
- "libc",
 ]
 
 [[package]]

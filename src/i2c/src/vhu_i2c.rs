@@ -8,8 +8,9 @@
 use log::warn;
 use std::mem::size_of;
 use std::sync::Arc;
-use std::{convert, error, fmt, io};
+use std::{convert, io};
 
+use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
@@ -27,36 +28,29 @@ const NUM_QUEUES: usize = 1;
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[derive(Debug)]
+#[derive(Debug, ThisError)]
 /// Errors related to vhost-device-i2c daemon.
 pub enum Error {
-    /// Failed to handle event other than input event.
+    #[error("Failed to handle event, didn't match EPOLLIN")]
     HandleEventNotEpollIn,
-    /// Failed to handle unknown event.
-    HandleEventUnknownEvent,
-    /// Guest gave us a write only descriptor that protocol says to read from.
+    #[error("Failed to handle unknown event")]
+    HandleEventUnknown,
+    #[error("Received unexpected write only descriptor")]
     UnexpectedWriteOnlyDescriptor,
-    /// Guest gave us a readable descriptor that protocol says to only write to.
-    UnexpectedReadDescriptor,
-    /// Invalid descriptor count
+    #[error("Received unexpected readable descriptor")]
+    UnexpectedReadableDescriptor,
+    #[error("Invalid descriptor count")]
     UnexpectedDescriptorCount,
-    /// Invalid descriptor
+    #[error("Invalid descriptor size")]
     UnexpectedDescriptorSize,
-    /// Descriptor not found
+    #[error("Descriptor not found")]
     DescriptorNotFound,
-    /// Descriptor read failed
+    #[error("Descriptor read failed")]
     DescriptorReadFailed,
-    /// Descriptor write failed
+    #[error("Descriptor write failed")]
     DescriptorWriteFailed,
-    /// Descriptor send failed
-    DescriptorSendFailed,
-}
-impl error::Error for Error {}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost-device-i2c error: {:?}", self)
-    }
+    #[error("Failed to send notification")]
+    NotificationFailed,
 }
 
 impl convert::From<Error> for io::Error {
@@ -143,7 +137,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
 
             let desc_in_hdr = descriptors[2];
             if !desc_in_hdr.is_write_only() {
-                return Err(Error::UnexpectedReadDescriptor);
+                return Err(Error::UnexpectedReadableDescriptor);
             }
 
             if desc_in_hdr.len() as usize != size_of::<u8>() {
@@ -217,7 +211,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
         // Send notification once all the requests are processed
         vring
             .signal_used_queue()
-            .map_err(|_| Error::DescriptorSendFailed)?;
+            .map_err(|_| Error::NotificationFailed)?;
         Ok(true)
     }
 }
@@ -294,7 +288,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
             _ => {
                 warn!("unhandled device_event: {}", device_event);
-                return Err(Error::HandleEventUnknownEvent.into());
+                return Err(Error::HandleEventUnknown.into());
             }
         }
         Ok(false)

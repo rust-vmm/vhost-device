@@ -240,8 +240,8 @@ pub struct I2cReq {
 /// mock implementation for the I2C driver so that we can test the I2C
 /// functionality without the need of a physical device.
 pub trait I2cDevice {
-    // Open the device specified by path.
-    fn open(device_path: String) -> Result<Self>
+    // Open the device specified by the adapter number.
+    fn open(adapter_no: u32) -> Result<Self>
     where
         Self: Sized;
 
@@ -256,21 +256,27 @@ pub trait I2cDevice {
 
     // Corresponds to the I2C_SLAVE ioctl call.
     fn slave(&self, addr: u64) -> i32;
+
+    // Returns the adapter number corresponding to this device.
+    fn adapter_no(&self) -> u32;
 }
 
 /// A physical I2C device. This structure can only be initialized on hosts
 /// where `/dev/i2c-XX` is available.
 pub struct PhysDevice {
     file: File,
+    adapter_no: u32,
 }
 
 impl I2cDevice for PhysDevice {
-    fn open(device_path: String) -> Result<Self> {
+    fn open(adapter_no: u32) -> Result<Self> {
+        let device_path = format!("/dev/i2c-{}", adapter_no);
         Ok(PhysDevice {
             file: OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(device_path)?,
+            adapter_no,
         })
     }
 
@@ -289,6 +295,10 @@ impl I2cDevice for PhysDevice {
     fn slave(&self, addr: u64) -> i32 {
         unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, addr as c_ulong) }
     }
+
+    fn adapter_no(&self) -> u32 {
+        self.adapter_no
+    }
 }
 
 pub struct I2cAdapter<D: I2cDevice> {
@@ -298,19 +308,16 @@ pub struct I2cAdapter<D: I2cDevice> {
 }
 
 impl<D: I2cDevice> I2cAdapter<D> {
-    // Creates a new adapter corresponding to the specified number.
-    fn new(adapter_no: u32) -> Result<I2cAdapter<D>> {
-        let i2cdev = format!("/dev/i2c-{}", adapter_no);
+    // Creates a new adapter corresponding to `device`.
+    fn new(mut device: D) -> Result<I2cAdapter<D>> {
         let func: u64 = I2C_FUNC_SMBUS_ALL;
-        let mut device = D::open(i2cdev)?;
-        let smbus;
-
         let ret = device.funcs(func);
         if ret == -1 {
             println!("Failed to get I2C function");
             return errno_result();
         }
 
+        let smbus;
         if (func & I2C_FUNC_I2C) != 0 {
             smbus = false;
         } else if (func & I2C_FUNC_SMBUS_ALL) != 0 {
@@ -321,8 +328,8 @@ impl<D: I2cDevice> I2cAdapter<D> {
         }
 
         Ok(I2cAdapter {
+            adapter_no: device.adapter_no(),
             device,
-            adapter_no,
             smbus,
         })
     }
@@ -436,7 +443,8 @@ impl<D: I2cDevice> I2cMap<D> {
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
 
         for (i, device_cfg) in device_config.inner.iter().enumerate() {
-            let adapter = I2cAdapter::new(device_cfg.adapter_no)?;
+            let device = D::open(device_cfg.adapter_no)?;
+            let adapter = I2cAdapter::new(device)?;
 
             // Check that all addresses corresponding to the adapter are valid.
             for addr in &device_cfg.addr {
@@ -489,14 +497,18 @@ pub mod tests {
         rdwr_result: i32,
         smbus_result: i32,
         slave_result: i32,
+        adapter_no: u32,
     }
 
     impl I2cDevice for DummyDevice {
-        fn open(_device_path: String) -> Result<Self>
+        fn open(adapter_no: u32) -> Result<Self>
         where
             Self: Sized,
         {
-            Ok(DummyDevice::default())
+            Ok(DummyDevice {
+                adapter_no,
+                ..Default::default()
+            })
         }
 
         fn funcs(&mut self, _func: u64) -> i32 {
@@ -513,6 +525,10 @@ pub mod tests {
 
         fn slave(&self, _addr: u64) -> i32 {
             self.slave_result
+        }
+
+        fn adapter_no(&self) -> u32 {
+            self.adapter_no
         }
     }
 
@@ -532,9 +548,9 @@ pub mod tests {
         let i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         assert_eq!(i2c_map.adapters.len(), 3);
-        assert_eq!(i2c_map.adapters[0].adapter_no, 1);
-        assert_eq!(i2c_map.adapters[1].adapter_no, 2);
-        assert_eq!(i2c_map.adapters[2].adapter_no, 5);
+        assert_eq!(i2c_map.adapters[0].adapter_no(), 1);
+        assert_eq!(i2c_map.adapters[1].adapter_no(), 2);
+        assert_eq!(i2c_map.adapters[2].adapter_no(), 5);
 
         assert_eq!(i2c_map.device_map[4], 0);
         assert_eq!(i2c_map.device_map[32], 1);

@@ -182,6 +182,14 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(config: I2cConfiguration)
         let i2c_map = i2c_map.clone();
 
         let handle = spawn(move || loop {
+            // A separate thread is spawned for each socket and can connect to a separate guest.
+            // These are run in an infinite loop to not require the daemon to be restarted once a
+            // guest exits.
+            //
+            // There isn't much value in complicating code here to return an error from the
+            // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
+            // trouble to other threads/guests or the main() function and should be safe for the
+            // daemon.
             let backend = Arc::new(RwLock::new(
                 VhostUserI2cBackend::new(i2c_map.clone()).unwrap(),
             ));
@@ -211,12 +219,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(config: I2cConfiguration)
             }
 
             // No matter the result, we need to shut down the worker thread.
-            backend
-                .read()
-                .unwrap()
-                .exit_event
-                .write(1)
-                .expect("Shutting down worker thread");
+            backend.read().unwrap().exit_event.write(1).unwrap();
         });
 
         handles.push(handle);

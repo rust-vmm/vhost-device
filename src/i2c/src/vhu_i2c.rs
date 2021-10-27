@@ -51,6 +51,8 @@ pub enum Error {
     DescriptorWriteFailed,
     #[error("Failed to send notification")]
     NotificationFailed,
+    #[error("Failed to create new EventFd: {0:?}")]
+    EventFdFailed(std::io::Error),
 }
 
 impl convert::From<Error> for io::Error {
@@ -94,7 +96,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
             i2c_map,
             event_idx: false,
             mem: None,
-            exit_event: EventFd::new(EFD_NONBLOCK).expect("Creating exit eventfd"),
+            exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdFailed)?,
         })
     }
 
@@ -295,7 +297,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        Some(self.exit_event.try_clone().expect("Cloning exit eventfd"))
+        self.exit_event.try_clone().ok()
     }
 }
 

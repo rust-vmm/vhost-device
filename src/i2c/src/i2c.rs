@@ -553,6 +553,23 @@ pub mod tests {
     }
 
     #[test]
+    fn test_funcs() {
+        let i2c_device = DummyDevice {
+            funcs_result: I2C_FUNC_SMBUS_ALL as i32,
+            ..Default::default()
+        };
+        let adapter = I2cAdapter::new(i2c_device).unwrap();
+        assert_eq!(adapter.smbus, true);
+
+        let i2c_device = DummyDevice {
+            funcs_result: I2C_FUNC_I2C as i32,
+            ..Default::default()
+        };
+        let adapter = I2cAdapter::new(i2c_device).unwrap();
+        assert_eq!(adapter.smbus, false);
+    }
+
+    #[test]
     fn test_i2c_map() {
         let adapter_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
         let i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();

@@ -5,11 +5,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use log::info;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 
-use libc::{c_ulong, ioctl, EINVAL};
-use vmm_sys_util::errno::{errno_result, Error, Result};
+use libc::{c_ulong, ioctl};
+use thiserror::Error as ThisError;
+use vmm_sys_util::errno::Error as IoError;
 
 use super::AdapterConfig;
 
@@ -19,6 +21,27 @@ use super::AdapterConfig;
 type IoctlRequest = libc::c_int;
 #[cfg(not(target_env = "musl"))]
 type IoctlRequest = c_ulong;
+
+type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
+/// Errors related to low level i2c helpers
+pub enum Error {
+    #[error("Incorrect message length for {0} operation: {1}")]
+    MessageLengthInvalid(&'static str, usize),
+    #[error("Invalid SMBUS command: {0}")]
+    SMBusCommandInvalid(u32),
+    #[error("Invalid SMBus transfer, request-count: {0}, req[0].len: {1}, req[1].len: {2}")]
+    SMBusTransferInvalid(usize, u16, u16),
+    #[error("Failed to open adapter at /dev/i2c-{0}")]
+    DeviceOpenFailed(u32),
+    #[error("Ioctl command failed for {0} operation: {1}")]
+    IoctlFailure(&'static str, IoError),
+    #[error("Invalid Adapter function: {0:x}")]
+    AdapterFunctionInvalid(u64),
+    #[error("Invalid Client Address")]
+    ClientAddressInvalid,
+}
 
 /// Linux I2C/SMBUS definitions
 /// IOCTL commands
@@ -147,11 +170,7 @@ impl I2cSmbusIoctlData {
                 if (reqs[0].flags & I2C_M_RD) != 0 {
                     // Special Read requests, reqs[0].len can be 0 or 1 only.
                     if reqs[0].len > 1 {
-                        println!(
-                            "Incorrect message length for read operation: {}",
-                            reqs[0].len
-                        );
-                        return Err(Error::new(EINVAL));
+                        return Err(Error::MessageLengthInvalid("read", reqs[0].len as usize));
                     }
                     read_write = I2C_SMBUS_READ;
                 } else {
@@ -173,11 +192,7 @@ impl I2cSmbusIoctlData {
                         I2C_SMBUS_WORD_DATA
                     }
                     _ => {
-                        println!(
-                            "Message length not supported for write operation: {}",
-                            reqs[0].len
-                        );
-                        return Err(Error::new(EINVAL));
+                        return Err(Error::MessageLengthInvalid("write", reqs[0].len as usize));
                     }
                 }
             }
@@ -195,11 +210,11 @@ impl I2cSmbusIoctlData {
                     || (reqs[0].len != 1)
                     || (reqs[1].len > 2)
                 {
-                    println!(
-                        "Expecting a valid read smbus transfer: {:?}",
-                        (reqs.len(), reqs[0].len, reqs[1].len)
-                    );
-                    return Err(Error::new(EINVAL));
+                    return Err(Error::SMBusTransferInvalid(
+                        reqs.len(),
+                        reqs[0].len,
+                        reqs[1].len,
+                    ));
                 }
                 read_write = I2C_SMBUS_READ;
 
@@ -211,8 +226,11 @@ impl I2cSmbusIoctlData {
             }
 
             _ => {
-                println!("Invalid number of messages for smbus xfer: {}", reqs.len());
-                return Err(Error::new(EINVAL));
+                return Err(Error::SMBusTransferInvalid(
+                    reqs.len(),
+                    reqs[0].len,
+                    reqs[1].len,
+                ));
             }
         }
 
@@ -246,16 +264,16 @@ pub trait I2cDevice {
         Self: Sized;
 
     // Corresponds to the I2C_FUNCS ioctl call.
-    fn funcs(&mut self, func: u64) -> i32;
+    fn funcs(&mut self, func: u64) -> Result<()>;
 
     // Corresponds to the I2C_RDWR ioctl call.
-    fn rdwr(&self, data: &I2cRdwrIoctlData) -> i32;
+    fn rdwr(&self, data: &I2cRdwrIoctlData) -> Result<()>;
 
     // Corresponds to the I2C_SMBUS ioctl call.
-    fn smbus(&self, data: &I2cSmbusIoctlData) -> i32;
+    fn smbus(&self, data: &I2cSmbusIoctlData) -> Result<()>;
 
     // Corresponds to the I2C_SLAVE ioctl call.
-    fn slave(&self, addr: u64) -> i32;
+    fn slave(&self, addr: u64) -> Result<()>;
 
     // Returns the adapter number corresponding to this device.
     fn adapter_no(&self) -> u32;
@@ -275,25 +293,50 @@ impl I2cDevice for PhysDevice {
             file: OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(device_path)?,
+                .open(device_path)
+                .map_err(|_| Error::DeviceOpenFailed(adapter_no))?,
             adapter_no,
         })
     }
 
-    fn funcs(&mut self, func: u64) -> i32 {
-        unsafe { ioctl(self.file.as_raw_fd(), I2C_FUNCS, &func) }
+    fn funcs(&mut self, func: u64) -> Result<()> {
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_FUNCS, &func) };
+
+        if ret == -1 {
+            Err(Error::IoctlFailure("funcs", IoError::last()))
+        } else {
+            Ok(())
+        }
     }
 
-    fn rdwr(&self, data: &I2cRdwrIoctlData) -> i32 {
-        unsafe { ioctl(self.file.as_raw_fd(), I2C_RDWR, data) }
+    fn rdwr(&self, data: &I2cRdwrIoctlData) -> Result<()> {
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_RDWR, data) };
+
+        if ret == -1 {
+            Err(Error::IoctlFailure("rdwr", IoError::last()))
+        } else {
+            Ok(())
+        }
     }
 
-    fn smbus(&self, data: &I2cSmbusIoctlData) -> i32 {
-        unsafe { ioctl(self.file.as_raw_fd(), I2C_SMBUS, data) }
+    fn smbus(&self, data: &I2cSmbusIoctlData) -> Result<()> {
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SMBUS, data) };
+
+        if ret == -1 {
+            Err(Error::IoctlFailure("smbus", IoError::last()))
+        } else {
+            Ok(())
+        }
     }
 
-    fn slave(&self, addr: u64) -> i32 {
-        unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, addr as c_ulong) }
+    fn slave(&self, addr: u64) -> Result<()> {
+        let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, addr as c_ulong) };
+
+        if ret == -1 {
+            Err(Error::IoctlFailure("slave", IoError::last()))
+        } else {
+            Ok(())
+        }
     }
 
     fn adapter_no(&self) -> u32 {
@@ -311,11 +354,8 @@ impl<D: I2cDevice> I2cAdapter<D> {
     // Creates a new adapter corresponding to `device`.
     fn new(mut device: D) -> Result<I2cAdapter<D>> {
         let func: u64 = I2C_FUNC_SMBUS_ALL;
-        let ret = device.funcs(func);
-        if ret == -1 {
-            println!("Failed to get I2C function");
-            return errno_result();
-        }
+
+        device.funcs(func)?;
 
         let smbus;
         if (func & I2C_FUNC_I2C) != 0 {
@@ -323,8 +363,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
         } else if (func & I2C_FUNC_SMBUS_ALL) != 0 {
             smbus = true;
         } else {
-            println!("Invalid functionality {:x}", func);
-            return Err(Error::new(EINVAL));
+            return Err(Error::AdapterFunctionInvalid(func));
         }
 
         Ok(I2cAdapter {
@@ -338,7 +377,6 @@ impl<D: I2cDevice> I2cAdapter<D> {
     fn i2c_transfer(&self, reqs: &mut [I2cReq]) -> Result<()> {
         let mut msgs: Vec<I2cMsg> = Vec::with_capacity(reqs.len());
         let len = reqs.len();
-        let addr = reqs[0].addr;
 
         for req in reqs {
             msgs.push(I2cMsg {
@@ -354,27 +392,14 @@ impl<D: I2cDevice> I2cAdapter<D> {
             nmsgs: len as u32,
         };
 
-        let ret = self.device.rdwr(&data);
-        if ret == -1 {
-            println!("Failed to transfer i2c data to device addr to {:x}", addr);
-            errno_result()
-        } else {
-            Ok(())
-        }
+        self.device.rdwr(&data)
     }
 
     /// Perform I2C_SMBUS transfer
     fn smbus_transfer(&self, reqs: &mut [I2cReq]) -> Result<()> {
         let smbus_data = I2cSmbusIoctlData::new(reqs)?;
 
-        let ret = self.device.smbus(&smbus_data);
-        if ret == -1 {
-            println!(
-                "Failed to transfer smbus data to device addr to {:x}",
-                reqs[0].addr
-            );
-            return errno_result();
-        }
+        self.device.smbus(&smbus_data)?;
 
         if smbus_data.read_write == I2C_SMBUS_READ {
             unsafe {
@@ -387,8 +412,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
                     }
 
                     _ => {
-                        println!("Invalid SMBUS command: {}", smbus_data.size);
-                        return Err(Error::new(EINVAL));
+                        return Err(Error::SMBusCommandInvalid(smbus_data.size));
                     }
                 }
             }
@@ -406,14 +430,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
 
     /// Sets device's address for an I2C adapter.
     fn set_device_addr(&self, addr: usize) -> Result<()> {
-        let ret = self.device.slave(addr as u64);
-
-        if ret == -1 {
-            println!("Failed to set device addr to {:x}", addr);
-            errno_result()
-        } else {
-            Ok(())
-        }
+        self.device.slave(addr as u64)
     }
 
     fn transfer(&self, reqs: &mut [I2cReq]) -> Result<()> {
@@ -452,7 +469,7 @@ impl<D: I2cDevice> I2cMap<D> {
                 device_map[*addr as usize] = i as u32;
             }
 
-            println!(
+            info!(
                 "Added I2C master with bus id: {:x} for devices",
                 adapter.adapter_no(),
             );
@@ -474,7 +491,7 @@ impl<D: I2cDevice> I2cMap<D> {
 
         // This can happen a lot while scanning the bus, don't print any errors.
         if index == I2C_INVALID_ADAPTER {
-            return Err(Error::new(EINVAL));
+            return Err(Error::ClientAddressInvalid);
         }
 
         // get the corresponding adapter based on the device config.
@@ -491,12 +508,12 @@ pub mod tests {
     use super::*;
     use std::convert::TryFrom;
 
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct DummyDevice {
-        funcs_result: i32,
-        rdwr_result: i32,
-        smbus_result: i32,
-        slave_result: i32,
+        funcs_result: Result<()>,
+        rdwr_result: Result<()>,
+        smbus_result: Result<()>,
+        slave_result: Result<()>,
         adapter_no: u32,
     }
 
@@ -507,39 +524,32 @@ pub mod tests {
         {
             Ok(DummyDevice {
                 adapter_no,
-                ..Default::default()
+                funcs_result: Ok(()),
+                rdwr_result: Ok(()),
+                smbus_result: Ok(()),
+                slave_result: Ok(()),
             })
         }
 
-        fn funcs(&mut self, _func: u64) -> i32 {
+        fn funcs(&mut self, _func: u64) -> Result<()> {
             self.funcs_result
         }
 
-        fn rdwr(&self, _data: &I2cRdwrIoctlData) -> i32 {
+        fn rdwr(&self, _data: &I2cRdwrIoctlData) -> Result<()> {
             self.rdwr_result
         }
 
-        fn smbus(&self, _data: &I2cSmbusIoctlData) -> i32 {
+        fn smbus(&self, _data: &I2cSmbusIoctlData) -> Result<()> {
             self.smbus_result
         }
 
-        fn slave(&self, _addr: u64) -> i32 {
+        fn slave(&self, _addr: u64) -> Result<()> {
             self.slave_result
         }
 
         fn adapter_no(&self) -> u32 {
             self.adapter_no
         }
-    }
-
-    #[test]
-    fn test_i2c_map_duplicate_device4() {
-        assert!(AdapterConfig::try_from("1:4,2:32:21,5:4:23").is_err());
-    }
-
-    #[test]
-    fn test_duplicated_adapter_no() {
-        assert!(AdapterConfig::try_from("1:4,1:32:21,5:10:23").is_err());
     }
 
     #[test]
@@ -617,6 +627,7 @@ pub mod tests {
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
         i2c_map.adapters[0].smbus = true;
 
+        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs: Vec<I2cReq> = vec![
             I2cReq {
                 addr: 0x3,
@@ -632,12 +643,10 @@ pub mod tests {
                 buf: [3, 4].to_vec(),
             },
         ];
-
-        // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
-        // TODO: check the actual error once we have an error type defined.
-        // TODO-continued: otherwise this test is unreliable because it might
-        // fail for another reason than the expected one.
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 1, 2)
+        );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs = vec![
@@ -655,7 +664,10 @@ pub mod tests {
                 buf: [3, 4].to_vec(),
             },
         ];
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 1, 2)
+        );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs = vec![
@@ -673,7 +685,10 @@ pub mod tests {
                 buf: [3, 4].to_vec(),
             },
         ];
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 2, 2)
+        );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation
         let mut reqs = vec![
@@ -691,6 +706,9 @@ pub mod tests {
                 buf: [3, 4, 5].to_vec(),
             },
         ];
-        assert!(i2c_map.transfer(&mut reqs).is_err());
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::SMBusTransferInvalid(2, 1, 3)
+        );
     }
 }

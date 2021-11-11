@@ -178,44 +178,65 @@ impl SmbusMsg {
         let mut data = I2cSmbusData {
             block: [0; I2C_SMBUS_BLOCK_MAX + 2],
         };
-        let read_write: u8;
-        let mut smbus_data = None;
 
         // Write messages have only one request message, while read messages
         // will have two (except for few special cases of I2C_SMBUS_QUICK and
         // I2C_SMBUS_BYTE, where only one request messages is sent).
-        let size = match reqs.len() {
+        match reqs.len() {
             // Write requests (with some exceptions as mentioned above)
             1 => {
-                if (reqs[0].flags & I2C_M_RD) != 0 {
-                    // Special Read requests, reqs[0].len can be 0 or 1 only.
-                    if reqs[0].len > 1 {
-                        return Err(Error::MessageLengthInvalid("read", reqs[0].len as usize));
-                    }
-                    read_write = I2C_SMBUS_READ;
-                } else {
-                    read_write = I2C_SMBUS_WRITE;
-                }
+                let read_write = match reqs[0].flags & I2C_M_RD {
+                    0 => I2C_SMBUS_WRITE,
+                    _ => I2C_SMBUS_READ,
+                };
 
                 match reqs[0].len {
                     // Special Read requests
-                    0 => I2C_SMBUS_QUICK,
-                    1 => I2C_SMBUS_BYTE,
+                    0 => Ok(SmbusMsg {
+                        read_write,
+                        command: reqs[0].buf[0],
+                        size: I2C_SMBUS_QUICK,
+                        data: None,
+                    }),
+
+                    1 => Ok(SmbusMsg {
+                        read_write,
+                        command: reqs[0].buf[0],
+                        size: I2C_SMBUS_BYTE,
+                        data: None,
+                    }),
 
                     // Write requests
                     2 => {
-                        data.byte = reqs[0].buf[1];
-                        smbus_data = Some(data);
-                        I2C_SMBUS_BYTE_DATA
+                        if read_write == I2C_SMBUS_READ {
+                            // Special Read requests, reqs[0].len can be 0 or 1 only.
+                            Err(Error::MessageLengthInvalid("read", 2))
+                        } else {
+                            data.byte = reqs[0].buf[1];
+                            Ok(SmbusMsg {
+                                read_write,
+                                command: reqs[0].buf[0],
+                                size: I2C_SMBUS_BYTE_DATA,
+                                data: Some(data),
+                            })
+                        }
                     }
+
                     3 => {
-                        data.word = reqs[0].buf[1] as u16 | ((reqs[0].buf[2] as u16) << 8);
-                        smbus_data = Some(data);
-                        I2C_SMBUS_WORD_DATA
+                        if read_write == I2C_SMBUS_READ {
+                            // Special Read requests, reqs[0].len can be 0 or 1 only.
+                            Err(Error::MessageLengthInvalid("read", 3))
+                        } else {
+                            data.word = reqs[0].buf[1] as u16 | ((reqs[0].buf[2] as u16) << 8);
+                            Ok(SmbusMsg {
+                                read_write,
+                                command: reqs[0].buf[0],
+                                size: I2C_SMBUS_WORD_DATA,
+                                data: Some(data),
+                            })
+                        }
                     }
-                    _ => {
-                        return Err(Error::MessageLengthInvalid("write", reqs[0].len as usize));
-                    }
+                    _ => Err(Error::MessageLengthInvalid("write", reqs[0].len as usize)),
                 }
             }
 
@@ -232,37 +253,31 @@ impl SmbusMsg {
                     || (reqs[0].len != 1)
                     || (reqs[1].len > 2)
                 {
-                    return Err(Error::SMBusTransferInvalid(
+                    Err(Error::SMBusTransferInvalid(
                         reqs.len(),
                         reqs[0].len,
                         reqs[1].len,
-                    ));
-                }
-                read_write = I2C_SMBUS_READ;
-                smbus_data = Some(data);
-
-                if reqs[1].len == 1 {
-                    I2C_SMBUS_BYTE_DATA
+                    ))
                 } else {
-                    I2C_SMBUS_WORD_DATA
+                    Ok(SmbusMsg {
+                        read_write: I2C_SMBUS_READ,
+                        command: reqs[0].buf[0],
+                        size: if reqs[1].len == 1 {
+                            I2C_SMBUS_BYTE_DATA
+                        } else {
+                            I2C_SMBUS_WORD_DATA
+                        },
+                        data: Some(data),
+                    })
                 }
             }
 
-            _ => {
-                return Err(Error::SMBusTransferInvalid(
-                    reqs.len(),
-                    reqs[0].len,
-                    reqs[1].len,
-                ));
-            }
-        };
-
-        Ok(SmbusMsg {
-            read_write,
-            command: reqs[0].buf[0],
-            size,
-            data: smbus_data,
-        })
+            _ => Err(Error::SMBusTransferInvalid(
+                reqs.len(),
+                reqs[0].len,
+                reqs[1].len,
+            )),
+        }
     }
 }
 

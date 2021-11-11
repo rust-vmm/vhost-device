@@ -86,7 +86,6 @@ unsafe impl ByteValued for VirtioI2cInHdr {}
 pub struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
-    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     pub exit_event: EventFd,
 }
 
@@ -95,7 +94,6 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
         Ok(VhostUserI2cBackend {
             i2c_map,
             event_idx: false,
-            mem: None,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdFailed)?,
         })
     }
@@ -249,9 +247,8 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
     fn update_memory(
         &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> VhostUserBackendResult<()> {
-        self.mem = Some(mem);
         Ok(())
     }
 

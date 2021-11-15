@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use log::info;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::AsRawFd;
 
@@ -446,11 +447,10 @@ impl<D: I2cDevice> I2cAdapter<D> {
 
 /// I2C map and helpers
 pub(crate) const MAX_I2C_VDEV: usize = 1 << 7;
-const I2C_INVALID_ADAPTER: u32 = 0xFFFFFFFF;
 
 pub struct I2cMap<D: I2cDevice> {
     adapters: Vec<I2cAdapter<D>>,
-    device_map: [u32; MAX_I2C_VDEV],
+    device_map: HashMap<u16, usize>,
 }
 
 impl<D: I2cDevice> I2cMap<D> {
@@ -458,7 +458,7 @@ impl<D: I2cDevice> I2cMap<D> {
     where
         Self: Sized,
     {
-        let mut device_map: [u32; MAX_I2C_VDEV] = [I2C_INVALID_ADAPTER; MAX_I2C_VDEV];
+        let mut device_map = HashMap::new();
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
 
         for (i, device_cfg) in device_config.inner.iter().enumerate() {
@@ -468,7 +468,7 @@ impl<D: I2cDevice> I2cMap<D> {
             // Check that all addresses corresponding to the adapter are valid.
             for addr in &device_cfg.addr {
                 adapter.set_device_addr(*addr as usize)?;
-                device_map[*addr as usize] = i as u32;
+                device_map.insert(*addr, i);
             }
 
             info!(
@@ -486,21 +486,21 @@ impl<D: I2cDevice> I2cMap<D> {
     }
 
     pub fn transfer(&self, reqs: &mut [I2cReq]) -> Result<()> {
-        let device = reqs[0].addr as usize;
+        let device = reqs[0].addr;
 
         // identify the device in the device_map
-        let index = self.device_map[device];
+        let index = match self.device_map.get(&device) {
+            Some(&index) => index,
 
-        // This can happen a lot while scanning the bus, don't print any errors.
-        if index == I2C_INVALID_ADAPTER {
-            return Err(Error::ClientAddressInvalid);
-        }
+            // This can happen a lot while scanning the bus, don't print any errors.
+            None => return Err(Error::ClientAddressInvalid),
+        };
 
         // get the corresponding adapter based on the device config.
         let adapter = &self.adapters[index as usize];
 
         // Set device's address
-        adapter.set_device_addr(device)?;
+        adapter.set_device_addr(device as usize)?;
         adapter.transfer(reqs)
     }
 }
@@ -590,11 +590,11 @@ pub mod tests {
         assert_eq!(i2c_map.adapters[1].adapter_no(), 2);
         assert_eq!(i2c_map.adapters[2].adapter_no(), 5);
 
-        assert_eq!(i2c_map.device_map[4], 0);
-        assert_eq!(i2c_map.device_map[32], 1);
-        assert_eq!(i2c_map.device_map[21], 1);
-        assert_eq!(i2c_map.device_map[10], 2);
-        assert_eq!(i2c_map.device_map[23], 2);
+        assert_eq!(i2c_map.device_map.get(&4), Some(&0));
+        assert_eq!(i2c_map.device_map.get(&32), Some(&1));
+        assert_eq!(i2c_map.device_map.get(&21), Some(&1));
+        assert_eq!(i2c_map.device_map.get(&10), Some(&2));
+        assert_eq!(i2c_map.device_map.get(&23), Some(&2));
     }
 
     #[test]

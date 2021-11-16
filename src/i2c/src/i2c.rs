@@ -693,7 +693,7 @@ pub mod tests {
             },
             I2cReq {
                 addr: 0x3,
-                flags: 1,
+                flags: I2C_M_RD,
                 len: 2,
                 buf: [3, 4].to_vec(),
             },
@@ -712,13 +712,13 @@ pub mod tests {
             I2cReq {
                 addr: 0x3,
                 // Will cause failure
-                flags: 0x1,
+                flags: I2C_M_RD,
                 len: 1,
                 buf: [34].to_vec(),
             },
             I2cReq {
                 addr: 0x3,
-                flags: 1,
+                flags: I2C_M_RD,
                 len: 2,
                 buf: [3, 4].to_vec(),
             },
@@ -760,7 +760,7 @@ pub mod tests {
             },
             I2cReq {
                 addr: 0x3,
-                flags: 1,
+                flags: I2C_M_RD,
                 len: 2,
                 buf: [3, 4].to_vec(),
             },
@@ -780,7 +780,7 @@ pub mod tests {
             },
             I2cReq {
                 addr: 0x3,
-                flags: 1,
+                flags: I2C_M_RD,
                 // Will cause failure
                 len: 3,
                 buf: [3, 4, 5].to_vec(),

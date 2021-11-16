@@ -18,6 +18,7 @@ use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
 use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
+use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 use crate::i2c::*;
@@ -255,11 +256,11 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
     fn handle_event(
         &mut self,
         device_event: u16,
-        evset: epoll::Events,
+        evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
     ) -> VhostUserBackendResult<bool> {
-        if evset != epoll::Events::EPOLLIN {
+        if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 

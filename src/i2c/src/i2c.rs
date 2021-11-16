@@ -203,7 +203,7 @@ impl SmbusMsg {
                         read_write,
                         command: reqs[0].buf[0],
                         size: I2C_SMBUS_BYTE,
-                        data: None,
+                        data: Some(data),
                     }),
 
                     // Write requests
@@ -456,14 +456,12 @@ impl<D: I2cDevice> I2cAdapter<D> {
         self.device.smbus(&mut msg)?;
 
         if msg.read_write == I2C_SMBUS_READ {
-            // data is guaranteed to be valid here.
-            let data = msg.data.unwrap();
-
             match msg.size {
-                I2C_SMBUS_BYTE => reqs[0].buf[0] = data.read_byte(),
-                I2C_SMBUS_BYTE_DATA => reqs[1].buf[0] = data.read_byte(),
+                I2C_SMBUS_QUICK => {}
+                I2C_SMBUS_BYTE => reqs[0].buf[0] = msg.data.unwrap().read_byte(),
+                I2C_SMBUS_BYTE_DATA => reqs[1].buf[0] = msg.data.unwrap().read_byte(),
                 I2C_SMBUS_WORD_DATA => {
-                    let word = data.read_word();
+                    let word = msg.data.unwrap().read_word();
 
                     reqs[1].buf[0] = (word & 0xff) as u8;
                     reqs[1].buf[1] = (word >> 8) as u8;

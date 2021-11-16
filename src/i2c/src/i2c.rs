@@ -604,11 +604,24 @@ pub mod tests {
             self.funcs_result
         }
 
-        fn rdwr(&self, _reqs: &mut [I2cReq]) -> Result<()> {
+        fn rdwr(&self, reqs: &mut [I2cReq]) -> Result<()> {
+            // Update buffer of each write-buffer with index + 1 value.
+            for req in reqs {
+                if (req.flags & I2C_M_RD) != 0 {
+                    for (j, byte) in req.buf.iter_mut().enumerate() {
+                        *byte = j as u8 + 1;
+                    }
+                }
+            }
+
             self.rdwr_result
         }
 
-        fn smbus(&self, _msg: &mut SmbusMsg) -> Result<()> {
+        fn smbus(&self, msg: &mut SmbusMsg) -> Result<()> {
+            // Update data unconditionally to 1 and 2.
+            if let Some(data) = &mut msg.data {
+                data.word = 0x0201;
+            }
             self.smbus_result
         }
 
@@ -618,6 +631,17 @@ pub mod tests {
 
         fn adapter_no(&self) -> u32 {
             self.adapter_no
+        }
+    }
+
+    fn verify_rdwr_data(reqs: &[I2cReq]) {
+        // Match what's done by DummyDevice::rdwr()
+        for req in reqs {
+            if (req.flags & I2C_M_RD) != 0 {
+                for (i, byte) in req.buf.iter().enumerate() {
+                    assert_eq!(*byte, i as u8 + 1);
+                }
+            }
         }
     }
 
@@ -671,14 +695,42 @@ pub mod tests {
 
         i2c_map.adapters[0].smbus = false;
 
-        let mut reqs: Vec<I2cReq> = vec![I2cReq {
-            addr: 0x3,
-            flags: 0,
-            len: 2,
-            buf: vec![7, 4],
-        }];
+        // Read-Write-Read-Write-Read block
+        let mut reqs: Vec<I2cReq> = vec![
+            I2cReq {
+                addr: 0x3,
+                flags: I2C_M_RD,
+                len: 20,
+                buf: vec![0; 20],
+            },
+            I2cReq {
+                addr: 0x3,
+                flags: 0,
+                len: 10,
+                buf: vec![0; 10],
+            },
+            I2cReq {
+                addr: 0x3,
+                flags: I2C_M_RD,
+                len: 25,
+                buf: vec![0; 25],
+            },
+            I2cReq {
+                addr: 0x3,
+                flags: 0,
+                len: 11,
+                buf: vec![0; 11],
+            },
+            I2cReq {
+                addr: 0x3,
+                flags: I2C_M_RD,
+                len: 30,
+                buf: vec![0; 30],
+            },
+        ];
 
         i2c_map.transfer(&mut *reqs).unwrap();
+        verify_rdwr_data(&reqs);
     }
 
     #[test]
@@ -688,6 +740,48 @@ pub mod tests {
 
         i2c_map.adapters[0].smbus = true;
 
+        // I2C_SMBUS_WRITE (I2C_SMBUS_QUICK) operation
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 0,
+            buf: vec![0],
+        }];
+
+        i2c_map.transfer(&mut reqs).unwrap();
+
+        // I2C_SMBUS_READ (I2C_SMBUS_QUICK) operation
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: I2C_M_RD,
+            len: 0,
+            buf: vec![0],
+        }];
+
+        i2c_map.transfer(&mut reqs).unwrap();
+
+        // I2C_SMBUS_WRITE (I2C_SMBUS_BYTE) operation
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 1,
+            buf: vec![0],
+        }];
+
+        i2c_map.transfer(&mut reqs).unwrap();
+
+        // I2C_SMBUS_READ (I2C_SMBUS_BYTE) operation
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: I2C_M_RD,
+            len: 1,
+            buf: vec![0],
+        }];
+
+        i2c_map.transfer(&mut reqs).unwrap();
+        assert_eq!(reqs[0].buf[0], 1);
+
+        // I2C_SMBUS_WRITE (I2C_SMBUS_BYTE_DATA) operation
         let mut reqs: Vec<I2cReq> = vec![I2cReq {
             addr: 0x3,
             flags: 0,
@@ -695,8 +789,25 @@ pub mod tests {
             buf: [7, 4].to_vec(),
         }];
 
-        // I2C_SMBUS_WRITE (I2C_SMBUS_BYTE_DATA) operation
         i2c_map.transfer(&mut reqs).unwrap();
+
+        // I2C_SMBUS_READ (I2C_SMBUS_BYTE_DATA) operation
+        let mut reqs = vec![
+            I2cReq {
+                addr: 0x3,
+                flags: 0,
+                len: 1,
+                buf: vec![0],
+            },
+            I2cReq {
+                addr: 0x3,
+                flags: I2C_M_RD,
+                len: 1,
+                buf: vec![0],
+            },
+        ];
+        i2c_map.transfer(&mut reqs).unwrap();
+        assert_eq!(reqs[1].buf[0], 1);
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) operation
         let mut reqs = vec![
@@ -704,16 +815,18 @@ pub mod tests {
                 addr: 0x3,
                 flags: 0,
                 len: 1,
-                buf: [34].to_vec(),
+                buf: vec![0],
             },
             I2cReq {
                 addr: 0x3,
                 flags: I2C_M_RD,
                 len: 2,
-                buf: [3, 4].to_vec(),
+                buf: vec![0; 2],
             },
         ];
         i2c_map.transfer(&mut reqs).unwrap();
+        assert_eq!(reqs[1].buf[0], 1);
+        assert_eq!(reqs[1].buf[1], 2);
     }
 
     #[test]

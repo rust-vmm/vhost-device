@@ -33,7 +33,7 @@ const NUM_QUEUES: usize = 1;
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[derive(Debug, ThisError)]
+#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 /// Errors related to vhost-device-i2c daemon.
 pub enum Error {
     #[error("Failed to handle event, didn't match EPOLLIN")]
@@ -352,10 +352,340 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::i2c::tests::DummyDevice;
-    use crate::AdapterConfig;
     use std::convert::TryFrom;
+
+    use virtio_queue::defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::Error;
+    use super::*;
+    use crate::i2c::tests::{update_rdwr_buf, verify_rdwr_buf, DummyDevice};
+    use crate::AdapterConfig;
+
+    // Prepares a single chain of descriptors
+    fn prepare_desc_chain(
+        start_addr: GuestAddress,
+        buf: &mut Vec<u8>,
+        flag: u32,
+        client_addr: u16,
+    ) -> I2cDescriptorChain {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 16);
+        let mut next_addr = vq.desc_table().total_size() + 0x100;
+        let mut index = 0;
+
+        // Out header descriptor
+        let out_hdr = VirtioI2cOutHdr {
+            addr: From::from(client_addr << 1),
+            padding: From::from(0x0),
+            flags: From::from(flag),
+        };
+
+        let desc_out = Descriptor::new(
+            next_addr,
+            size_of::<VirtioI2cOutHdr>() as u32,
+            VIRTQ_DESC_F_NEXT,
+            index + 1,
+        );
+
+        mem.write_obj::<VirtioI2cOutHdr>(out_hdr, desc_out.addr())
+            .unwrap();
+        vq.desc_table().store(index, desc_out);
+        next_addr += desc_out.len() as u64;
+        index += 1;
+
+        // Buf descriptor: optional
+        if !buf.is_empty() {
+            // Set buffer is write-only or not
+            let flag = if (flag & VIRTIO_I2C_FLAGS_M_RD) == 0 {
+                update_rdwr_buf(buf);
+                0
+            } else {
+                VIRTQ_DESC_F_WRITE
+            };
+
+            let desc_buf = Descriptor::new(
+                next_addr,
+                buf.len() as u32,
+                flag | VIRTQ_DESC_F_NEXT,
+                index + 1,
+            );
+            mem.write(buf, desc_buf.addr()).unwrap();
+            vq.desc_table().store(index, desc_buf);
+            next_addr += desc_buf.len() as u64;
+            index += 1;
+        }
+
+        // In response descriptor
+        let desc_in = Descriptor::new(next_addr, size_of::<u8>() as u32, VIRTQ_DESC_F_WRITE, 0);
+        vq.desc_table().store(index, desc_in);
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
+            .iter()
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    // Validate descriptor chains after processing them, checks pass/failure of
+    // operation and the value of the buffers updated by the `DummyDevice`.
+    fn validate_desc_chains(desc_chains: Vec<I2cDescriptorChain>, status: u8) {
+        for desc_chain in desc_chains {
+            let descriptors: Vec<_> = desc_chain.clone().collect();
+
+            let in_hdr = desc_chain
+                .memory()
+                .read_obj::<VirtioI2cInHdr>(descriptors[descriptors.len() - 1].addr())
+                .unwrap();
+
+            // Operation result should match expected status.
+            assert_eq!(in_hdr.status, status);
+
+            let out_hdr = desc_chain
+                .memory()
+                .read_obj::<VirtioI2cOutHdr>(descriptors[0].addr())
+                .unwrap();
+
+            if (out_hdr.flags.to_native() & VIRTIO_I2C_FLAGS_M_RD) != 0 && descriptors.len() == 3 {
+                let mut buf = vec![0; descriptors[1].len() as usize];
+                desc_chain
+                    .memory()
+                    .read(&mut buf, descriptors[1].addr())
+                    .unwrap();
+
+                // Verify the content of the read-buffer
+                verify_rdwr_buf(&buf);
+            }
+        }
+    }
+
+    // Prepares list of dummy descriptors, their content isn't significant
+    fn prepare_desc_chain_dummy(
+        addr: Option<Vec<u64>>,
+        flags: Vec<u16>,
+        len: Vec<u32>,
+    ) -> I2cDescriptorChain {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 16);
+
+        for (i, flag) in flags.iter().enumerate() {
+            let mut f = if i == flags.len() - 1 {
+                0
+            } else {
+                VIRTQ_DESC_F_NEXT
+            };
+            f |= flag;
+
+            let offset = match addr {
+                Some(ref addr) => addr[i],
+                _ => 0x100,
+            };
+
+            let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
+            vq.desc_table().store(i as u16, desc);
+        }
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
+            .iter()
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn process_requests_success() {
+        let device_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
+        let i2c_map = Arc::new(I2cMap::<DummyDevice>::new(&device_config).unwrap());
+
+        // Descriptor chain size zero, shouldn't fail
+        process_requests(&i2c_map, Vec::<I2cDescriptorChain>::new(), None).unwrap();
+
+        // Valid single read descriptor
+        let mut buf: Vec<u8> = vec![0; 30];
+        let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, VIRTIO_I2C_FLAGS_M_RD, 4);
+        let desc_chains = vec![desc_chain];
+
+        process_requests(&i2c_map, desc_chains.clone(), None).unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_OK);
+
+        // Valid single write descriptor
+        let mut buf: Vec<u8> = vec![0; 30];
+        let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, 0, 4);
+        let desc_chains = vec![desc_chain];
+
+        process_requests(&i2c_map, desc_chains.clone(), None).unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_OK);
+
+        // Valid mixed read-write descriptors
+        let mut buf: Vec<Vec<u8>> = vec![vec![0; 30]; 6];
+        let desc_chains = vec![
+            // Write
+            prepare_desc_chain(GuestAddress(0), &mut buf[0], 0, 4),
+            // Read
+            prepare_desc_chain(GuestAddress(0), &mut buf[1], VIRTIO_I2C_FLAGS_M_RD, 4),
+            // Write
+            prepare_desc_chain(GuestAddress(0), &mut buf[2], 0, 4),
+            // Read
+            prepare_desc_chain(GuestAddress(0), &mut buf[3], VIRTIO_I2C_FLAGS_M_RD, 4),
+            // Write
+            prepare_desc_chain(GuestAddress(0), &mut buf[4], 0, 4),
+            // Read
+            prepare_desc_chain(GuestAddress(0), &mut buf[5], VIRTIO_I2C_FLAGS_M_RD, 4),
+        ];
+
+        process_requests(&i2c_map, desc_chains.clone(), None).unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_OK);
+    }
+
+    #[test]
+    fn process_requests_failure() {
+        let device_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
+        let i2c_map = Arc::new(I2cMap::<DummyDevice>::new(&device_config).unwrap());
+
+        // One descriptors
+        let flags: Vec<u16> = vec![0];
+        let len: Vec<u32> = vec![0];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedDescriptorCount(1)
+        );
+
+        // Four descriptors
+        let flags: Vec<u16> = vec![0, 0, 0, 0];
+        let len: Vec<u32> = vec![0, 0, 0, 0];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedDescriptorCount(4)
+        );
+
+        // Write only out hdr
+        let flags: Vec<u16> = vec![VIRTQ_DESC_F_WRITE, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            1,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedWriteOnlyDescriptor(0)
+        );
+
+        // Invalid out hdr length
+        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![100, 1, size_of::<u8>() as u32];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedDescriptorSize(size_of::<VirtioI2cOutHdr>(), 100)
+        );
+
+        // Invalid out hdr address
+        let addr: Vec<u64> = vec![0x10000, 0, 0];
+        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            1,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::DescriptorReadFailed
+        );
+
+        // Read only in hdr
+        let flags: Vec<u16> = vec![0, 0, 0];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            1,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedReadableDescriptor(2)
+        );
+
+        // Invalid in hdr length
+        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![size_of::<VirtioI2cOutHdr>() as u32, 1, 100];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedDescriptorSize(size_of::<u8>(), 100)
+        );
+
+        // Invalid in hdr address
+        let addr: Vec<u64> = vec![0, 0, 0x10000];
+        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            1,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::DescriptorWriteFailed
+        );
+
+        // Invalid buf length
+        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            0,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::UnexpectedDescriptorSize(1, 0)
+        );
+
+        // Invalid buf address
+        let addr: Vec<u64> = vec![0, 0x10000, 0];
+        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            1,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
+        assert_eq!(
+            process_requests(&i2c_map, vec![desc_chain], None).unwrap_err(),
+            Error::DescriptorReadFailed
+        );
+
+        // Missing buffer for I2C rdwr transfer
+        let mut buf = Vec::<u8>::new();
+        let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, VIRTIO_I2C_FLAGS_M_RD, 4);
+        let desc_chains = vec![desc_chain];
+
+        process_requests(&i2c_map, desc_chains.clone(), None).unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_ERR);
+    }
 
     #[test]
     fn verify_backend() {

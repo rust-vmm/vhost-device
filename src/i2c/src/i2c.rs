@@ -574,6 +574,20 @@ pub mod tests {
     use std::convert::TryFrom;
     use vmm_sys_util::tempfile::TempFile;
 
+    // Update read-buffer of each write-buffer with index + 1 value.
+    pub fn update_rdwr_buf(buf: &mut Vec<u8>) {
+        for (i, byte) in buf.iter_mut().enumerate() {
+            *byte = i as u8 + 1;
+        }
+    }
+
+    // Verify the write-buffer passed to us
+    pub fn verify_rdwr_buf(buf: &[u8]) {
+        for (i, byte) in buf.iter().enumerate() {
+            assert_eq!(*byte, i as u8 + 1);
+        }
+    }
+
     #[derive(Debug)]
     pub struct DummyDevice {
         funcs_result: Result<u64>,
@@ -611,12 +625,15 @@ pub mod tests {
         }
 
         fn rdwr(&self, reqs: &mut [I2cReq]) -> Result<()> {
-            // Update buffer of each write-buffer with index + 1 value.
             for req in reqs {
+                if req.len == 0 {
+                    return Err(Error::I2cTransferInvalid(0));
+                }
+
                 if (req.flags & I2C_M_RD) != 0 {
-                    for (j, byte) in req.buf.iter_mut().enumerate() {
-                        *byte = j as u8 + 1;
-                    }
+                    update_rdwr_buf(&mut req.buf);
+                } else {
+                    verify_rdwr_buf(&req.buf);
                 }
             }
 
@@ -644,9 +661,7 @@ pub mod tests {
         // Match what's done by DummyDevice::rdwr()
         for req in reqs {
             if (req.flags & I2C_M_RD) != 0 {
-                for (i, byte) in req.buf.iter().enumerate() {
-                    assert_eq!(*byte, i as u8 + 1);
-                }
+                verify_rdwr_buf(&req.buf);
             }
         }
     }
@@ -734,6 +749,12 @@ pub mod tests {
                 buf: vec![0; 30],
             },
         ];
+
+        for req in &mut reqs {
+            if (req.flags & I2C_M_RD) == 0 {
+                update_rdwr_buf(&mut req.buf);
+            }
+        }
 
         i2c_map.transfer(&mut *reqs).unwrap();
         verify_rdwr_data(&reqs);

@@ -40,14 +40,14 @@ pub enum Error {
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
     HandleEventUnknown,
-    #[error("Received unexpected write only descriptor")]
-    UnexpectedWriteOnlyDescriptor,
-    #[error("Received unexpected readable descriptor")]
-    UnexpectedReadableDescriptor,
-    #[error("Invalid descriptor count")]
-    UnexpectedDescriptorCount,
-    #[error("Invalid descriptor size")]
-    UnexpectedDescriptorSize,
+    #[error("Received unexpected write only descriptor at index {0}")]
+    UnexpectedWriteOnlyDescriptor(usize),
+    #[error("Received unexpected readable descriptor at index {0}")]
+    UnexpectedReadableDescriptor(usize),
+    #[error("Invalid descriptor count {0}")]
+    UnexpectedDescriptorCount(usize),
+    #[error("Invalid descriptor size, expected: {0}, found: {1}")]
+    UnexpectedDescriptorSize(usize, u32),
     #[error("Descriptor not found")]
     DescriptorNotFound,
     #[error("Descriptor read failed")]
@@ -56,8 +56,8 @@ pub enum Error {
     DescriptorWriteFailed,
     #[error("Failed to send notification")]
     NotificationFailed,
-    #[error("Failed to create new EventFd: {0:?}")]
-    EventFdFailed(std::io::Error),
+    #[error("Failed to create new EventFd")]
+    EventFdFailed,
 }
 
 impl convert::From<Error> for io::Error {
@@ -116,17 +116,20 @@ fn process_requests<D: I2cDevice>(
         let descriptors: Vec<_> = desc_chain.clone().collect();
 
         if (descriptors.len() != 2) && (descriptors.len() != 3) {
-            return Err(Error::UnexpectedDescriptorCount);
+            return Err(Error::UnexpectedDescriptorCount(descriptors.len()));
         }
 
         let desc_out_hdr = descriptors[0];
 
         if desc_out_hdr.is_write_only() {
-            return Err(Error::UnexpectedWriteOnlyDescriptor);
+            return Err(Error::UnexpectedWriteOnlyDescriptor(0));
         }
 
         if desc_out_hdr.len() as usize != size_of::<VirtioI2cOutHdr>() {
-            return Err(Error::UnexpectedDescriptorSize);
+            return Err(Error::UnexpectedDescriptorSize(
+                size_of::<VirtioI2cOutHdr>(),
+                desc_out_hdr.len(),
+            ));
         }
 
         let out_hdr = desc_chain
@@ -141,11 +144,14 @@ fn process_requests<D: I2cDevice>(
 
         let desc_in_hdr = descriptors[descriptors.len() - 1];
         if !desc_in_hdr.is_write_only() {
-            return Err(Error::UnexpectedReadableDescriptor);
+            return Err(Error::UnexpectedReadableDescriptor(descriptors.len() - 1));
         }
 
         if desc_in_hdr.len() as usize != size_of::<u8>() {
-            return Err(Error::UnexpectedDescriptorSize);
+            return Err(Error::UnexpectedDescriptorSize(
+                size_of::<u8>(),
+                desc_in_hdr.len(),
+            ));
         }
 
         let (buf, len) = match descriptors.len() {
@@ -155,13 +161,13 @@ fn process_requests<D: I2cDevice>(
                 let len = desc_buf.len();
 
                 if len == 0 {
-                    return Err(Error::UnexpectedDescriptorSize);
+                    return Err(Error::UnexpectedDescriptorSize(1, len));
                 }
                 let mut buf = vec![0; len as usize];
 
                 if flags != I2C_M_RD {
                     if desc_buf.is_write_only() {
-                        return Err(Error::UnexpectedWriteOnlyDescriptor);
+                        return Err(Error::UnexpectedWriteOnlyDescriptor(1));
                     }
 
                     desc_chain
@@ -169,7 +175,7 @@ fn process_requests<D: I2cDevice>(
                         .read(&mut buf, desc_buf.addr())
                         .map_err(|_| Error::DescriptorReadFailed)?;
                 } else if !desc_buf.is_write_only() {
-                    return Err(Error::UnexpectedReadableDescriptor);
+                    return Err(Error::UnexpectedReadableDescriptor(1));
                 }
 
                 (buf, len)
@@ -237,7 +243,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
         Ok(VhostUserI2cBackend {
             i2c_map,
             event_idx: false,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdFailed)?,
+            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
         })
     }
 

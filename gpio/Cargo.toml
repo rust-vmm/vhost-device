@@ -25,3 +25,7 @@ vm-memory = "0.7"
 vmm-sys-util = "=0.9.0"
 
 libgpiod = { git = "https://github.com/vireshk/libgpiod" }
+
+[dev-dependencies]
+virtio-queue = { version = "0.2", features = ["test-utils"] }
+vm-memory = { version = "0.7.0", features = ["backend-mmap", "backend-atomic"] }

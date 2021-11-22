@@ -480,3 +480,714 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         self.exit_event.try_clone().ok()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use virtio_queue::defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::Error;
+    use super::*;
+    use crate::gpio::tests::DummyDevice;
+    use crate::gpio::Error as GpioError;
+    use crate::gpio::*;
+
+    // Prepares a single chain of descriptors for request queue
+    fn prepare_desc_chain<R: ByteValued>(
+        start_addr: GuestAddress,
+        out_hdr: R,
+        response_len: u32,
+    ) -> GpioDescriptorChain {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 16);
+        let mut next_addr = vq.desc_table().total_size() + 0x100;
+        let mut index = 0;
+
+        let desc_out = Descriptor::new(
+            next_addr,
+            size_of::<R>() as u32,
+            VIRTQ_DESC_F_NEXT,
+            index + 1,
+        );
+
+        mem.write_obj::<R>(out_hdr, desc_out.addr()).unwrap();
+        vq.desc_table().store(index, desc_out);
+        next_addr += desc_out.len() as u64;
+        index += 1;
+
+        // In response descriptor
+        let desc_in = Descriptor::new(next_addr, response_len, VIRTQ_DESC_F_WRITE, 0);
+        vq.desc_table().store(index, desc_in);
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
+            .iter()
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    // Prepares a single chain of descriptors for request queue
+    fn prepare_request_desc_chain(
+        start_addr: GuestAddress,
+        rtype: u16,
+        gpio: u16,
+        value: u32,
+        len: u32,
+    ) -> GpioDescriptorChain {
+        // Out request descriptor
+        let out_hdr = VirtioGpioRequest {
+            rtype: From::from(rtype),
+            gpio: From::from(gpio),
+            value: From::from(value),
+        };
+
+        prepare_desc_chain::<VirtioGpioRequest>(start_addr, out_hdr, len + 1)
+    }
+
+    // Prepares a single chain of descriptors for event queue
+    fn prepare_event_desc_chain(start_addr: GuestAddress, gpio: u16) -> GpioDescriptorChain {
+        // Out event descriptor
+        let out_hdr = VirtioGpioIrqRequest {
+            gpio: From::from(gpio),
+        };
+
+        prepare_desc_chain::<VirtioGpioIrqRequest>(
+            start_addr,
+            out_hdr,
+            size_of::<VirtioGpioIrqResponse>() as u32,
+        )
+    }
+
+    // Prepares list of dummy descriptors, their content isn't significant.
+    fn prepare_desc_chain_dummy(
+        addr: Option<Vec<u64>>,
+        flags: Vec<u16>,
+        len: Vec<u32>,
+    ) -> GpioDescriptorChain {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 16);
+
+        for (i, flag) in flags.iter().enumerate() {
+            let mut f = if i == flags.len() - 1 {
+                0
+            } else {
+                VIRTQ_DESC_F_NEXT
+            };
+            f |= flag;
+
+            let offset = match addr {
+                Some(ref addr) => addr[i],
+                _ => 0x100,
+            };
+
+            let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
+            vq.desc_table().store(i as u16, desc);
+        }
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
+            .iter()
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    // Validate descriptor chains after processing them, checks pass/failure of
+    // operation and the value of the buffers updated by the `DummyDevice`.
+    fn validate_desc_chains(
+        desc_chains: Vec<GpioDescriptorChain>,
+        status: u8,
+        val: Option<Vec<u8>>,
+    ) {
+        for (i, desc_chain) in desc_chains.iter().enumerate() {
+            let descriptors: Vec<_> = desc_chain.clone().collect();
+            let mut response = vec![0; descriptors[1].len() as usize];
+
+            desc_chain
+                .memory()
+                .read(&mut response, descriptors[1].addr())
+                .unwrap();
+
+            // Operation result should match expected status.
+            assert_eq!(response[0], status);
+            if let Some(val) = &val {
+                assert_eq!(response[1], val[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_gpio_process_requests_success() {
+        const NGPIO: u16 = 256;
+        const GPIO: u16 = 5;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+        let backend = VhostUserGpioBackend::new(controller).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
+
+        // Descriptor chain size zero, shouldn't fail
+        backend
+            .process_requests(Vec::<GpioDescriptorChain>::new(), &vring)
+            .unwrap();
+
+        // Valid single GPIO operation
+        let desc_chain =
+            prepare_request_desc_chain(GuestAddress(0), VIRTIO_GPIO_MSG_SET_VALUE, GPIO, 1, 1);
+        let desc_chains = vec![desc_chain];
+
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_STATUS_OK, Some(vec![0]));
+
+        // Valid multi GPIO operation
+        let desc_chains = vec![
+            prepare_request_desc_chain(GuestAddress(0), VIRTIO_GPIO_MSG_SET_VALUE, GPIO, 1, 1),
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_SET_DIRECTION,
+                GPIO,
+                VIRTIO_GPIO_DIRECTION_OUT as u32,
+                1,
+            ),
+            prepare_request_desc_chain(GuestAddress(0), VIRTIO_GPIO_MSG_GET_VALUE, GPIO, 0, 1),
+            prepare_request_desc_chain(GuestAddress(0), VIRTIO_GPIO_MSG_GET_DIRECTION, GPIO, 0, 1),
+        ];
+
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(
+            desc_chains,
+            VIRTIO_GPIO_STATUS_OK,
+            Some(vec![0, 0, 1, VIRTIO_GPIO_DIRECTION_OUT]),
+        );
+    }
+
+    #[test]
+    fn test_gpio_process_requests_failure() {
+        const NGPIO: u16 = 256;
+        const GPIO: u16 = 5;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+        let backend = VhostUserGpioBackend::new(controller).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
+
+        // Have only one descriptor, expected two.
+        let flags: Vec<u16> = vec![0];
+        let len: Vec<u32> = vec![0];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorCount(1)
+        );
+
+        // Have three descriptors, expected two.
+        let flags: Vec<u16> = vec![0, 0, 0];
+        let len: Vec<u32> = vec![0, 0, 0];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorCount(3)
+        );
+
+        // Write only out hdr.
+        let flags: Vec<u16> = vec![VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedWriteOnlyDescriptor(0)
+        );
+
+        // Invalid out hdr address.
+        let addr: Vec<u64> = vec![0x10000, 0];
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
+        let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::DescriptorReadFailed
+        );
+
+        // Invalid out hdr length.
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![100, 2];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorSize(size_of::<VirtioGpioRequest>(), 100)
+        );
+
+        // Read only in hdr.
+        let flags: Vec<u16> = vec![0, 0];
+        let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedReadableDescriptor(1)
+        );
+
+        // Invalid in hdr address.
+        let addr: Vec<u64> = vec![0, 0x10000];
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
+        let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::DescriptorWriteFailed
+        );
+
+        // Invalid in hdr length.
+        let desc_chain =
+            prepare_request_desc_chain(GuestAddress(0), VIRTIO_GPIO_MSG_SET_VALUE, GPIO, 1, 3);
+        let desc_chains = vec![desc_chain];
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_STATUS_ERR, Some(vec![0]));
+    }
+
+    #[test]
+    fn test_gpio_process_events_success() {
+        const NGPIO: u16 = 256;
+        const GPIO: u16 = 5;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+        let mut backend = VhostUserGpioBackend::new(controller).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
+
+        // Descriptor chain size zero, shouldn't fail.
+        backend
+            .process_events(Vec::<GpioDescriptorChain>::new(), &vring)
+            .unwrap();
+
+        // Set direction should pass.
+        let desc_chain = prepare_request_desc_chain(
+            GuestAddress(0),
+            VIRTIO_GPIO_MSG_SET_DIRECTION,
+            GPIO,
+            VIRTIO_GPIO_DIRECTION_IN as u32,
+            1,
+        );
+        let desc_chains = vec![desc_chain];
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_STATUS_OK, Some(vec![0]));
+
+        // Set irq type should pass.
+        let desc_chain = prepare_request_desc_chain(
+            GuestAddress(0),
+            VIRTIO_GPIO_MSG_IRQ_TYPE,
+            GPIO,
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH as u32,
+            1,
+        );
+        let desc_chains = vec![desc_chain];
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_STATUS_OK, Some(vec![0]));
+
+        // Wait for interrupt should pass
+        let desc_chain = prepare_event_desc_chain(GuestAddress(0), GPIO);
+        let desc_chains = vec![desc_chain];
+        backend.process_events(desc_chains.clone(), &vring).unwrap();
+
+        while backend.handles.read().unwrap()[GPIO as usize].is_some() {}
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_IRQ_STATUS_VALID, None);
+    }
+
+    #[test]
+    fn test_gpio_process_events_multi_success() {
+        const NGPIO: u16 = 256;
+        const GPIO: u16 = 5;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+        let mut backend = VhostUserGpioBackend::new(controller).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
+
+        let desc_chains = vec![
+            // Prepare line: GPIO
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_SET_DIRECTION,
+                GPIO,
+                VIRTIO_GPIO_DIRECTION_IN as u32,
+                1,
+            ),
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_IRQ_TYPE,
+                GPIO,
+                VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH as u32,
+                1,
+            ),
+            // Prepare line: GPIO + 1
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_SET_DIRECTION,
+                GPIO + 1,
+                VIRTIO_GPIO_DIRECTION_IN as u32,
+                1,
+            ),
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_IRQ_TYPE,
+                GPIO + 1,
+                VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH as u32,
+                1,
+            ),
+            // Prepare line: GPIO + 2
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_SET_DIRECTION,
+                GPIO + 2,
+                VIRTIO_GPIO_DIRECTION_IN as u32,
+                1,
+            ),
+            prepare_request_desc_chain(
+                GuestAddress(0),
+                VIRTIO_GPIO_MSG_IRQ_TYPE,
+                GPIO + 2,
+                VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH as u32,
+                1,
+            ),
+        ];
+
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(
+            desc_chains,
+            VIRTIO_GPIO_STATUS_OK,
+            Some(vec![0, 0, 0, 0, 0, 0]),
+        );
+
+        // Wait for interrupt should pass.
+        let desc_chains = vec![
+            prepare_event_desc_chain(GuestAddress(0), GPIO),
+            prepare_event_desc_chain(GuestAddress(0), GPIO + 1),
+            prepare_event_desc_chain(GuestAddress(0), GPIO + 2),
+        ];
+
+        backend.process_events(desc_chains.clone(), &vring).unwrap();
+
+        while backend.handles.read().unwrap()[GPIO as usize].is_some()
+            || backend.handles.read().unwrap()[(GPIO + 1) as usize].is_some()
+            || backend.handles.read().unwrap()[(GPIO + 2) as usize].is_some()
+        {}
+
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_IRQ_STATUS_VALID, None);
+    }
+
+    #[test]
+    fn test_gpio_process_events_failure() {
+        const NGPIO: u16 = 256;
+        let err = GpioError::GpioIrqTypeInvalid(0);
+        let mut device = DummyDevice::new(NGPIO);
+
+        // This will make process-request fail later with
+        // VIRTIO_GPIO_IRQ_STATUS_INVALID error.
+        device.wait_for_irq_result = Err(err);
+
+        let controller = GpioController::new(device).unwrap();
+        let mut backend = VhostUserGpioBackend::new(controller).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
+
+        // Only one descriptor, expected two.
+        let flags: Vec<u16> = vec![0];
+        let len: Vec<u32> = vec![0];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorCount(1)
+        );
+
+        // Three descriptors, expected two.
+        let flags: Vec<u16> = vec![0, 0, 0];
+        let len: Vec<u32> = vec![0, 0, 0];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorCount(3)
+        );
+
+        // Write only out hdr
+        let flags: Vec<u16> = vec![VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioGpioIrqRequest>() as u32,
+            size_of::<VirtioGpioIrqResponse>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedWriteOnlyDescriptor(0)
+        );
+
+        // Invalid out hdr address
+        let addr: Vec<u64> = vec![0x10000, 0];
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioGpioIrqRequest>() as u32,
+            size_of::<VirtioGpioIrqResponse>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::DescriptorReadFailed
+        );
+
+        // Invalid out hdr length
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![100, size_of::<VirtioGpioIrqResponse>() as u32];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorSize(size_of::<VirtioGpioIrqRequest>(), 100)
+        );
+
+        // Read only in hdr
+        let flags: Vec<u16> = vec![0, 0];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioGpioIrqRequest>() as u32,
+            size_of::<VirtioGpioIrqResponse>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedReadableDescriptor(1)
+        );
+
+        // Invalid in hdr length
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![size_of::<VirtioGpioIrqRequest>() as u32, 100];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_events(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedDescriptorSize(size_of::<VirtioGpioIrqResponse>(), 100)
+        );
+
+        // Wait for event without setting irq type first.
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioGpioIrqRequest>() as u32,
+            size_of::<VirtioGpioIrqResponse>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        let desc_chains = vec![desc_chain];
+        backend.process_events(desc_chains.clone(), &vring).unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_IRQ_STATUS_INVALID, None);
+
+        // Wait for interrupt failure with VIRTIO_GPIO_IRQ_STATUS_INVALID status, as was set at the
+        // top of this function.
+        const GPIO: u16 = 5;
+        // Set irq type
+        let desc_chain = prepare_request_desc_chain(
+            GuestAddress(0),
+            VIRTIO_GPIO_MSG_IRQ_TYPE,
+            GPIO,
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH as u32,
+            1,
+        );
+        let desc_chains = vec![desc_chain];
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_STATUS_OK, Some(vec![0]));
+
+        // Wait for interrupt
+        let desc_chain = prepare_event_desc_chain(GuestAddress(0), GPIO);
+        let desc_chains = vec![desc_chain];
+        backend.process_events(desc_chains.clone(), &vring).unwrap();
+
+        while backend.handles.read().unwrap()[GPIO as usize].is_some() {}
+        validate_desc_chains(desc_chains, VIRTIO_GPIO_IRQ_STATUS_INVALID, None);
+    }
+
+    #[test]
+    fn test_gpio_verify_backend() {
+        const NGPIO: u16 = 8;
+        let mut gpio_names = vec![
+            "gpio0".to_string(),
+            '\0'.to_string(),
+            "gpio2".to_string(),
+            '\0'.to_string(),
+            "gpio4".to_string(),
+            '\0'.to_string(),
+            "gpio6".to_string(),
+            '\0'.to_string(),
+        ];
+        // Controller adds '\0' for each line.
+        let names_size = std::mem::size_of_val(&gpio_names) + gpio_names.len();
+
+        let mut device = DummyDevice::new(NGPIO);
+        device.gpio_names.clear();
+        device.gpio_names.append(&mut gpio_names);
+        let controller = GpioController::new(device).unwrap();
+        let mut backend = VhostUserGpioBackend::new(controller).unwrap();
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_eq!(backend.features(), 0x171000001);
+        assert_eq!(
+            backend.protocol_features(),
+            VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
+        );
+
+        assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
+
+        backend.set_event_idx(true);
+        assert!(backend.event_idx);
+
+        assert!(backend.exit_event(0).is_some());
+
+        let config = VirtioGpioConfig {
+            ngpio: From::from(NGPIO),
+            padding: From::from(0),
+            gpio_names_size: From::from(names_size as u32),
+        };
+
+        assert_eq!(backend.get_config(0, 0), unsafe {
+            from_raw_parts(
+                &config as *const _ as *const _,
+                size_of::<VirtioGpioConfig>(),
+            )
+            .to_vec()
+        });
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        backend.update_memory(mem.clone()).unwrap();
+
+        let vring_request = VringRwLock::new(mem.clone(), 0x1000);
+        let vring_event = VringRwLock::new(mem, 0x1000);
+        assert_eq!(
+            backend
+                .handle_event(
+                    0,
+                    EventSet::OUT,
+                    &[vring_request.clone(), vring_event.clone()],
+                    0,
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        assert_eq!(
+            backend
+                .handle_event(
+                    2,
+                    EventSet::IN,
+                    &[vring_request.clone(), vring_event.clone()],
+                    0,
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        // Hit the loop part
+        backend.set_event_idx(true);
+        backend
+            .handle_event(
+                0,
+                EventSet::IN,
+                &[vring_request.clone(), vring_event.clone()],
+                0,
+            )
+            .unwrap();
+
+        // Hit the non-loop part
+        backend.set_event_idx(false);
+        backend
+            .handle_event(
+                0,
+                EventSet::IN,
+                &[vring_request.clone(), vring_event.clone()],
+                0,
+            )
+            .unwrap();
+
+        // Hit the loop part
+        backend.set_event_idx(true);
+        backend
+            .handle_event(
+                1,
+                EventSet::IN,
+                &[vring_request.clone(), vring_event.clone()],
+                0,
+            )
+            .unwrap();
+
+        // Hit the non-loop part
+        backend.set_event_idx(false);
+        backend
+            .handle_event(1, EventSet::IN, &[vring_request, vring_event], 0)
+            .unwrap();
+    }
+}

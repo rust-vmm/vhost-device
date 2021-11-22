@@ -190,3 +190,96 @@ pub(crate) fn gpio_init() -> Result<()> {
 
     start_backend::<PhysDevice>(GpioArgs::parse())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gpio::tests::DummyDevice;
+
+    impl DeviceConfig {
+        pub fn new_with(devices: Vec<u32>) -> Self {
+            DeviceConfig { inner: devices }
+        }
+    }
+
+    fn get_cmd_args(path: &str, devices: &str, count: usize) -> GpioArgs {
+        GpioArgs {
+            socket_path: path.to_string(),
+            socket_count: count,
+            device_list: devices.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_gpio_device_config() {
+        let mut config = DeviceConfig::new();
+
+        config.push(5).unwrap();
+        config.push(6).unwrap();
+
+        assert_eq!(config.push(5).unwrap_err(), Error::DeviceDuplicate(5));
+    }
+
+    #[test]
+    fn test_gpio_parse_failure() {
+        let socket_name = "vgpio.sock";
+
+        // Invalid device number
+        let cmd_args = get_cmd_args(socket_name, "1:4d:5", 3);
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::ParseFailure("4d".parse::<u32>().unwrap_err())
+        );
+
+        // Zero socket count
+        let cmd_args = get_cmd_args(socket_name, "1:4", 0);
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::SocketCountInvalid(0)
+        );
+
+        // Duplicate client address: 4
+        let cmd_args = get_cmd_args(socket_name, "1:4:5:6:4", 5);
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::DeviceDuplicate(4)
+        );
+
+        // Device count mismatch
+        let cmd_args = get_cmd_args(socket_name, "1:4:5:6", 5);
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::DeviceCountMismatch(5, 4)
+        );
+    }
+
+    #[test]
+    fn test_gpio_parse_successful() {
+        let socket_name = "vgpio.sock";
+
+        // Match expected and actual configuration
+        let cmd_args = get_cmd_args(socket_name, "1:4:32:21:5", 5);
+        let config = GpioConfiguration::try_from(cmd_args).unwrap();
+
+        let expected_devices = DeviceConfig::new_with(vec![1, 4, 32, 21, 5]);
+        let expected_config = GpioConfiguration {
+            socket_count: 5,
+            socket_path: String::from(socket_name),
+            devices: expected_devices,
+        };
+
+        assert_eq!(config, expected_config);
+    }
+
+    #[test]
+    fn test_gpio_fail_listener() {
+        // This will fail the listeners and thread will panic.
+        let socket_name = "~/path/not/present/gpio";
+        let cmd_args = get_cmd_args(socket_name, "1:4:3:5", 4);
+
+        assert_eq!(
+            start_backend::<DummyDevice>(cmd_args).unwrap_err(),
+            Error::FailedJoiningThreads
+        );
+    }
+}

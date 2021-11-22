@@ -197,3 +197,107 @@ fn main() -> Result<()> {
 
     start_backend::<PhysDevice>(config)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl DeviceConfig {
+        pub fn new_with(devices: Vec<u32>) -> Self {
+            DeviceConfig { inner: devices }
+        }
+    }
+
+    fn get_cmd_args(name: Option<&str>, devices: &str, count: Option<&str>) -> ArgMatches {
+        let mut args = vec!["prog", "-l", devices];
+        let yaml = load_yaml!("cli.yaml");
+        let app = App::from(yaml);
+
+        if let Some(name) = name {
+            args.extend_from_slice(&["-s", name]);
+        }
+
+        if let Some(count) = count {
+            args.extend_from_slice(&["-c", count]);
+        }
+        app.try_get_matches_from(args).unwrap()
+    }
+
+    #[test]
+    fn test_gpio_parse_failure() {
+        let socket_name = Some("vgpio.sock");
+
+        // Invalid device number
+        let cmd_args = get_cmd_args(socket_name, "1:4d:5", Some("3"));
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::ParseFailure("4d".parse::<u32>().unwrap_err())
+        );
+
+        // Invalid socket path
+        let cmd_args = get_cmd_args(None, "1:4:5", Some("3"));
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::SocketPathInvalid
+        );
+
+        // Invalid socket count
+        let cmd_args = get_cmd_args(socket_name, "1:4", Some("2d"));
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::ParseFailure("2d".parse::<u16>().unwrap_err())
+        );
+
+        // Zero socket count
+        let cmd_args = get_cmd_args(socket_name, "1:4", Some("0"));
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::SocketCountInvalid(0)
+        );
+
+        // Duplicate client address: 4
+        let cmd_args = get_cmd_args(socket_name, "1:4:5:6:4", Some("5"));
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::DeviceDuplicate(4)
+        );
+
+        // Device count mismatch
+        let cmd_args = get_cmd_args(socket_name, "1:4:5:6", Some("5"));
+        assert_eq!(
+            GpioConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::DeviceCountMismatch(5, 4)
+        );
+    }
+
+    #[test]
+    fn test_gpio_parse_successful() {
+        let socket_name = Some("vgpio.sock");
+
+        // Missing socket count, default (1) should be used.
+        let cmd_args = get_cmd_args(socket_name, "1", None);
+        let config = GpioConfiguration::try_from(cmd_args).unwrap();
+        assert_eq!(config.socket_count, 1);
+
+        // Match expected and actual configuration
+        let cmd_args = get_cmd_args(socket_name, "1:4:32:21:5", Some("5"));
+        let config = GpioConfiguration::try_from(cmd_args).unwrap();
+
+        let expected_devices = DeviceConfig::new_with(vec![1, 4, 32, 21, 5]);
+        let expected_config = GpioConfiguration {
+            socket_count: 5,
+            socket_path: String::from(socket_name.unwrap()),
+            devices: expected_devices,
+        };
+
+        assert_eq!(config, expected_config);
+    }
+
+    #[test]
+    fn test_gpio_map_duplicate_device4() {
+        assert_eq!(
+            DeviceConfig::try_from("1:4:4:23").unwrap_err(),
+            Error::DeviceDuplicate(4)
+        );
+    }
+}

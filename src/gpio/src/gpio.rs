@@ -15,7 +15,7 @@ use vm_memory::{Le16, Le32};
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Clone, Debug, PartialEq, ThisError)]
+#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 /// Errors related to low level gpio helpers
 pub enum Error {
     #[error("Invalid gpio direction: {0}")]
@@ -28,6 +28,9 @@ pub enum Error {
     GpioMessageInvalid(u16),
     #[error("Gpiod operation failed {0:?}")]
     GpiodFailed(libgpiod::Error),
+    #[cfg(test)]
+    #[error("Gpio test Operation failed {0}")]
+    GpioOperationFailed(&'static str),
 }
 
 /// Virtio specification definitions
@@ -44,7 +47,7 @@ pub(crate) const VIRTIO_GPIO_DIRECTION_OUT: u8 = 0x01;
 pub(crate) const VIRTIO_GPIO_DIRECTION_IN: u8 = 0x02;
 
 /// Virtio GPIO Configuration
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(C)]
 pub struct VirtioGpioConfig {
     ngpio: Le16,
@@ -195,16 +198,19 @@ impl GpioDevice for PhysDevice {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 struct LineState {
     dir: u8,
     val: Option<u16>,
 }
 
+#[derive(Debug)]
 struct DeviceState<D: GpioDevice> {
     device: D,
     line_state: Vec<LineState>,
 }
 
+#[derive(Debug)]
 pub struct GpioController<D: GpioDevice> {
     config: VirtioGpioConfig,
     state: RwLock<DeviceState<D>>,
@@ -315,5 +321,328 @@ impl<D: GpioDevice> GpioController<D> {
             }
             msg => return Err(Error::GpioMessageInvalid(msg)),
         })
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::Error;
+    use super::*;
+
+    #[derive(Debug)]
+    pub(crate) struct DummyDevice {
+        ngpio: u16,
+        line_names: Vec<String>,
+        line_state: Vec<LineState>,
+        get_num_lines_result: Result<u16>,
+        get_line_name_result: Result<String>,
+        get_direction_result: Result<u8>,
+        set_direction_result: Result<()>,
+        get_value_result: Result<u8>,
+        set_value_result: Result<()>,
+    }
+
+    impl DummyDevice {
+        pub(crate) fn new(ngpio: u16) -> Self {
+            Self {
+                ngpio,
+                line_names: vec!['\0'.to_string(); ngpio.into()],
+                line_state: vec![
+                    LineState {
+                        dir: VIRTIO_GPIO_DIRECTION_NONE,
+                        val: None,
+                    };
+                    ngpio.into()
+                ],
+                get_num_lines_result: Ok(0),
+                get_line_name_result: Ok("".to_string()),
+                get_direction_result: Ok(0),
+                set_direction_result: Ok(()),
+                get_value_result: Ok(0),
+                set_value_result: Ok(()),
+            }
+        }
+    }
+
+    impl GpioDevice for DummyDevice {
+        fn open(_device: u32) -> Result<Self>
+        where
+            Self: Sized,
+        {
+            Ok(DummyDevice::new(8))
+        }
+
+        fn get_num_lines(&self) -> Result<u16> {
+            if self.get_num_lines_result.is_err() {
+                return self.get_num_lines_result;
+            }
+
+            Ok(self.ngpio)
+        }
+
+        fn get_line_name(&self, gpio: u16) -> Result<String> {
+            assert!((gpio as usize) < self.line_names.len());
+
+            if self.get_line_name_result.is_err() {
+                return self.get_line_name_result.clone();
+            }
+
+            Ok(self.line_names[gpio as usize].clone())
+        }
+
+        fn get_direction(&self, gpio: u16) -> Result<u8> {
+            if self.get_direction_result.is_err() {
+                return self.get_direction_result;
+            }
+
+            Ok(self.line_state[gpio as usize].dir)
+        }
+
+        fn set_direction(&mut self, gpio: u16, dir: u8, value: u32) -> Result<()> {
+            if self.set_direction_result.is_err() {
+                return self.set_direction_result;
+            }
+
+            self.line_state[gpio as usize].dir = dir;
+            self.line_state[gpio as usize].val = match dir as u8 {
+                VIRTIO_GPIO_DIRECTION_NONE => None,
+                VIRTIO_GPIO_DIRECTION_IN => self.line_state[gpio as usize].val,
+                VIRTIO_GPIO_DIRECTION_OUT => Some(value as u16),
+
+                _ => return Err(Error::GpioDirectionInvalid(dir as u32)),
+            };
+
+            Ok(())
+        }
+
+        fn get_value(&self, gpio: u16) -> Result<u8> {
+            if self.get_value_result.is_err() {
+                return self.get_value_result;
+            }
+
+            if let Some(val) = self.line_state[gpio as usize].val {
+                Ok(val as u8)
+            } else {
+                Err(Error::GpioCurrentValueInvalid)
+            }
+        }
+
+        fn set_value(&mut self, gpio: u16, value: u32) -> Result<()> {
+            if self.set_value_result.is_err() {
+                return self.set_value_result;
+            }
+
+            self.line_state[gpio as usize].val = Some(value as u16);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_verify_gpio_controller() {
+        const NGPIO: u16 = 8;
+        let line_names = vec![
+            "gpio0".to_string(),
+            '\0'.to_string(),
+            "gpio2".to_string(),
+            '\0'.to_string(),
+            "gpio4".to_string(),
+            '\0'.to_string(),
+            "gpio6".to_string(),
+            '\0'.to_string(),
+        ];
+
+        let mut device = DummyDevice::new(NGPIO);
+        device.line_names.clear();
+        device.line_names.append(&mut line_names.clone());
+        let controller = GpioController::new(device).unwrap();
+
+        assert_eq!(
+            *controller.get_config(),
+            VirtioGpioConfig {
+                ngpio: From::from(NGPIO),
+                padding: From::from(0),
+                gpio_names_size: From::from(size_of_val(&line_names) as u32),
+            }
+        );
+
+        let mut name = String::with_capacity(line_names.len());
+        for i in line_names {
+            name.push_str(&i);
+            name.push('\0');
+        }
+
+        assert_eq!(
+            controller
+                .operation(VIRTIO_GPIO_MSG_GET_LINE_NAMES, 0, 0)
+                .unwrap(),
+            name.as_bytes()
+        );
+
+        for gpio in 0..NGPIO {
+            // No initial value
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_GET_VALUE, gpio, 0)
+                    .unwrap_err(),
+                Error::GpioCurrentValueInvalid
+            );
+
+            // No initial direction
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_GET_DIRECTION, gpio, 0)
+                    .unwrap(),
+                vec![VIRTIO_GPIO_DIRECTION_NONE]
+            );
+        }
+    }
+
+    #[test]
+    fn test_verify_gpio_operation() {
+        const NGPIO: u16 = 256;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+
+        for gpio in 0..NGPIO {
+            // Set value first followed by direction
+            controller
+                .operation(VIRTIO_GPIO_MSG_SET_VALUE, gpio, 1)
+                .unwrap();
+
+            // Set direction OUT
+            controller
+                .operation(
+                    VIRTIO_GPIO_MSG_SET_DIRECTION,
+                    gpio,
+                    VIRTIO_GPIO_DIRECTION_OUT as u32,
+                )
+                .unwrap();
+
+            // Valid value
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_GET_VALUE, gpio, 0)
+                    .unwrap(),
+                vec![1]
+            );
+
+            // Valid direction
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_GET_DIRECTION, gpio, 0)
+                    .unwrap(),
+                vec![VIRTIO_GPIO_DIRECTION_OUT]
+            );
+
+            // Set direction IN
+            controller
+                .operation(
+                    VIRTIO_GPIO_MSG_SET_DIRECTION,
+                    gpio,
+                    VIRTIO_GPIO_DIRECTION_IN as u32,
+                )
+                .unwrap();
+
+            // Valid value retained here
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_GET_VALUE, gpio, 0)
+                    .unwrap(),
+                vec![1]
+            );
+
+            // Valid direction
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_GET_DIRECTION, gpio, 0)
+                    .unwrap(),
+                vec![VIRTIO_GPIO_DIRECTION_IN]
+            );
+        }
+    }
+
+    #[test]
+    fn test_gpio_controller_new_failure() {
+        const NGPIO: u16 = 256;
+        // Get num lines failure
+        let error = Error::GpioOperationFailed("get-num-lines");
+        let mut device = DummyDevice::new(NGPIO);
+        device.get_num_lines_result = Err(error);
+        assert_eq!(GpioController::new(device).unwrap_err(), error);
+
+        // Get line name failure
+        let error = Error::GpioOperationFailed("get-line-name");
+        let mut device = DummyDevice::new(NGPIO);
+        device.get_line_name_result = Err(error);
+        assert_eq!(GpioController::new(device).unwrap_err(), error);
+
+        // Get direction failure
+        let error = Error::GpioOperationFailed("get-direction");
+        let mut device = DummyDevice::new(NGPIO);
+        device.get_direction_result = Err(error);
+        assert_eq!(GpioController::new(device).unwrap_err(), error);
+    }
+
+    #[test]
+    fn test_gpio_set_direction_failure() {
+        const NGPIO: u16 = 256;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+
+        for gpio in 0..NGPIO {
+            // Set direction out without setting value first
+            assert_eq!(
+                controller
+                    .operation(
+                        VIRTIO_GPIO_MSG_SET_DIRECTION,
+                        gpio,
+                        VIRTIO_GPIO_DIRECTION_OUT as u32,
+                    )
+                    .unwrap_err(),
+                Error::GpioCurrentValueInvalid
+            );
+
+            // Set invalid direction
+            let dir = 10;
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_SET_DIRECTION, gpio, dir)
+                    .unwrap_err(),
+                Error::GpioDirectionInvalid(dir)
+            );
+        }
+    }
+
+    #[test]
+    fn test_gpio_set_value_failure() {
+        const NGPIO: u16 = 256;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+
+        for gpio in 0..NGPIO {
+            // Set invalid value
+            let val = 10;
+            assert_eq!(
+                controller
+                    .operation(VIRTIO_GPIO_MSG_SET_VALUE, gpio, val)
+                    .unwrap_err(),
+                Error::GpioValueInvalid(val)
+            );
+        }
+    }
+
+    #[test]
+    fn test_gpio_operation_failure() {
+        const NGPIO: u16 = 256;
+        let device = DummyDevice::new(NGPIO);
+        let controller = GpioController::new(device).unwrap();
+
+        for gpio in 0..NGPIO {
+            // Invalid operation
+            assert_eq!(
+                controller.operation(100, gpio, 0).unwrap_err(),
+                Error::GpioMessageInvalid(100)
+            );
+        }
     }
 }

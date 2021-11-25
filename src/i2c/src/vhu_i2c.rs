@@ -23,6 +23,9 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 use crate::i2c::*;
 
+/// Virtio I2C Feature bits
+const VIRTIO_I2C_F_ZERO_LENGTH_REQUEST: u16 = 0;
+
 const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 1;
 
@@ -77,6 +80,9 @@ struct VirtioI2cOutHdr {
 }
 unsafe impl ByteValued for VirtioI2cOutHdr {}
 
+/// VirtioI2cOutHdr Flags
+const VIRTIO_I2C_FLAGS_M_RD: u32 = 1 << 1;
+
 #[derive(Copy, Clone, Default)]
 #[repr(C)]
 struct VirtioI2cInHdr {
@@ -118,7 +124,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
         for desc_chain in requests.clone() {
             let descriptors: Vec<_> = desc_chain.clone().collect();
 
-            if descriptors.len() != 3 {
+            if (descriptors.len() != 2) && (descriptors.len() != 3) {
                 return Err(Error::UnexpectedDescriptorCount);
             }
 
@@ -131,12 +137,17 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
                 return Err(Error::UnexpectedDescriptorSize);
             }
 
-            let desc_buf = descriptors[1];
-            if desc_buf.len() == 0 {
-                return Err(Error::UnexpectedDescriptorSize);
-            }
+            let out_hdr = desc_chain
+                .memory()
+                .read_obj::<VirtioI2cOutHdr>(desc_out_hdr.addr())
+                .map_err(|_| Error::DescriptorReadFailed)?;
 
-            let desc_in_hdr = descriptors[2];
+            let flags = match out_hdr.flags.to_native() & VIRTIO_I2C_FLAGS_M_RD {
+                VIRTIO_I2C_FLAGS_M_RD => I2C_M_RD,
+                _ => 0,
+            };
+
+            let desc_in_hdr = descriptors[descriptors.len() - 1];
             if !desc_in_hdr.is_write_only() {
                 return Err(Error::UnexpectedReadableDescriptor);
             }
@@ -145,28 +156,40 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
                 return Err(Error::UnexpectedDescriptorSize);
             }
 
-            let mut buf: Vec<u8> = vec![0; desc_buf.len() as usize];
+            let (buf, len) = match descriptors.len() {
+                // Buffer is available
+                3 => {
+                    let desc_buf = descriptors[1];
+                    let len = desc_buf.len();
 
-            let mut flags: u16 = 0;
+                    if len == 0 {
+                        return Err(Error::UnexpectedDescriptorSize);
+                    }
+                    let mut buf = vec![0; len as usize];
 
-            if desc_buf.is_write_only() {
-                flags = I2C_M_RD;
-            } else {
-                desc_chain
-                    .memory()
-                    .read(&mut buf, desc_buf.addr())
-                    .map_err(|_| Error::DescriptorReadFailed)?;
-            }
+                    if flags != I2C_M_RD {
+                        if desc_buf.is_write_only() {
+                            return Err(Error::UnexpectedWriteOnlyDescriptor);
+                        }
 
-            let out_hdr = desc_chain
-                .memory()
-                .read_obj::<VirtioI2cOutHdr>(desc_out_hdr.addr())
-                .map_err(|_| Error::DescriptorReadFailed)?;
+                        desc_chain
+                            .memory()
+                            .read(&mut buf, desc_buf.addr())
+                            .map_err(|_| Error::DescriptorReadFailed)?;
+                    } else if !desc_buf.is_write_only() {
+                        return Err(Error::UnexpectedReadableDescriptor);
+                    }
+
+                    (buf, len)
+                }
+
+                _ => (Vec::<u8>::new(), 0),
+            };
 
             reqs.push(I2cReq {
                 addr: out_hdr.addr.to_native() >> 1,
                 flags,
-                len: desc_buf.len() as u16,
+                len: len as u16,
                 buf,
             });
         }
@@ -182,16 +205,23 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
 
         for (i, desc_chain) in requests.iter().enumerate() {
             let descriptors: Vec<_> = desc_chain.clone().collect();
-            let desc_buf = descriptors[1];
-            let desc_in_hdr = descriptors[2];
+            let desc_in_hdr = descriptors[descriptors.len() - 1];
             let mut len = size_of::<VirtioI2cInHdr>() as u32;
 
-            // Write the data read from the I2C device
-            if desc_buf.is_write_only() {
-                desc_chain
-                    .memory()
-                    .write(&reqs[i].buf, desc_buf.addr())
-                    .map_err(|_| Error::DescriptorWriteFailed)?;
+            if descriptors.len() == 3 {
+                let desc_buf = descriptors[1];
+
+                // Write the data read from the I2C device
+                if reqs[i].flags == I2C_M_RD {
+                    desc_chain
+                        .memory()
+                        .write(&reqs[i].buf, desc_buf.addr())
+                        .map_err(|_| Error::DescriptorWriteFailed)?;
+                }
+
+                if in_hdr.status == VIRTIO_I2C_MSG_OK {
+                    len += desc_buf.len();
+                }
             }
 
             // Write the transfer status
@@ -199,10 +229,6 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
                 .memory()
                 .write_obj::<VirtioI2cInHdr>(in_hdr, desc_in_hdr.addr())
                 .map_err(|_| Error::DescriptorWriteFailed)?;
-
-            if in_hdr.status == VIRTIO_I2C_MSG_OK {
-                len += desc_buf.len();
-            }
 
             if vring.add_used(desc_chain.head_index(), len).is_err() {
                 warn!("Couldn't return used descriptors to the ring");
@@ -235,6 +261,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
             | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
             | 1 << VIRTIO_RING_F_INDIRECT_DESC
             | 1 << VIRTIO_RING_F_EVENT_IDX
+            | 1 << VIRTIO_I2C_F_ZERO_LENGTH_REQUEST
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
@@ -314,7 +341,7 @@ mod tests {
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);
         assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
-        assert_eq!(backend.features(), 0x171000000);
+        assert_eq!(backend.features(), 0x171000001);
         assert_eq!(backend.protocol_features(), VhostUserProtocolFeatures::MQ);
 
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);

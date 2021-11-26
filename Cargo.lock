@@ -41,6 +41,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "cc"
+version = "1.0.72"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22a9137b95ea06864e018375b72adfb7db6e6f68cfc8df5a04d00288050485ee"
+
+[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -176,6 +182,24 @@ name = "libc"
 version = "0.2.121"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efaa7b300f3b5fe8eb6bf21ce3895e1751d9665086af2d64b42f19701015ff4f"
+
+[[package]]
+name = "libgpiod"
+version = "0.1.0"
+source = "git+https://github.com/vireshk/libgpiod#b91233f1c74ca98cc9161afaa37b17668696b0f6"
+dependencies = [
+ "libgpiod-sys",
+ "thiserror",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "libgpiod-sys"
+version = "0.1.0"
+source = "git+https://github.com/vireshk/libgpiod#b91233f1c74ca98cc9161afaa37b17668696b0f6"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "log"
@@ -400,6 +424,24 @@ checksum = "53567fd9ab820e4f3cc156f24146882fee3c365194c3e1dea74723265f27fc88"
 dependencies = [
  "bitflags",
  "libc",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "vhost-device-gpio"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "libc",
+ "libgpiod",
+ "log",
+ "thiserror",
+ "vhost",
+ "vhost-user-backend",
+ "virtio-bindings",
+ "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
 ]

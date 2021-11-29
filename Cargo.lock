@@ -287,6 +287,7 @@ dependencies = [
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
+ "virtio-queue",
  "vm-memory 0.7.0",
  "vmm-sys-util",
 ]

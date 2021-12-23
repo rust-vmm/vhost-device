@@ -24,6 +24,7 @@ virtio-queue = "0.2"
 vm-memory = "0.7"
 vmm-sys-util = "=0.9.0"
 
+[target.'cfg(target_env = "gnu")'.dependencies]
 libgpiod = { git = "https://github.com/vireshk/libgpiod" }
 
 [dev-dependencies]

@@ -16,7 +16,7 @@ clap = { version = "=3.0.0-beta.2",  features = ["yaml"] }
 libc = ">=0.2.95"
 log = ">=0.4.6"
 thiserror = "1.0"
-vhost = { version = "0.2", features = ["vhost-user-slave"] }
+vhost = { version = "0.3", features = ["vhost-user-slave"] }
 vhost-user-backend = { git = "https://github.com/rust-vmm/vhost-user-backend", rev = "4047c697470cc6c37e8e1835025b091d2b59c2f7" }
 virtio-bindings = ">=0.1"
 virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio", rev = "66cda80" }

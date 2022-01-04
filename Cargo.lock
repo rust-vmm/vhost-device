@@ -277,6 +277,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b56bf8f178fc500fe14505fca8b00dec76fc38f2304f461c8d9d7547982311d"
+dependencies = [
+ "bitflags",
+ "libc",
+ "vm-memory 0.7.0",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-i2c"
 version = "0.1.0"
 dependencies = [
@@ -284,7 +296,7 @@ dependencies = [
  "libc",
  "log",
  "thiserror",
- "vhost",
+ "vhost 0.3.0",
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
@@ -299,7 +311,7 @@ source = "git+https://github.com/rust-vmm/vhost-user-backend?rev=4047c697470cc6c
 dependencies = [
  "libc",
  "log",
- "vhost",
+ "vhost 0.2.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory 0.7.0",

@@ -18,7 +18,9 @@ use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
 use virtio_queue::DescriptorChain;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
+use vm_memory::{
+    ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le16, Le32,
+};
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -97,7 +99,7 @@ pub struct VhostUserI2cBackend<D: I2cDevice> {
     pub exit_event: EventFd,
 }
 
-type I2cDescriptorChain = DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap<()>>>;
+type I2cDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 
 impl<D: I2cDevice> VhostUserI2cBackend<D> {
     pub fn new(i2c_map: Arc<I2cMap<D>>) -> Result<Self> {

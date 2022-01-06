@@ -8,7 +8,7 @@ crates.
 
 Here is the list of device backends that we support:
 
-- [I2C](https://github.com/rust-vmm/vhost-device/blob/master/i2c/README.md)
+- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/i2c/README.md)
 
 ## Separation of Concerns
 

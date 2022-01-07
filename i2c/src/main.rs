@@ -233,6 +233,8 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(config: I2cConfiguration)
 }
 
 fn main() -> Result<()> {
+    env_logger::init();
+
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 

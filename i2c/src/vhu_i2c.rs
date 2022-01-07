@@ -716,6 +716,21 @@ mod tests {
             Error::DescriptorReadFailed
         );
 
+        // Write only buf for write operation
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            10,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedWriteOnlyDescriptor(1)
+        );
+
         // Missing buffer for I2C rdwr transfer
         let mut buf = Vec::<u8>::new();
         let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, VIRTIO_I2C_FLAGS_M_RD, 4);
@@ -743,5 +758,39 @@ mod tests {
 
         backend.set_event_idx(true);
         assert!(backend.event_idx);
+
+        assert!(backend.exit_event(0).is_some());
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        backend.update_memory(mem.clone()).unwrap();
+
+        let vring = VringRwLock::new(mem, 0x1000);
+        assert_eq!(
+            backend
+                .handle_event(0, EventSet::OUT, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        assert_eq!(
+            backend
+                .handle_event(1, EventSet::IN, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        // Hit the loop part
+        backend.set_event_idx(true);
+        backend
+            .handle_event(0, EventSet::IN, &[vring.clone()], 0)
+            .unwrap();
+
+        // Hit the non-loop part
+        backend.set_event_idx(false);
+        backend.handle_event(0, EventSet::IN, &[vring], 0).unwrap();
     }
 }

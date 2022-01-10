@@ -1,0 +1,47 @@
+name: vhost-device-rng
+version: "0.1.0"
+author: "Mathieu Poirier <mathieu.poirier@linaro.org>"
+about: Virtio RNG backend daemon.
+
+settings:
+    - ArgRequiredElseHelp
+
+args:
+  # Connection to sockets
+  - socket_path:
+      short: s
+      long: socket-path
+      value_name: FILE
+      takes_value: true
+      help: Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+  - socket_count:
+      short: c
+      long: socket-count
+      value_name: INT
+      takes_value: true
+      help: Number of guests (sockets) to connect to. Default = 1.
+  # Where to get the RNG data from
+  - rng_source:
+      short: f
+      long: filename
+      value_name: PATH
+      takes_value: true
+      help: Where to get the RNG data from. Defaults to /dev/urandom.
+  - period:
+      short: p
+      long: period
+      value_name: INT
+      takes_value: true
+      help: Time needed (in ms) to transfer max-bytes amount of byte.
+  - max_bytes:
+      short: m
+      long: max-bytes
+      value_name: INT
+      takes_value: true
+      help: Maximum amount of byte that can be transferred in a period.
+
+groups:
+  - required_args:
+      args:
+        - socket_path
+      required: true

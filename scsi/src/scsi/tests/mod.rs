@@ -20,7 +20,16 @@ fn null_image() -> File {
 
 fn test_image() -> File {
     let mut f = tempfile().unwrap();
-    f.write_all(include_bytes!("./test.img")).unwrap();
+    // generate 16 512-byte sectors, each of which consist of a single
+    // repeated hex character, i.e.
+    // sector 00: 0000000....0000
+    // sector 15: fffffff....ffff
+    for chr in b'0'..=b'9' {
+        f.write_all(&[chr; 512]).unwrap();
+    }
+    for chr in b'a'..=b'f' {
+        f.write_all(&[chr; 512]).unwrap();
+    }
     f
 }
 

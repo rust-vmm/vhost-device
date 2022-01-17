@@ -5,12 +5,13 @@ use std::{
     cmp::{max, min},
     io,
     io::{ErrorKind, Read, Write},
+    ops::Deref,
     rc::Rc,
 };
 
 use log::error;
 use virtio_queue::{Descriptor, DescriptorChain, DescriptorChainRwIter};
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace};
+use vm_memory::{Bytes, GuestAddress, GuestMemory};
 
 /// virtio-scsi has its own format for LUNs, documented in 5.6.6.1 of virtio
 /// v1.1. This represents a LUN parsed from that format.
@@ -103,7 +104,10 @@ pub enum VirtioScsiError {
 /// A `Write` implementation that writes to the memory indicated by a virtio
 /// descriptor chain.
 #[derive(Clone)]
-pub struct DescriptorChainWriter<M: GuestAddressSpace + Clone> {
+pub struct DescriptorChainWriter<M: Deref>
+where
+    M::Target: GuestMemory,
+{
     chain: DescriptorChain<M>,
     iter: DescriptorChainRwIter<M>,
     current: Option<Descriptor>,
@@ -112,7 +116,10 @@ pub struct DescriptorChainWriter<M: GuestAddressSpace + Clone> {
     max_written: Rc<Cell<u32>>,
 }
 
-impl<M: GuestAddressSpace + Clone> DescriptorChainWriter<M> {
+impl<M: Deref + Clone> DescriptorChainWriter<M>
+where
+    M::Target: GuestMemory,
+{
     pub fn new(chain: DescriptorChain<M>) -> Self {
         let mut iter = chain.clone().writable();
         let current = iter.next();
@@ -160,7 +167,10 @@ impl<M: GuestAddressSpace + Clone> DescriptorChainWriter<M> {
     }
 }
 
-impl<M: GuestAddressSpace + Clone> Write for DescriptorChainWriter<M> {
+impl<M: Deref + Clone> Write for DescriptorChainWriter<M>
+where
+    M::Target: GuestMemory,
+{
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Some(current) = self.current {
             let left_in_descriptor = current.len() - self.offset;
@@ -198,14 +208,20 @@ impl<M: GuestAddressSpace + Clone> Write for DescriptorChainWriter<M> {
 
 /// A `Read` implementation that reads from the memory indicated by a virtio
 /// descriptor chain.
-pub struct DescriptorChainReader<M: GuestAddressSpace + Clone> {
+pub struct DescriptorChainReader<M: Deref>
+where
+    M::Target: GuestMemory,
+{
     chain: DescriptorChain<M>,
     iter: DescriptorChainRwIter<M>,
     current: Option<Descriptor>,
     offset: u32,
 }
 
-impl<M: GuestAddressSpace + Clone> DescriptorChainReader<M> {
+impl<M: Deref + Clone> DescriptorChainReader<M>
+where
+    M::Target: GuestMemory,
+{
     pub fn new(chain: DescriptorChain<M>) -> Self {
         let mut iter = chain.clone().readable();
         let current = iter.next();
@@ -218,7 +234,10 @@ impl<M: GuestAddressSpace + Clone> DescriptorChainReader<M> {
     }
 }
 
-impl<M: GuestAddressSpace + Clone> Read for DescriptorChainReader<M> {
+impl<M: Deref> Read for DescriptorChainReader<M>
+where
+    M::Target: GuestMemory,
+{
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if let Some(current) = self.current {
             let left_in_descriptor = current.len() - self.offset;

@@ -28,7 +28,7 @@ use vhost::{
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio::VirtioScsiLun;
 use virtio_bindings::bindings::virtio_net::VIRTIO_F_VERSION_1;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, GuestMemoryLoadGuard};
 use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
@@ -47,8 +47,8 @@ use crate::{
 const CDB_SIZE: usize = 32;
 const SENSE_SIZE: usize = 96;
 
-type DescriptorChainWriter = virtio::DescriptorChainWriter<GuestMemoryAtomic<GuestMemoryMmap>>;
-type DescriptorChainReader = virtio::DescriptorChainReader<GuestMemoryAtomic<GuestMemoryMmap>>;
+type DescriptorChainWriter = virtio::DescriptorChainWriter<GuestMemoryLoadGuard<GuestMemoryMmap>>;
+type DescriptorChainReader = virtio::DescriptorChainReader<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 type Target = dyn scsi::Target<DescriptorChainWriter, DescriptorChainReader>;
 
 struct VhostUserScsiBackend {

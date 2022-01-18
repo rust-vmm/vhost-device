@@ -171,7 +171,9 @@ impl TryFrom<ArgMatches> for I2cConfiguration {
     }
 }
 
-fn start_backend<D: 'static + I2cDevice + Send + Sync>(config: I2cConfiguration) -> Result<()> {
+fn start_backend<D: 'static + I2cDevice + Send + Sync>(cmd_args: ArgMatches) -> Result<()> {
+    let config = I2cConfiguration::try_from(cmd_args).unwrap();
+
     // The same i2c_map structure instance is shared between all the guests
     let i2c_map = Arc::new(I2cMap::<D>::new(&config.devices).map_err(Error::I2cFailure)?);
 
@@ -238,13 +240,13 @@ fn main() -> Result<()> {
     let yaml = load_yaml!("cli.yaml");
     let cmd_args = App::from(yaml).get_matches();
 
-    let config = I2cConfiguration::try_from(cmd_args).unwrap();
-    start_backend::<PhysDevice>(config)
+    start_backend::<PhysDevice>(cmd_args)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i2c::tests::DummyDevice;
 
     impl DeviceConfig {
         pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
@@ -271,6 +273,25 @@ mod tests {
             args.extend_from_slice(&["-c", &count]);
         }
         app.try_get_matches_from(args).unwrap()
+    }
+
+    #[test]
+    fn test_device_config() {
+        let mut config = DeviceConfig::new(5);
+        let invalid_addr = (MAX_I2C_VDEV + 1) as u16;
+
+        config.push(5).unwrap();
+        config.push(6).unwrap();
+
+        assert_eq!(
+            config.push(invalid_addr).unwrap_err(),
+            Error::ClientAddressInvalid(invalid_addr)
+        );
+
+        assert_eq!(
+            config.push(5).unwrap_err(),
+            Error::ClientAddressDuplicate(5)
+        );
     }
 
     #[test]
@@ -360,6 +381,18 @@ mod tests {
         assert_eq!(
             AdapterConfig::try_from("1:4,1:32:21,5:10:23").unwrap_err(),
             Error::AdapterDuplicate(1)
+        );
+    }
+
+    #[test]
+    fn test_fail_listener() {
+        // This will fail the listeners and thread will panic.
+        let socket_name = Some("~/path/not/present/i2c");
+        let cmd_args = get_cmd_args(socket_name, "1:4,3:5", Some("5"));
+
+        assert_eq!(
+            start_backend::<DummyDevice>(cmd_args).unwrap_err(),
+            Error::FailedJoiningThreads
         );
     }
 }

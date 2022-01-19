@@ -266,11 +266,11 @@ mod tests {
         let app = App::from(yaml);
 
         if let Some(name) = name {
-            args.extend_from_slice(&["-s", &name]);
+            args.extend_from_slice(&["-s", name]);
         }
 
         if let Some(count) = count {
-            args.extend_from_slice(&["-c", &count]);
+            args.extend_from_slice(&["-c", count]);
         }
         app.try_get_matches_from(args).unwrap()
     }

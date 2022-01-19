@@ -673,14 +673,14 @@ pub mod tests {
             ..Default::default()
         };
         let adapter = I2cAdapter::new(i2c_device).unwrap();
-        assert_eq!(adapter.smbus, true);
+        assert!(adapter.smbus);
 
         let i2c_device = DummyDevice {
             funcs_result: Ok(I2C_FUNC_I2C),
             ..Default::default()
         };
         let adapter = I2cAdapter::new(i2c_device).unwrap();
-        assert_eq!(adapter.smbus, false);
+        assert!(!adapter.smbus);
 
         let i2c_device = DummyDevice {
             funcs_result: Ok(0),

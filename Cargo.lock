@@ -3,6 +3,15 @@
 version = 3
 
 [[package]]
+name = "aho-corasick"
+version = "0.7.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e37cfd5e7657ada45f742d6e99ca5788580b5c529dc78faf11ece6dc702656f"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -71,6 +80,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_logger"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -92,10 +114,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "indexmap"
-version = "1.7.0"
+name = "humantime"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
+checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
+
+[[package]]
+name = "indexmap"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "282a6247722caba404c065016bbfa522806e51714c34f5dfc3e4a3a46fcb4223"
 dependencies = [
  "autocfg",
  "hashbrown",
@@ -127,6 +155,12 @@ checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "memchr"
+version = "2.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 
 [[package]]
 name = "os_str_bytes"
@@ -169,12 +203,29 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.10"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38bc8cc6a5f2e3655e0899c1b848643b2562f853f114bfec7be120678e3ace05"
+checksum = "47aa80447ce4daf1717500037052af176af5d38cc3e571d9ec1c7353fc10c87d"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "regex"
+version = "1.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d07a8629359eb56f1e2fb1652bb04212c072a87ba68546a04065d525673ac461"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-syntax",
+]
+
+[[package]]
+name = "regex-syntax"
+version = "0.6.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f497285884f3fcff424ffc933e56d7cbca511def0c9831a7f9b5f6153e3cc89b"
 
 [[package]]
 name = "strsim"
@@ -184,9 +235,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "1.0.82"
+version = "1.0.85"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8daf5dd0bb60cbd4137b1b587d2fc0ae729bc07cf01cd70b36a1ed5ade3b9d59"
+checksum = "a684ac3dcd8913827e18cd09a68384ee66c1de24157e3c556c9ab16d85695fb7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -251,19 +302,19 @@ checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fecdca9a5291cc2b8dcf7dc02453fee791a280f3743cb0905f8822ae463b3fe"
+checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vhost"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d23ddeb452fb4f837526c6298cc8a2f4948e5595b0328a3d61b5eebe51874d7"
+checksum = "3b56bf8f178fc500fe14505fca8b00dec76fc38f2304f461c8d9d7547982311d"
 dependencies = [
  "bitflags",
  "libc",
- "vm-memory 0.6.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -272,6 +323,7 @@ name = "vhost-device-i2c"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "env_logger",
  "libc",
  "log",
  "thiserror",
@@ -279,21 +331,22 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory 0.7.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vhost-user-backend"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vhost-user-backend?rev=4047c697470cc6c37e8e1835025b091d2b59c2f7#4047c697470cc6c37e8e1835025b091d2b59c2f7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8db00e93514caa8987bb8b536fe962c9b66b4068583abc4c531eb97988477cd"
 dependencies = [
  "libc",
  "log",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory 0.7.0",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -306,21 +359,12 @@ checksum = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 [[package]]
 name = "virtio-queue"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vm-virtio?rev=66cda80#66cda803e406217945c1f93e6a4fb3b7c2a6983b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f90da9e627f6aaf667cc7b6548a28be332d3e1f058f4ceeb46ab6bcee5c4b74d"
 dependencies = [
  "log",
- "vm-memory 0.7.0",
+ "vm-memory",
  "vmm-sys-util",
-]
-
-[[package]]
-name = "vm-memory"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a8ebcb86ca457f9d6e14cf97009f679952eba42f0113de5db596e514cd0e43b"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]

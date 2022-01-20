@@ -673,14 +673,14 @@ pub mod tests {
             ..Default::default()
         };
         let adapter = I2cAdapter::new(i2c_device).unwrap();
-        assert_eq!(adapter.smbus, true);
+        assert!(adapter.smbus);
 
         let i2c_device = DummyDevice {
             funcs_result: Ok(I2C_FUNC_I2C),
             ..Default::default()
         };
         let adapter = I2cAdapter::new(i2c_device).unwrap();
-        assert_eq!(adapter.smbus, false);
+        assert!(!adapter.smbus);
 
         let i2c_device = DummyDevice {
             funcs_result: Ok(0),
@@ -761,6 +761,14 @@ pub mod tests {
     }
 
     #[test]
+    fn test_verify_smbus_data() {
+        let data = I2cSmbusData { word: 0x050A };
+
+        assert_eq!(data.read_byte(), 0x0A);
+        assert_eq!(data.read_word(), 0x050A);
+    }
+
+    #[test]
     fn test_smbus_transfer() {
         let adapter_config = AdapterConfig::try_from("1:3").unwrap();
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
@@ -836,6 +844,16 @@ pub mod tests {
         i2c_map.transfer(&mut reqs).unwrap();
         assert_eq!(reqs[1].buf[0], 1);
 
+        // I2C_SMBUS_WRITE (I2C_SMBUS_WORD_DATA) operation
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            flags: 0,
+            len: 3,
+            buf: [7, 4, 3].to_vec(),
+        }];
+
+        i2c_map.transfer(&mut reqs).unwrap();
+
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) operation
         let mut reqs = vec![
             I2cReq {
@@ -907,6 +925,19 @@ pub mod tests {
         assert_eq!(
             i2c_map.transfer(&mut reqs).unwrap_err(),
             Error::MessageLengthInvalid("write", 4)
+        );
+
+        // I2C_SMBUS_WRITE (I2C_SMBUS_WORD_DATA) failure operation
+        let mut reqs: Vec<I2cReq> = vec![I2cReq {
+            addr: 0x3,
+            // Will cause failure
+            flags: I2C_M_RD,
+            len: 3,
+            buf: [7, 4, 3].to_vec(),
+        }];
+        assert_eq!(
+            i2c_map.transfer(&mut reqs).unwrap_err(),
+            Error::MessageLengthInvalid("read", 3)
         );
 
         // I2C_SMBUS_READ (I2C_SMBUS_WORD_DATA) failure operation

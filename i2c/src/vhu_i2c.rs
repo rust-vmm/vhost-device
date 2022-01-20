@@ -18,7 +18,9 @@ use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
 use virtio_queue::DescriptorChain;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
+use vm_memory::{
+    ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le16, Le32,
+};
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -97,7 +99,7 @@ pub struct VhostUserI2cBackend<D: I2cDevice> {
     pub exit_event: EventFd,
 }
 
-type I2cDescriptorChain = DescriptorChain<GuestMemoryAtomic<GuestMemoryMmap<()>>>;
+type I2cDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 
 impl<D: I2cDevice> VhostUserI2cBackend<D> {
     pub fn new(i2c_map: Arc<I2cMap<D>>) -> Result<Self> {
@@ -112,7 +114,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
     fn process_requests(
         &self,
         requests: Vec<I2cDescriptorChain>,
-        vring: Option<&VringRwLock>,
+        vring: &VringRwLock,
     ) -> Result<bool> {
         let mut reqs: Vec<I2cReq> = Vec::new();
 
@@ -237,10 +239,8 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
                 .write_obj::<VirtioI2cInHdr>(in_hdr, desc_in_hdr.addr())
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
-            if let Some(vring) = vring {
-                if vring.add_used(desc_chain.head_index(), len).is_err() {
-                    warn!("Couldn't return used descriptors to the ring");
-                }
+            if vring.add_used(desc_chain.head_index(), len).is_err() {
+                warn!("Couldn't return used descriptors to the ring");
             }
         }
 
@@ -256,7 +256,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 
-        if self.process_requests(requests, Some(vring))? {
+        if self.process_requests(requests, vring)? {
             // Send notification once all the requests are processed
             vring
                 .signal_used_queue()
@@ -516,10 +516,14 @@ mod tests {
         let device_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
         let i2c_map = I2cMap::<DummyDevice>::new(&device_config).unwrap();
         let backend = VhostUserI2cBackend::new(Arc::new(i2c_map)).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
 
         // Descriptor chain size zero, shouldn't fail
         backend
-            .process_requests(Vec::<I2cDescriptorChain>::new(), None)
+            .process_requests(Vec::<I2cDescriptorChain>::new(), &vring)
             .unwrap();
 
         // Valid single read descriptor
@@ -527,7 +531,9 @@ mod tests {
         let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, VIRTIO_I2C_FLAGS_M_RD, 4);
         let desc_chains = vec![desc_chain];
 
-        backend.process_requests(desc_chains.clone(), None).unwrap();
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
         validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_OK);
 
         // Valid single write descriptor
@@ -535,7 +541,9 @@ mod tests {
         let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, 0, 4);
         let desc_chains = vec![desc_chain];
 
-        backend.process_requests(desc_chains.clone(), None).unwrap();
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
         validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_OK);
 
         // Valid mixed read-write descriptors
@@ -555,7 +563,9 @@ mod tests {
             prepare_desc_chain(GuestAddress(0), &mut buf[5], VIRTIO_I2C_FLAGS_M_RD, 4),
         ];
 
-        backend.process_requests(desc_chains.clone(), None).unwrap();
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
         validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_OK);
     }
 
@@ -564,6 +574,10 @@ mod tests {
         let device_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
         let i2c_map = I2cMap::<DummyDevice>::new(&device_config).unwrap();
         let backend = VhostUserI2cBackend::new(Arc::new(i2c_map)).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000);
 
         // One descriptors
         let flags: Vec<u16> = vec![0];
@@ -571,7 +585,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedDescriptorCount(1)
         );
@@ -582,7 +596,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedDescriptorCount(4)
         );
@@ -597,7 +611,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedWriteOnlyDescriptor(0)
         );
@@ -608,7 +622,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedDescriptorSize(size_of::<VirtioI2cOutHdr>(), 100)
         );
@@ -624,7 +638,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::DescriptorReadFailed
         );
@@ -639,7 +653,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedReadableDescriptor(2)
         );
@@ -650,7 +664,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedDescriptorSize(size_of::<u8>(), 100)
         );
@@ -666,7 +680,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::DescriptorWriteFailed
         );
@@ -681,7 +695,7 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::UnexpectedDescriptorSize(1, 0)
         );
@@ -697,9 +711,24 @@ mod tests {
         let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
         assert_eq!(
             backend
-                .process_requests(vec![desc_chain], None)
+                .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::DescriptorReadFailed
+        );
+
+        // Write only buf for write operation
+        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let len: Vec<u32> = vec![
+            size_of::<VirtioI2cOutHdr>() as u32,
+            10,
+            size_of::<u8>() as u32,
+        ];
+        let desc_chain = prepare_desc_chain_dummy(None, flags, len);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedWriteOnlyDescriptor(1)
         );
 
         // Missing buffer for I2C rdwr transfer
@@ -707,7 +736,9 @@ mod tests {
         let desc_chain = prepare_desc_chain(GuestAddress(0), &mut buf, VIRTIO_I2C_FLAGS_M_RD, 4);
         let desc_chains = vec![desc_chain];
 
-        backend.process_requests(desc_chains.clone(), None).unwrap();
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
         validate_desc_chains(desc_chains, VIRTIO_I2C_MSG_ERR);
     }
 
@@ -727,5 +758,39 @@ mod tests {
 
         backend.set_event_idx(true);
         assert!(backend.event_idx);
+
+        assert!(backend.exit_event(0).is_some());
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        backend.update_memory(mem.clone()).unwrap();
+
+        let vring = VringRwLock::new(mem, 0x1000);
+        assert_eq!(
+            backend
+                .handle_event(0, EventSet::OUT, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        assert_eq!(
+            backend
+                .handle_event(1, EventSet::IN, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        // Hit the loop part
+        backend.set_event_idx(true);
+        backend
+            .handle_event(0, EventSet::IN, &[vring.clone()], 0)
+            .unwrap();
+
+        // Hit the non-loop part
+        backend.set_event_idx(false);
+        backend.handle_event(0, EventSet::IN, &[vring], 0).unwrap();
     }
 }

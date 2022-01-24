@@ -186,3 +186,113 @@ fn main() -> Result<()> {
 
     start_backend(parse_cmd_line(cmd_args).unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{load_yaml, App};
+    use tempfile::tempdir;
+
+    fn get_cmd_args(option: &str, value: &str) -> clap::ArgMatches {
+        let yaml = load_yaml!("cli.yaml");
+        App::from(yaml).get_matches_from(vec![
+            "vhost-device-rng",
+            "-s",
+            "socket.file",
+            option,
+            value,
+        ])
+    }
+
+    fn get_default_cmd_args() -> clap::ArgMatches {
+        let yaml = load_yaml!("cli.yaml");
+        App::from(yaml).get_matches_from(vec!["vhost-device-rng", "-s", "socket.file"])
+    }
+
+    #[test]
+    fn invalid_socket_path() {
+        let app = App::new("vhost-device-rng");
+        assert_eq!(
+            parse_cmd_line(app.get_matches()).unwrap_err(),
+            Error::InvalidSocketPath
+        );
+    }
+
+    #[test]
+    fn invalid_socket_count() {
+        assert_eq!(
+            parse_cmd_line(get_cmd_args("-c", "0")).unwrap_err(),
+            Error::InvalidSocketCount
+        );
+    }
+
+    #[test]
+    fn invalid_random_file_input() {
+        assert_eq!(
+            parse_cmd_line(get_cmd_args("-f", "/dev/doesnotexists")).unwrap_err(),
+            Error::AccessRngSourceFile
+        );
+    }
+
+    #[test]
+    fn invalid_period_too_big() {
+        assert_eq!(
+            parse_cmd_line(get_cmd_args("-p", "100000")).unwrap_err(),
+            Error::InvalidPeriodInput
+        );
+    }
+
+    #[test]
+    fn invalid_period_malformed() {
+        assert_eq!(
+            parse_cmd_line(get_cmd_args("-p", "invalid")).unwrap_err(),
+            Error::InvalidPeriodFormat
+        );
+    }
+
+    #[test]
+    fn invalide_max_bytes() {
+        assert_eq!(
+            parse_cmd_line(get_cmd_args("-m", "invalid")).unwrap_err(),
+            Error::InvalidMaxByteInput
+        );
+    }
+
+    #[test]
+    fn default_period() {
+        assert_eq!(
+            parse_cmd_line(get_default_cmd_args()).unwrap().period_ms,
+            VHU_RNG_MAX_PERIOD_MS
+        );
+    }
+
+    #[test]
+    fn valid_period() {
+        assert_eq!(
+            parse_cmd_line(get_cmd_args("-p", "10")).unwrap().period_ms,
+            10
+        );
+    }
+
+    #[test]
+    fn verify_start_backend() {
+        let dir = tempdir().unwrap();
+        let random_path = dir.path().join("urandom");
+        let _random_file = File::create(random_path.clone());
+
+        let config = VuRngConfig {
+            period_ms: 1000,
+            max_bytes: 512,
+            count: 1,
+            socket_path: "/invalid/path".to_string(),
+            rng_source: random_path.to_str().unwrap().to_string(),
+        };
+
+        // An invalid socket will force the vhost_user::Listener to throw an error,
+        // forcing the thread to exit and the call to handle.join() to fail.
+        assert_eq!(
+            start_backend(config).unwrap_err(),
+            Error::FailedJoiningThreads
+        );
+    }
+}

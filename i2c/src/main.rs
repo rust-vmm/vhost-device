@@ -14,7 +14,7 @@ use std::num::ParseIntError;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
 
-use clap::{load_yaml, App, ArgMatches};
+use clap::Parser;
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
@@ -28,8 +28,6 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, PartialEq, ThisError)]
 /// Errors related to low level i2c helpers
 pub enum Error {
-    #[error("Invalid socket path")]
-    SocketPathInvalid,
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
     #[error("Invalid device list")]
@@ -46,6 +44,23 @@ pub enum Error {
     ParseFailure(ParseIntError),
     #[error("Failed to join threads")]
     FailedJoiningThreads,
+}
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct I2cArgs {
+    /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+    #[clap(short, long)]
+    socket_path: String,
+
+    /// Number of guests (sockets) to connect to.
+    #[clap(short = 'c', long, default_value_t = 1)]
+    socket_count: usize,
+
+    /// List of I2C bus and clients in format
+    /// <bus>:<client_addr>[:<client_addr>][,<bus>:<client_addr>[:<client_addr>]].
+    #[clap(short = 'l', long)]
+    device_list: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -140,39 +155,25 @@ struct I2cConfiguration {
     devices: AdapterConfig,
 }
 
-impl TryFrom<ArgMatches> for I2cConfiguration {
+impl TryFrom<I2cArgs> for I2cConfiguration {
     type Error = Error;
 
-    fn try_from(cmd_args: ArgMatches) -> Result<Self> {
-        let socket_path = cmd_args
-            .value_of("socket_path")
-            .ok_or(Error::SocketPathInvalid)?
-            .to_string();
-
-        let socket_count = cmd_args
-            .value_of("socket_count")
-            .unwrap_or("1")
-            .parse::<usize>()
-            .map_err(Error::ParseFailure)?;
-
-        if socket_count == 0 {
+    fn try_from(args: I2cArgs) -> Result<Self> {
+        if args.socket_count == 0 {
             return Err(Error::SocketCountInvalid(0));
         }
 
-        let list = cmd_args
-            .value_of("devices")
-            .ok_or(Error::DeviceListInvalid)?;
-        let devices = AdapterConfig::try_from(list)?;
+        let devices = AdapterConfig::try_from(args.device_list.as_str())?;
         Ok(I2cConfiguration {
-            socket_path,
-            socket_count,
+            socket_path: args.socket_path,
+            socket_count: args.socket_count,
             devices,
         })
     }
 }
 
-fn start_backend<D: 'static + I2cDevice + Send + Sync>(cmd_args: ArgMatches) -> Result<()> {
-    let config = I2cConfiguration::try_from(cmd_args).unwrap();
+fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<()> {
+    let config = I2cConfiguration::try_from(args).unwrap();
 
     // The same i2c_map structure instance is shared between all the guests
     let i2c_map = Arc::new(I2cMap::<D>::new(&config.devices).map_err(Error::I2cFailure)?);
@@ -237,10 +238,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(cmd_args: ArgMatches) -> 
 fn main() -> Result<()> {
     env_logger::init();
 
-    let yaml = load_yaml!("cli.yaml");
-    let cmd_args = App::from(yaml).get_matches();
-
-    start_backend::<PhysDevice>(cmd_args)
+    start_backend::<PhysDevice>(I2cArgs::parse())
 }
 
 #[cfg(test)]
@@ -260,19 +258,12 @@ mod tests {
         }
     }
 
-    fn get_cmd_args(name: Option<&str>, devices: &str, count: Option<&str>) -> ArgMatches {
-        let mut args = vec!["prog", "-l", devices];
-        let yaml = load_yaml!("cli.yaml");
-        let app = App::from(yaml);
-
-        if let Some(name) = name {
-            args.extend_from_slice(&["-s", name]);
+    fn get_cmd_args(path: &str, devices: &str, count: usize) -> I2cArgs {
+        I2cArgs {
+            socket_path: path.to_string(),
+            socket_count: count,
+            device_list: devices.to_string(),
         }
-
-        if let Some(count) = count {
-            args.extend_from_slice(&["-c", count]);
-        }
-        app.try_get_matches_from(args).unwrap()
     }
 
     #[test]
@@ -296,45 +287,31 @@ mod tests {
 
     #[test]
     fn test_parse_failure() {
-        let socket_name = Some("vi2c.sock");
+        let socket_name = "vi2c.sock";
 
         // Invalid bus_addr
-        let cmd_args = get_cmd_args(socket_name, "1:4,3d:5", Some("5"));
+        let cmd_args = get_cmd_args(socket_name, "1:4,3d:5", 5);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ParseFailure("3d".parse::<u32>().unwrap_err())
         );
 
         // Invalid client address
-        let cmd_args = get_cmd_args(socket_name, "1:4d", Some("5"));
+        let cmd_args = get_cmd_args(socket_name, "1:4d", 5);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ParseFailure("4d".parse::<u16>().unwrap_err())
         );
 
-        // Invalid socket path
-        let cmd_args = get_cmd_args(None, "1:4d", Some("5"));
-        assert_eq!(
-            I2cConfiguration::try_from(cmd_args).unwrap_err(),
-            Error::SocketPathInvalid
-        );
-
-        // Invalid socket count
-        let cmd_args = get_cmd_args(socket_name, "1:4", Some("1d"));
-        assert_eq!(
-            I2cConfiguration::try_from(cmd_args).unwrap_err(),
-            Error::ParseFailure("1d".parse::<u16>().unwrap_err())
-        );
-
         // Zero socket count
-        let cmd_args = get_cmd_args(socket_name, "1:4", Some("0"));
+        let cmd_args = get_cmd_args(socket_name, "1:4", 0);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::SocketCountInvalid(0)
         );
 
         // Duplicate client address: 4
-        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:4:23", Some("5"));
+        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:4:23", 5);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ClientAddressDuplicate(4)
@@ -343,14 +320,9 @@ mod tests {
 
     #[test]
     fn test_parse_successful() {
-        let socket_name = Some("vi2c.sock");
+        let socket_name = "vi2c.sock";
 
-        // Missing socket count, default (1) should be used.
-        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:5:23", None);
-        let config = I2cConfiguration::try_from(cmd_args).unwrap();
-        assert_eq!(config.socket_count, 1);
-
-        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:5:23", Some("5"));
+        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:5:23", 5);
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
 
         let expected_devices = AdapterConfig::new_with(vec![
@@ -361,7 +333,7 @@ mod tests {
 
         let expected_config = I2cConfiguration {
             socket_count: 5,
-            socket_path: String::from(socket_name.unwrap()),
+            socket_path: String::from(socket_name),
             devices: expected_devices,
         };
 
@@ -387,8 +359,8 @@ mod tests {
     #[test]
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
-        let socket_name = Some("~/path/not/present/i2c");
-        let cmd_args = get_cmd_args(socket_name, "1:4,3:5", Some("5"));
+        let socket_name = "~/path/not/present/i2c";
+        let cmd_args = get_cmd_args(socket_name, "1:4,3:5", 5);
 
         assert_eq!(
             start_backend::<DummyDevice>(cmd_args).unwrap_err(),

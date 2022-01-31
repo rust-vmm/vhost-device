@@ -211,6 +211,30 @@ impl VuRngBackend {
     }
 }
 
+#[cfg(test)]
+impl VuRngBackend {
+    // For testing purposes modify time synthetically
+    pub(crate) fn time_add(&mut self, duration: Duration) {
+        if let Some(t) = self.timer.period_start.checked_add(duration) {
+            self.timer.period_start = t;
+        }
+    }
+
+    pub(crate) fn time_sub(&mut self, duration: Duration) {
+        if let Some(t) = self.timer.period_start.checked_sub(duration) {
+            self.timer.period_start = t;
+        }
+    }
+
+    pub(crate) fn time_now(&mut self) {
+        self.timer.period_start = Instant::now();
+    }
+
+    pub(crate) fn set_quota(&mut self, quota: usize) {
+        self.timer.quota_remaining = quota;
+    }
+}
+
 /// VhostUserBackend trait methods
 impl VhostUserBackendMut<VringRwLock, ()> for VuRngBackend {
     fn num_queues(&self) -> usize {
@@ -289,5 +313,241 @@ impl VhostUserBackendMut<VringRwLock, ()> for VuRngBackend {
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
         self.exit_event.try_clone().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use tempfile::{tempdir, tempfile};
+
+    use virtio_queue::defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    fn build_desc_chain(count: u16, flags: u16) -> RngDescriptorChain {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 16);
+
+        //Create a descriptor chain with @count descriptors.
+        for i in 0..count {
+            let desc_flags = if i < count - 1 {
+                flags | VIRTQ_DESC_F_NEXT
+            } else {
+                flags & !VIRTQ_DESC_F_NEXT
+            };
+
+            let desc = Descriptor::new((0x100 * (i + 1)) as u64, 0x200, desc_flags, i + 1);
+            vq.desc_table().store(i, desc);
+        }
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
+            .iter()
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    #[test]
+    fn verify_chain_descriptors() {
+        let random = tempfile().unwrap();
+        let random_file = Arc::new(Mutex::new(random));
+        let mut backend = VuRngBackend::new(random_file, 1000, 512).unwrap();
+
+        // The guest driver is supposed to send us only unchained descriptors
+        let desc_chain = build_desc_chain(4, VIRTQ_DESC_F_WRITE);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], None)
+                .unwrap_err(),
+            VuRngError::UnexpectedDescriptorCount
+        );
+
+        // The guest driver is supposed to send us only write descriptors
+        let desc_chain = build_desc_chain(1, 0);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], None)
+                .unwrap_err(),
+            VuRngError::UnexpectedReadDescriptor
+        );
+    }
+
+    #[test]
+    fn verify_timer() {
+        let random = tempfile().unwrap();
+        let random_file = Arc::new(Mutex::new(random));
+        let mut backend = VuRngBackend::new(random_file, 1000, 512).unwrap();
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem.clone(), 0x1000);
+
+        // Artifically set the memory to avoid a VuRngError::NoMemoryConfigured error
+        backend.update_memory(mem).unwrap();
+
+        // Artificially set the period start time 5 seconds in the future
+        backend.time_add(Duration::from_secs(5));
+
+        // Checking for a start time in the future throws a VuRngError::UnexpectedTimerValue
+        assert_eq!(
+            backend
+                .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], Some(&vring))
+                .unwrap_err(),
+            VuRngError::UnexpectedTimerValue
+        );
+
+        // Artificially set the period start time to 10 second.  This will simulate a
+        // condition where the the period has been exeeded and for the quota to be reset
+        // to its maximum value.
+        backend.time_sub(Duration::from_secs(10));
+        assert!(backend
+            .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], Some(&vring))
+            .unwrap());
+
+        // Reset time to right now and set remaining quota to 0.  This will simulate a
+        // condition where the quota for a period has been exceeded and force the execution
+        // thread to wait for the start of the next period before serving requets.
+        backend.time_now();
+        backend.set_quota(0);
+        assert!(backend
+            .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], Some(&vring))
+            .unwrap());
+    }
+
+    #[test]
+    fn verify_file_access() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("foo.txt");
+        let random_file = Arc::new(Mutex::new(File::create(file_path).unwrap()));
+        let mut backend = VuRngBackend::new(random_file, 1000, 512).unwrap();
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem.clone(), 0x1000);
+
+        // Artifically set the memory to avoid a VuRngError::NoMemoryConfigured error
+        backend.update_memory(mem).unwrap();
+
+        // Reading from an empty file will throw a VuRngError::UnexpectedRngSourceError.
+        assert_eq!(
+            backend
+                .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], Some(&vring))
+                .unwrap_err(),
+            VuRngError::UnexpectedRngSourceError
+        );
+    }
+
+    #[test]
+    fn verify_handle_event() {
+        let random = tempfile().unwrap();
+        let random_file = Arc::new(Mutex::new(random));
+        let mut backend = VuRngBackend::new(random_file, 1000, 512).unwrap();
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000);
+
+        // Currently handles EventSet::IN only, otherwise an error is generated.
+        assert_eq!(
+            backend
+                .handle_event(0, EventSet::OUT, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        // Currently handles a single device event, anything higher than 0 will generate
+        // an error.
+        assert_eq!(
+            backend
+                .handle_event(1, EventSet::IN, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        // backend.event_idx is set to false by default, which will call backend.process_queue()
+        // a single time.  Since there is no descriptor in the vring backend.process_requests()
+        // will return immediately.
+        backend
+            .handle_event(0, EventSet::IN, &[vring.clone()], 0)
+            .unwrap();
+
+        // Set backend.event_idx to true in order to call backend.process_queue() multiple time
+        backend.set_event_idx(true);
+        backend.handle_event(0, EventSet::IN, &[vring], 0).unwrap();
+    }
+
+    #[test]
+    fn verify_backend() {
+        let random = tempfile().unwrap();
+        let random_file = Arc::new(Mutex::new(random));
+        let mut backend = VuRngBackend::new(random_file, 1000, 512).unwrap();
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem.clone(), 0x1000);
+
+        // Empty descriptor chain should be ignored
+        assert!(backend
+            .process_requests(Vec::<RngDescriptorChain>::new(), Some(&vring))
+            .unwrap());
+
+        // The descriptor type and count are correct but no memory is configured, something
+        // that needs to generate a VuRngError::NoMemoryConfigured error.
+        let desc_chain = build_desc_chain(1, VIRTQ_DESC_F_WRITE);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], Some(&vring))
+                .unwrap_err(),
+            VuRngError::NoMemoryConfigured
+        );
+
+        // Artificially set the memory to avoid a VuRngError::NoMemoryConfigured error
+        backend.update_memory(mem).unwrap();
+
+        // The capacity of descriptors is 512 byte as set in build_desc_chain().  Set the
+        // quota value to half of that to simulate a condition where there is less antropy
+        // available than the capacity of the descriptor buffer.
+        backend.set_quota(0x100);
+        assert!(backend
+            .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], Some(&vring))
+            .unwrap());
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_eq!(backend.features(), 0x171000000);
+        assert_eq!(backend.protocol_features(), VhostUserProtocolFeatures::MQ);
+
+        assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
+        assert_eq!(backend.get_config(0, 0), vec![]);
+
+        backend.set_event_idx(true);
+        assert!(backend.event_idx);
     }
 }

@@ -168,3 +168,85 @@ fn main() -> Result<()> {
 
     start_backend(VuRngConfig::try_from(RngArgs::parse()).unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn verify_cmd_line_arguments() {
+        // Setting the period to VHU_RNG_MAX_PERIOD_MS + 1 will trigger an error.
+        let args = RngArgs {
+            period: VHU_RNG_MAX_PERIOD_MS + 1,
+            max_bytes: 512,
+            socket_count: 1,
+            socket_path: Some("/some/socket_path".to_string()),
+            rng_source: "/some/random_path".to_string(),
+        };
+
+        assert_eq!(VuRngConfig::try_from(args), Err(Error::InvalidPeriodInput));
+
+        // Setting the socket count to 0 will trigger an error.
+        let args = RngArgs {
+            period: VHU_RNG_MAX_PERIOD_MS,
+            max_bytes: 512,
+            socket_count: 0,
+            socket_path: Some("/some/socket_path".to_string()),
+            rng_source: "/some/random_path".to_string(),
+        };
+
+        assert_eq!(VuRngConfig::try_from(args), Err(Error::InvalidSocketCount));
+
+        // Setting the socket patch to "None" trigger an error.
+        let mut args = RngArgs {
+            period: VHU_RNG_MAX_PERIOD_MS,
+            max_bytes: 512,
+            socket_count: 1,
+            socket_path: None,
+            rng_source: "/some/random_path".to_string(),
+        };
+
+        // args.clone() increases test coverage by copying the structure.
+        assert_eq!(
+            VuRngConfig::try_from(args.clone()),
+            Err(Error::InvalidSocketPath)
+        );
+
+        // All elements are valid.
+        args.socket_path = Some("/some/socket_path".to_string());
+        assert!(VuRngConfig::try_from(args).is_ok());
+    }
+
+    #[test]
+    fn verify_start_backend() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("socket");
+        let _socket_file = File::create(socket_path);
+        let random_path = dir.path().join("urandom");
+        let _random_file = File::create(random_path.clone());
+
+        let mut config = VuRngConfig {
+            period_ms: 1000,
+            max_bytes: 512,
+            count: 1,
+            socket_path: "/invalid/path".to_string(),
+            rng_source: "/invalid/path".to_string(),
+        };
+
+        // An invalid RNG source file will case an error.  Moreover config.clone() increases
+        // test coverage by copying the structure.
+        assert_eq!(
+            start_backend(config.clone()).unwrap_err(),
+            Error::AccessRngSourceFile
+        );
+
+        // An invalid socket will force the vhost_user::Listener to throw an error,
+        // forcing the thread to exit and the call to handle.join() to fail.
+        config.rng_source = random_path.to_str().unwrap().to_string();
+        assert_eq!(
+            start_backend(config).unwrap_err(),
+            Error::FailedJoiningThreads
+        );
+    }
+}

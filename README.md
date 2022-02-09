@@ -10,6 +10,20 @@ Here is the list of device backends that we support:
 
 - [I2C](https://github.com/rust-vmm/vhost-device/blob/main/i2c/README.md)
 
+## Testing and Code Coverage
+
+Like the wider rust-vmm project we expect new features to come with
+comprehensive code coverage. However as a multi-binary repository
+there are cases where avoiding a drop in coverage can be hard and an
+exception to the approach is allowable. These are:
+
+* adding a new binary target (aim at least 60% overall coverage)
+* expanding the main function (a small drop is acceptable)
+
+However any new feature added to an existing binary should not cause a
+drop in coverage. The general aim should be to always improve
+coverage.
+
 ## Separation of Concerns
 
 The binaries built by this repository can be run with any VMM which

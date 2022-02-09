@@ -258,11 +258,13 @@ mod tests {
         }
     }
 
-    fn get_cmd_args(path: &str, devices: &str, count: usize) -> I2cArgs {
-        I2cArgs {
-            socket_path: path.to_string(),
-            socket_count: count,
-            device_list: devices.to_string(),
+    impl I2cArgs {
+        fn from_args(path: &str, devices: &str, count: usize) -> I2cArgs {
+            I2cArgs {
+                socket_path: path.to_string(),
+                socket_count: count,
+                device_list: devices.to_string(),
+            }
         }
     }
 
@@ -290,28 +292,28 @@ mod tests {
         let socket_name = "vi2c.sock";
 
         // Invalid bus_addr
-        let cmd_args = get_cmd_args(socket_name, "1:4,3d:5", 5);
+        let cmd_args = I2cArgs::from_args(socket_name, "1:4,3d:5", 5);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ParseFailure("3d".parse::<u32>().unwrap_err())
         );
 
         // Invalid client address
-        let cmd_args = get_cmd_args(socket_name, "1:4d", 5);
+        let cmd_args = I2cArgs::from_args(socket_name, "1:4d", 5);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ParseFailure("4d".parse::<u16>().unwrap_err())
         );
 
         // Zero socket count
-        let cmd_args = get_cmd_args(socket_name, "1:4", 0);
+        let cmd_args = I2cArgs::from_args(socket_name, "1:4", 0);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::SocketCountInvalid(0)
         );
 
         // Duplicate client address: 4
-        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:4:23", 5);
+        let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:4:23", 5);
         assert_eq!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ClientAddressDuplicate(4)
@@ -322,7 +324,7 @@ mod tests {
     fn test_parse_successful() {
         let socket_name = "vi2c.sock";
 
-        let cmd_args = get_cmd_args(socket_name, "1:4,2:32:21,5:5:23", 5);
+        let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:5:23", 5);
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
 
         let expected_devices = AdapterConfig::new_with(vec![
@@ -360,7 +362,7 @@ mod tests {
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
         let socket_name = "~/path/not/present/i2c";
-        let cmd_args = get_cmd_args(socket_name, "1:4,3:5", 5);
+        let cmd_args = I2cArgs::from_args(socket_name, "1:4,3:5", 5);
 
         assert_eq!(
             start_backend::<DummyDevice>(cmd_args).unwrap_err(),

@@ -165,7 +165,7 @@ impl TryFrom<I2cArgs> for I2cConfiguration {
 
         let devices = AdapterConfig::try_from(args.device_list.trim())?;
         Ok(I2cConfiguration {
-            socket_path: args.socket_path,
+            socket_path: args.socket_path.trim().to_string(),
             socket_count: args.socket_count,
             devices,
         })
@@ -324,9 +324,10 @@ mod tests {
     fn test_parse_successful() {
         let socket_name = "vi2c.sock";
 
-        // Space before and after the device list
-        let cmd_args = I2cArgs::from_args(socket_name, " 1:4 ", 1);
-        I2cConfiguration::try_from(cmd_args).unwrap();
+        // Space before and after the device list and socket name
+        let cmd_args = I2cArgs::from_args(" ./vi2c.sock", " 1:4 ", 1);
+        let config = I2cConfiguration::try_from(cmd_args).unwrap();
+        Listener::new(config.socket_path, true).unwrap();
 
         // Valid configuration
         let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:5:23", 5);

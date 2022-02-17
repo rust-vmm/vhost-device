@@ -163,7 +163,7 @@ impl TryFrom<I2cArgs> for I2cConfiguration {
             return Err(Error::SocketCountInvalid(0));
         }
 
-        let devices = AdapterConfig::try_from(args.device_list.as_str())?;
+        let devices = AdapterConfig::try_from(args.device_list.trim())?;
         Ok(I2cConfiguration {
             socket_path: args.socket_path,
             socket_count: args.socket_count,
@@ -324,6 +324,11 @@ mod tests {
     fn test_parse_successful() {
         let socket_name = "vi2c.sock";
 
+        // Space before and after the device list
+        let cmd_args = I2cArgs::from_args(socket_name, " 1:4 ", 1);
+        I2cConfiguration::try_from(cmd_args).unwrap();
+
+        // Valid configuration
         let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:5:23", 5);
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
 

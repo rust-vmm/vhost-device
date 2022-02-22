@@ -167,3 +167,78 @@ fn main() -> Result<()> {
 
     start_backend(VuRngConfig::try_from(RngArgs::parse()).unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn verify_cmd_line_arguments() {
+        // All parameters have default values, except for the socket path.  White spaces are
+        // introduced on purpose to make sure Strings are trimmed properly.
+        let default_args: RngArgs = Parser::parse_from(&["", "-s  /some/socket_path  "]);
+
+        // A valid configuration that should be equal to the above default configuration.
+        let args = RngArgs {
+            period: VHU_RNG_MAX_PERIOD_MS,
+            max_bytes: usize::MAX,
+            socket_count: 1,
+            socket_path: "/some/socket_path".to_string(),
+            rng_source: "/dev/urandom".to_string(),
+        };
+
+        // All configuration elements should be what we expect them to be.  Using
+        // VuRngConfig::try_from() ensures that strings have been properly trimmed.
+        assert_eq!(
+            VuRngConfig::try_from(default_args),
+            VuRngConfig::try_from(args.clone())
+        );
+
+        // Setting a invalid period should trigger an InvalidPeriodInput error.
+        let mut invalid_period_args = args.clone();
+        invalid_period_args.period = VHU_RNG_MAX_PERIOD_MS + 1;
+        assert_eq!(
+            VuRngConfig::try_from(invalid_period_args),
+            Err(Error::InvalidPeriodInput(VHU_RNG_MAX_PERIOD_MS + 1))
+        );
+
+        // Setting the socket count to 0 should trigger an InvalidSocketCount error.
+        let mut invalid_socket_count_args = args;
+        invalid_socket_count_args.socket_count = 0;
+        assert_eq!(
+            VuRngConfig::try_from(invalid_socket_count_args),
+            Err(Error::InvalidSocketCount(0))
+        );
+    }
+
+    #[test]
+    fn verify_start_backend() {
+        let dir = tempdir().unwrap();
+        let random_path = dir.path().join("urandom");
+        let _random_file = File::create(random_path.clone());
+
+        let mut config = VuRngConfig {
+            period_ms: 1000,
+            max_bytes: 512,
+            count: 1,
+            socket_path: "/invalid/path".to_string(),
+            rng_source: "/invalid/path".to_string(),
+        };
+
+        // An invalid RNG source file should trigger an AccessRngSourceFile error.
+        assert_eq!(
+            start_backend(config.clone()).unwrap_err(),
+            Error::AccessRngSourceFile
+        );
+
+        // Set the RNG source to something valid, forcing the code to check the validity
+        // of the socket file.  Since the latter is invalid the vhost_user::Listener will
+        // throw an error, forcing the thread to exit and the call to handle.join() to fail.
+        config.rng_source = random_path.to_str().unwrap().to_string();
+        assert_eq!(
+            start_backend(config).unwrap_err(),
+            Error::FailedJoiningThreads
+        );
+    }
+}

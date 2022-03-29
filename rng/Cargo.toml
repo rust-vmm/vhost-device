@@ -18,8 +18,8 @@ log = ">=0.4.6"
 rand = ">=0.8.5"
 tempfile = "3.2.0"
 thiserror = "1.0"
-vhost = { version = "0.3", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.2"
+vhost = { version = "0.4", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.3"
 virtio-bindings = ">=0.1"
 virtio-queue = "0.2"
 vm-memory = ">=0.7"

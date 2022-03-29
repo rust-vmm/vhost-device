@@ -17,8 +17,8 @@ env_logger = ">=0.9"
 libc = ">=0.2.95"
 log = ">=0.4.6"
 thiserror = "1.0"
-vhost = { version = "0.3", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.2"
+vhost = { version = "0.4", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.3"
 virtio-bindings = ">=0.1"
 virtio-queue = "0.2"
 vm-memory = "0.7"

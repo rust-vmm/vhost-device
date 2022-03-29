@@ -281,9 +281,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8380fe0152551244f0747b1bf41737e0f8a74f97a14ccefd1148187271634f3c"
+checksum = "8ae183fc1b06c149f0c1793e1eb447c8b04bfe46d48e9e48bfb8d2d7ed64ecf0"
 dependencies = [
  "bitflags",
 ]
@@ -394,9 +394,9 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vhost"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b56bf8f178fc500fe14505fca8b00dec76fc38f2304f461c8d9d7547982311d"
+checksum = "53567fd9ab820e4f3cc156f24146882fee3c365194c3e1dea74723265f27fc88"
 dependencies = [
  "bitflags",
  "libc",
@@ -443,9 +443,9 @@ dependencies = [
 
 [[package]]
 name = "vhost-user-backend"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bf4c8d6fc1560ac01051bd09b744887665b25adeb390bb7de6bbfb4d2ad8b12"
+checksum = "1490f2028d4f119b2292efe218b5f8cfc6471f039b53b6a6eb5d9513e964facc"
 dependencies = [
  "libc",
  "log",

@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "gpio",
     "i2c",
     "rng",
 ]

@@ -14,7 +14,7 @@ use libgpiod::{
     RequestConfig,
 };
 use thiserror::Error as ThisError;
-use vm_memory::{Le16, Le32};
+use vm_memory::{ByteValued, Le16, Le32};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -79,13 +79,15 @@ const VIRTIO_GPIO_IRQ_TYPE_ALL: u16 = VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH
     | VIRTIO_GPIO_IRQ_TYPE_LEVEL_LOW;
 
 /// Virtio GPIO Configuration
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 #[repr(C)]
 pub(crate) struct VirtioGpioConfig {
     pub(crate) ngpio: Le16,
     pub(crate) padding: Le16,
     pub(crate) gpio_names_size: Le32,
 }
+
+unsafe impl ByteValued for VirtioGpioConfig {}
 
 /// Trait that represents an GPIO Device.
 ///

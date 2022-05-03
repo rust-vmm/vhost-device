@@ -27,7 +27,7 @@ use vm_memory::{
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-use crate::gpio::{GpioController, GpioDevice, VirtioGpioConfig, VIRTIO_GPIO_IRQ_TYPE_NONE};
+use crate::gpio::{GpioController, GpioDevice, VIRTIO_GPIO_IRQ_TYPE_NONE};
 
 /// Possible values of the status field
 const VIRTIO_GPIO_STATUS_OK: u8 = 0x0;
@@ -394,11 +394,15 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
     }
 
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
         unsafe {
             from_raw_parts(
-                self.controller.get_config() as *const _ as *const _,
-                size_of::<VirtioGpioConfig>(),
+                self.controller
+                    .get_config()
+                    .as_slice()
+                    .as_ptr()
+                    .offset(offset as isize) as *const _ as *const _,
+                size as usize,
             )
             .to_vec()
         }
@@ -1110,13 +1114,16 @@ mod tests {
             gpio_names_size: From::from(names_size as u32),
         };
 
-        assert_eq!(backend.get_config(0, 0), unsafe {
-            from_raw_parts(
-                &config as *const _ as *const _,
-                size_of::<VirtioGpioConfig>(),
-            )
-            .to_vec()
-        });
+        assert_eq!(
+            backend.get_config(0, size_of::<VirtioGpioConfig>() as u32),
+            unsafe {
+                from_raw_parts(
+                    &config as *const _ as *const _,
+                    size_of::<VirtioGpioConfig>(),
+                )
+                .to_vec()
+            }
+        );
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),

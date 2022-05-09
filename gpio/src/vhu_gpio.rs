@@ -391,7 +391,9 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
+        VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::CONFIG
+            | VhostUserProtocolFeatures::REPLY_ACK
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
@@ -1098,7 +1100,9 @@ mod tests {
         assert_eq!(backend.features(), 0x171000001);
         assert_eq!(
             backend.protocol_features(),
-            VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
+            VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::CONFIG
+                | VhostUserProtocolFeatures::REPLY_ACK
         );
 
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);

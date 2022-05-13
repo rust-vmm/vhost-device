@@ -185,10 +185,12 @@ impl GpioDevice for PhysDevice {
                 return Ok(());
             }
 
-            VIRTIO_GPIO_DIRECTION_IN => config.set_direction_offset(Direction::Input, gpio as u32),
+            VIRTIO_GPIO_DIRECTION_IN => {
+                config.set_direction_override(Direction::Input, gpio as u32);
+            }
             VIRTIO_GPIO_DIRECTION_OUT => {
-                config.set_direction(Direction::Output);
-                config.set_output_value(gpio as u32, value);
+                config.set_direction_default(Direction::Output);
+                config.set_output_value_override(gpio as u32, value);
             }
 
             _ => return Err(Error::GpioDirectionInvalid(value)),
@@ -245,9 +247,9 @@ impl GpioDevice for PhysDevice {
         let mut config = LineConfig::new().map_err(Error::GpiodFailed)?;
 
         match value as u16 {
-            VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING => config.set_edge_detection(Edge::Rising),
-            VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING => config.set_edge_detection(Edge::Falling),
-            VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH => config.set_edge_detection(Edge::Both),
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING => config.set_edge_detection_default(Edge::Rising),
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING => config.set_edge_detection_default(Edge::Falling),
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH => config.set_edge_detection_default(Edge::Both),
 
             // Drop the buffer.
             VIRTIO_GPIO_IRQ_TYPE_NONE => {
@@ -313,7 +315,7 @@ impl GpioDevice for PhysDevice {
         };
 
         // Wait for the interrupt for a second.
-        match request.edge_event_wait(Duration::new(1, 0)) {
+        match request.wait_edge_event(Duration::new(1, 0)) {
             Err(LibGpiodError::OperationTimedOut) => return Err(Error::GpioIrqOpTimedOut),
             x => x.map_err(Error::GpiodFailed)?,
         }
@@ -322,7 +324,7 @@ impl GpioDevice for PhysDevice {
         let state = &self.state[gpio as usize].write().unwrap();
         if let Some(buffer) = &state.buffer {
             request
-                .edge_event_read(buffer, 1)
+                .read_edge_event(buffer, 1)
                 .map_err(Error::GpiodFailed)?;
 
             Ok(())

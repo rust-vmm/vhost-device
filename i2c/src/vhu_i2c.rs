@@ -391,7 +391,7 @@ mod tests {
 
         mem.write_obj::<VirtioI2cOutHdr>(out_hdr, desc_out.addr())
             .unwrap();
-        vq.desc_table().store(index, desc_out);
+        vq.desc_table().store(index, desc_out).unwrap();
         next_addr += desc_out.len() as u64;
         index += 1;
 
@@ -412,14 +412,14 @@ mod tests {
                 index + 1,
             );
             mem.write(buf, desc_buf.addr()).unwrap();
-            vq.desc_table().store(index, desc_buf);
+            vq.desc_table().store(index, desc_buf).unwrap();
             next_addr += desc_buf.len() as u64;
             index += 1;
         }
 
         // In response descriptor
         let desc_in = Descriptor::new(next_addr, size_of::<u8>() as u32, VIRTQ_DESC_F_WRITE, 0);
-        vq.desc_table().store(index, desc_in);
+        vq.desc_table().store(index, desc_in).unwrap();
 
         // Put the descriptor index 0 in the first available ring position.
         mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
@@ -492,7 +492,7 @@ mod tests {
             };
 
             let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
-            vq.desc_table().store(i as u16, desc);
+            vq.desc_table().store(i as u16, desc).unwrap();
         }
 
         // Put the descriptor index 0 in the first available ring position.

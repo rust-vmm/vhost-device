@@ -349,7 +349,7 @@ mod tests {
             };
 
             let desc = Descriptor::new((0x100 * (i + 1)) as u64, 0x200, desc_flags, i + 1);
-            vq.desc_table().store(i, desc);
+            vq.desc_table().store(i, desc).unwrap();
         }
 
         // Put the descriptor index 0 in the first available ring position.

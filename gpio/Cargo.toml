@@ -18,15 +18,15 @@ libc = ">=0.2.95"
 log = ">=0.4.6"
 thiserror = "1.0"
 vhost = { version = "0.4", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.3"
+vhost-user-backend = "0.5"
 virtio-bindings = ">=0.1"
-virtio-queue = "0.2"
-vm-memory = ">=0.7"
+virtio-queue = "0.4"
+vm-memory = ">=0.8"
 vmm-sys-util = "=0.9.0"
 
 [target.'cfg(target_env = "gnu")'.dependencies]
 libgpiod = { git = "https://github.com/vireshk/libgpiod" }
 
 [dev-dependencies]
-virtio-queue = { version = "0.2", features = ["test-utils"] }
-vm-memory = { version = ">=0.7.0", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { version = "0.4", features = ["test-utils"] }
+vm-memory = { version = ">=0.8.0", features = ["backend-mmap", "backend-atomic"] }

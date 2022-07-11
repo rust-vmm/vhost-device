@@ -195,8 +195,9 @@ checksum = "5916d2ae698f6de9bfb891ad7a8d65c09d232dc58cc4ac433c7da3b2fd84bc2b"
 [[package]]
 name = "libgpiod"
 version = "0.1.0"
-source = "git+https://github.com/vireshk/libgpiod#d96c27a6b868a737f3601bd63fb44556ec5773d7"
+source = "git+https://github.com/vireshk/libgpiod#584910baf342bee3511361c3e486ad4f3e5437f2"
 dependencies = [
+ "libc",
  "libgpiod-sys",
  "thiserror",
  "vmm-sys-util",
@@ -205,7 +206,7 @@ dependencies = [
 [[package]]
 name = "libgpiod-sys"
 version = "0.1.0"
-source = "git+https://github.com/vireshk/libgpiod#d96c27a6b868a737f3601bd63fb44556ec5773d7"
+source = "git+https://github.com/vireshk/libgpiod#584910baf342bee3511361c3e486ad4f3e5437f2"
 dependencies = [
  "cc",
 ]

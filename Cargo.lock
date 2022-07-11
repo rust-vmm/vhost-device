@@ -54,16 +54,16 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "clap"
-version = "3.1.17"
+version = "3.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47582c09be7c8b32c0ab3a6181825ababb713fde6fff20fc573a3870dd45c6a0"
+checksum = "190814073e85d238f31ff738fcb0bf6910cedeb73376c87cd69291028966fd83"
 dependencies = [
  "atty",
  "bitflags",
  "clap_derive",
  "clap_lex",
  "indexmap",
- "lazy_static",
+ "once_cell",
  "strsim",
  "termcolor",
  "textwrap",
@@ -71,9 +71,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "3.1.7"
+version = "3.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3aab4734e083b809aaf5794e14e756d1c798d2c69c7f7de7a09a2f5214993c1"
+checksum = "759bf187376e1afa7b85b959e6a664a3e7a95203415dba952ad19139e798f902"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -181,12 +181,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
 name = "libc"
 version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -225,6 +219,12 @@ name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
+
+[[package]]
+name = "once_cell"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18a6dbe30758c9f83eb00cbea4ac95966305f5a7772f3f42ebfc7fc7eddbd8e1"
 
 [[package]]
 name = "os_str_bytes"

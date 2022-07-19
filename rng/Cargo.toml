@@ -23,7 +23,7 @@ vhost-user-backend = "0.5"
 virtio-bindings = ">=0.1"
 virtio-queue = "0.4"
 vm-memory = ">=0.8"
-vmm-sys-util = "=0.9.0"
+vmm-sys-util = "=0.10.0"
 
 [dev-dependencies]
 virtio-queue = { version = "0.4", features = ["test-utils"] }

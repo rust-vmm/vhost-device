@@ -18,11 +18,11 @@ libc = ">=0.2.95"
 log = ">=0.4.6"
 thiserror = "1.0"
 vhost = { version = "0.4", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.5"
+vhost-user-backend = "0.5.1"
 virtio-bindings = ">=0.1"
 virtio-queue = "0.4"
 vm-memory = ">=0.8"
-vmm-sys-util = "=0.9.0"
+vmm-sys-util = "=0.10.0"
 
 [target.'cfg(target_env = "gnu")'.dependencies]
 libgpiod = { git = "https://github.com/vireshk/libgpiod" }

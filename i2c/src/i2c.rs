@@ -575,7 +575,7 @@ pub mod tests {
     use vmm_sys_util::tempfile::TempFile;
 
     // Update read-buffer of each write-buffer with index + 1 value.
-    pub fn update_rdwr_buf(buf: &mut Vec<u8>) {
+    pub fn update_rdwr_buf(buf: &mut [u8]) {
         for (i, byte) in buf.iter_mut().enumerate() {
             *byte = i as u8 + 1;
         }

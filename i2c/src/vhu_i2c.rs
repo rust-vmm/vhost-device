@@ -17,9 +17,10 @@ use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_V
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
-use virtio_queue::DescriptorChain;
+use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
-    ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le16, Le32,
+    ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+    Le16, Le32,
 };
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -97,6 +98,7 @@ pub struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
     pub exit_event: EventFd,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 type I2cDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
@@ -107,6 +109,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
             i2c_map,
             event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            mem: None,
         })
     }
 
@@ -252,7 +255,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
-            .iter()
+            .iter(self.mem.as_ref().unwrap().memory())
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 
@@ -299,8 +302,9 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
     fn update_memory(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> VhostUserBackendResult<()> {
+        self.mem = Some(mem);
         Ok(())
     }
 
@@ -354,8 +358,8 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 mod tests {
     use std::convert::TryFrom;
 
-    use virtio_queue::defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::Error;
@@ -370,8 +374,8 @@ mod tests {
         flag: u32,
         client_addr: u16,
     ) -> I2cDescriptorChain {
-        let mem = GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(&mem, 16);
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
         let mut next_addr = vq.desc_table().total_size() + 0x100;
         let mut index = 0;
 
@@ -385,7 +389,7 @@ mod tests {
         let desc_out = Descriptor::new(
             next_addr,
             size_of::<VirtioI2cOutHdr>() as u32,
-            VIRTQ_DESC_F_NEXT,
+            VRING_DESC_F_NEXT as u16,
             index + 1,
         );
 
@@ -402,13 +406,13 @@ mod tests {
                 update_rdwr_buf(buf);
                 0
             } else {
-                VIRTQ_DESC_F_WRITE
+                VRING_DESC_F_WRITE
             };
 
             let desc_buf = Descriptor::new(
                 next_addr,
                 buf.len() as u32,
-                flag | VIRTQ_DESC_F_NEXT,
+                (flag | VRING_DESC_F_NEXT) as u16,
                 index + 1,
             );
             mem.write(buf, desc_buf.addr()).unwrap();
@@ -418,7 +422,12 @@ mod tests {
         }
 
         // In response descriptor
-        let desc_in = Descriptor::new(next_addr, size_of::<u8>() as u32, VIRTQ_DESC_F_WRITE, 0);
+        let desc_in = Descriptor::new(
+            next_addr,
+            size_of::<u8>() as u32,
+            VRING_DESC_F_WRITE as u16,
+            0,
+        );
         vq.desc_table().store(index, desc_in).unwrap();
 
         // Put the descriptor index 0 in the first available ring position.
@@ -430,8 +439,9 @@ mod tests {
             .unwrap();
 
         // Create descriptor chain from pre-filled memory
-        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
-            .iter()
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
             .unwrap()
             .next()
             .unwrap()
@@ -475,14 +485,14 @@ mod tests {
         flags: Vec<u16>,
         len: Vec<u32>,
     ) -> I2cDescriptorChain {
-        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(&mem, 16);
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
 
         for (i, flag) in flags.iter().enumerate() {
-            let mut f = if i == flags.len() - 1 {
+            let mut f: u16 = if i == flags.len() - 1 {
                 0
             } else {
-                VIRTQ_DESC_F_NEXT
+                VRING_DESC_F_NEXT as u16
             };
             f |= flag;
 
@@ -491,7 +501,7 @@ mod tests {
                 _ => 0x100,
             };
 
-            let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
+            let desc = Descriptor::new(offset, len[i], f as u16, (i + 1) as u16);
             vq.desc_table().store(i as u16, desc).unwrap();
         }
 
@@ -504,8 +514,9 @@ mod tests {
             .unwrap();
 
         // Create descriptor chain from pre-filled memory
-        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
-            .iter()
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
             .unwrap()
             .next()
             .unwrap()
@@ -519,7 +530,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Descriptor chain size zero, shouldn't fail
         backend
@@ -577,7 +588,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // One descriptors
         let flags: Vec<u16> = vec![0];
@@ -602,7 +613,7 @@ mod tests {
         );
 
         // Write only out hdr
-        let flags: Vec<u16> = vec![VIRTQ_DESC_F_WRITE, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![VRING_DESC_F_WRITE as u16, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioI2cOutHdr>() as u32,
             1,
@@ -617,7 +628,7 @@ mod tests {
         );
 
         // Invalid out hdr length
-        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![100, 1, size_of::<u8>() as u32];
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
@@ -629,7 +640,7 @@ mod tests {
 
         // Invalid out hdr address
         let addr: Vec<u64> = vec![0x10000, 0, 0];
-        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioI2cOutHdr>() as u32,
             1,
@@ -659,7 +670,7 @@ mod tests {
         );
 
         // Invalid in hdr length
-        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![size_of::<VirtioI2cOutHdr>() as u32, 1, 100];
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
@@ -671,7 +682,7 @@ mod tests {
 
         // Invalid in hdr address
         let addr: Vec<u64> = vec![0, 0, 0x10000];
-        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioI2cOutHdr>() as u32,
             1,
@@ -686,7 +697,7 @@ mod tests {
         );
 
         // Invalid buf length
-        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioI2cOutHdr>() as u32,
             0,
@@ -702,7 +713,7 @@ mod tests {
 
         // Invalid buf address
         let addr: Vec<u64> = vec![0, 0x10000, 0];
-        let flags: Vec<u16> = vec![0, 0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, 0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioI2cOutHdr>() as u32,
             1,
@@ -717,7 +728,7 @@ mod tests {
         );
 
         // Write only buf for write operation
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioI2cOutHdr>() as u32,
             10,
@@ -766,7 +777,7 @@ mod tests {
         );
         backend.update_memory(mem.clone()).unwrap();
 
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
         assert_eq!(
             backend
                 .handle_event(0, EventSet::OUT, &[vring.clone()], 0)

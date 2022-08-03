@@ -19,10 +19,10 @@ use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_V
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
-use virtio_queue::DescriptorChain;
+use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
-    Le16, Le32,
+    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard,
+    GuestMemoryMmap, Le16, Le32,
 };
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -148,6 +148,7 @@ pub(crate) struct VhostUserGpioBackend<D: GpioDevice> {
     handles: Arc<RwLock<Vec<Option<JoinHandle<()>>>>>,
     event_idx: bool,
     pub(crate) exit_event: EventFd,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 type GpioDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
@@ -163,6 +164,7 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
             handles: Arc::new(RwLock::new(handles)),
             event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            mem: None,
         })
     }
 
@@ -251,7 +253,7 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
-            .iter()
+            .iter(self.mem.as_ref().unwrap().memory())
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 
@@ -359,7 +361,7 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
-            .iter()
+            .iter(self.mem.as_ref().unwrap().memory())
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 
@@ -416,8 +418,9 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
     fn update_memory(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> VhostUserBackendResult<()> {
+        self.mem = Some(mem);
         Ok(())
     }
 
@@ -489,8 +492,8 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
 #[cfg(test)]
 mod tests {
-    use virtio_queue::defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::Error;
@@ -505,15 +508,15 @@ mod tests {
         out_hdr: R,
         response_len: u32,
     ) -> GpioDescriptorChain {
-        let mem = GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(&mem, 16);
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
         let mut next_addr = vq.desc_table().total_size() + 0x100;
         let mut index = 0;
 
         let desc_out = Descriptor::new(
             next_addr,
             size_of::<R>() as u32,
-            VIRTQ_DESC_F_NEXT,
+            VRING_DESC_F_NEXT as u16,
             index + 1,
         );
 
@@ -523,7 +526,7 @@ mod tests {
         index += 1;
 
         // In response descriptor
-        let desc_in = Descriptor::new(next_addr, response_len, VIRTQ_DESC_F_WRITE, 0);
+        let desc_in = Descriptor::new(next_addr, response_len, VRING_DESC_F_WRITE as u16, 0);
         vq.desc_table().store(index, desc_in).unwrap();
 
         // Put the descriptor index 0 in the first available ring position.
@@ -535,8 +538,9 @@ mod tests {
             .unwrap();
 
         // Create descriptor chain from pre-filled memory
-        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
-            .iter()
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
             .unwrap()
             .next()
             .unwrap()
@@ -580,14 +584,14 @@ mod tests {
         flags: Vec<u16>,
         len: Vec<u32>,
     ) -> GpioDescriptorChain {
-        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(&mem, 16);
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
 
         for (i, flag) in flags.iter().enumerate() {
-            let mut f = if i == flags.len() - 1 {
+            let mut f: u16 = if i == flags.len() - 1 {
                 0
             } else {
-                VIRTQ_DESC_F_NEXT
+                VRING_DESC_F_NEXT as u16
             };
             f |= flag;
 
@@ -609,8 +613,9 @@ mod tests {
             .unwrap();
 
         // Create descriptor chain from pre-filled memory
-        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
-            .iter()
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
             .unwrap()
             .next()
             .unwrap()
@@ -650,7 +655,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Descriptor chain size zero, shouldn't fail
         backend
@@ -701,7 +706,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Have only one descriptor, expected two.
         let flags: Vec<u16> = vec![0];
@@ -726,7 +731,7 @@ mod tests {
         );
 
         // Write only out hdr.
-        let flags: Vec<u16> = vec![VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![VRING_DESC_F_WRITE as u16, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
@@ -738,7 +743,7 @@ mod tests {
 
         // Invalid out hdr address.
         let addr: Vec<u64> = vec![0x10000, 0];
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
         let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
         assert_eq!(
@@ -749,7 +754,7 @@ mod tests {
         );
 
         // Invalid out hdr length.
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![100, 2];
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
@@ -772,7 +777,7 @@ mod tests {
 
         // Invalid in hdr address.
         let addr: Vec<u64> = vec![0, 0x10000];
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![size_of::<VirtioGpioRequest>() as u32, 2];
         let desc_chain = prepare_desc_chain_dummy(Some(addr), flags, len);
         assert_eq!(
@@ -802,7 +807,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Descriptor chain size zero, shouldn't fail.
         backend
@@ -856,7 +861,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         let desc_chains = vec![
             // Prepare line: GPIO
@@ -947,7 +952,7 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Only one descriptor, expected two.
         let flags: Vec<u16> = vec![0];
@@ -972,7 +977,7 @@ mod tests {
         );
 
         // Write only out hdr
-        let flags: Vec<u16> = vec![VIRTQ_DESC_F_WRITE, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![VRING_DESC_F_WRITE as u16, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioGpioIrqRequest>() as u32,
             size_of::<VirtioGpioIrqResponse>() as u32,
@@ -987,7 +992,7 @@ mod tests {
 
         // Invalid out hdr address
         let addr: Vec<u64> = vec![0x10000, 0];
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioGpioIrqRequest>() as u32,
             size_of::<VirtioGpioIrqResponse>() as u32,
@@ -1001,7 +1006,7 @@ mod tests {
         );
 
         // Invalid out hdr length
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![100, size_of::<VirtioGpioIrqResponse>() as u32];
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
@@ -1026,7 +1031,7 @@ mod tests {
         );
 
         // Invalid in hdr length
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![size_of::<VirtioGpioIrqRequest>() as u32, 100];
         let desc_chain = prepare_desc_chain_dummy(None, flags, len);
         assert_eq!(
@@ -1037,7 +1042,7 @@ mod tests {
         );
 
         // Wait for event without setting irq type first.
-        let flags: Vec<u16> = vec![0, VIRTQ_DESC_F_WRITE];
+        let flags: Vec<u16> = vec![0, VRING_DESC_F_WRITE as u16];
         let len: Vec<u32> = vec![
             size_of::<VirtioGpioIrqRequest>() as u32,
             size_of::<VirtioGpioIrqResponse>() as u32,
@@ -1134,8 +1139,8 @@ mod tests {
         );
         backend.update_memory(mem.clone()).unwrap();
 
-        let vring_request = VringRwLock::new(mem.clone(), 0x1000);
-        let vring_event = VringRwLock::new(mem, 0x1000);
+        let vring_request = VringRwLock::new(mem.clone(), 0x1000).unwrap();
+        let vring_event = VringRwLock::new(mem, 0x1000).unwrap();
         assert_eq!(
             backend
                 .handle_event(

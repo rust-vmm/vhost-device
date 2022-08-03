@@ -19,8 +19,10 @@ use virtio_bindings::bindings::virtio_net::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_V
 use virtio_bindings::bindings::virtio_ring::{
     VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
 };
-use virtio_queue::DescriptorChain;
-use vm_memory::{Bytes, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
+use virtio_queue::{DescriptorChain, QueueOwnedT};
+use vm_memory::{
+    Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+};
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
@@ -87,6 +89,7 @@ pub struct VuRngBackend<T: Read> {
     timer: VuRngTimerConfig,
     rng_source: Arc<Mutex<T>>,
     pub exit_event: EventFd,
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 impl<T: Read> VuRngBackend<T> {
@@ -101,6 +104,7 @@ impl<T: Read> VuRngBackend<T> {
             rng_source,
             timer: VuRngTimerConfig::new(period_ms, max_bytes),
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuRngError::EventFdError)?,
+            mem: None,
         })
     }
 
@@ -184,7 +188,7 @@ impl<T: Read> VuRngBackend<T> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
-            .iter()
+            .iter(self.mem.as_ref().unwrap().memory())
             .map_err(|_| VuRngError::DescriptorNotFound)?
             .collect();
 
@@ -228,8 +232,9 @@ impl<T: 'static + Read + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for V
 
     fn update_memory(
         &mut self,
-        _mem: GuestMemoryAtomic<GuestMemoryMmap>,
+        mem: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> result::Result<(), io::Error> {
+        self.mem = Some(mem);
         Ok(())
     }
 
@@ -284,8 +289,8 @@ mod tests {
     use super::*;
     use std::io::{ErrorKind, Read};
 
-    use virtio_queue::defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     // Add VuRngBackend accessor to artificially manipulate internal fields
@@ -337,15 +342,15 @@ mod tests {
     }
 
     fn build_desc_chain(count: u16, flags: u16) -> RngDescriptorChain {
-        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(&mem, 16);
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
 
         //Create a descriptor chain with @count descriptors.
         for i in 0..count {
             let desc_flags = if i < count - 1 {
-                flags | VIRTQ_DESC_F_NEXT
+                flags | VRING_DESC_F_NEXT as u16
             } else {
-                flags & !VIRTQ_DESC_F_NEXT
+                flags & !VRING_DESC_F_NEXT as u16
             };
 
             let desc = Descriptor::new((0x100 * (i + 1)) as u64, 0x200, desc_flags, i + 1);
@@ -361,8 +366,9 @@ mod tests {
             .unwrap();
 
         // Create descriptor chain from pre-filled memory
-        vq.create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
-            .iter()
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
             .unwrap()
             .next()
             .unwrap()
@@ -381,10 +387,10 @@ mod tests {
         );
 
         // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // The guest driver is supposed to send us only unchained descriptors
-        let desc_chain = build_desc_chain(count, VIRTQ_DESC_F_WRITE);
+        let desc_chain = build_desc_chain(count, VRING_DESC_F_WRITE as u16);
         assert_eq!(
             backend
                 .process_requests(vec![desc_chain], &vring)
@@ -413,7 +419,7 @@ mod tests {
         );
 
         // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Artificially set the period start time 5 seconds in the future
         backend.time_add(Duration::from_secs(5));
@@ -421,7 +427,7 @@ mod tests {
         // Checking for a start time in the future throws a VuRngError::UnexpectedTimerValue
         assert_eq!(
             backend
-                .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], &vring)
+                .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
                 .unwrap_err(),
             VuRngError::UnexpectedTimerValue
         );
@@ -431,7 +437,7 @@ mod tests {
         // to its maximum value.
         backend.time_sub(Duration::from_secs(10));
         assert!(backend
-            .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], &vring)
+            .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
             .unwrap());
 
         // Reset time to right now and set remaining quota to 0.  This will simulate a
@@ -440,7 +446,7 @@ mod tests {
         backend.time_now();
         backend.set_quota(0);
         assert!(backend
-            .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], &vring)
+            .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
             .unwrap());
     }
 
@@ -456,12 +462,12 @@ mod tests {
         );
 
         // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Any type of error while reading an RNG source will throw a VuRngError::UnexpectedRngSourceError.
         assert_eq!(
             backend
-                .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], &vring)
+                .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
                 .unwrap_err(),
             VuRngError::UnexpectedRngSourceError
         );
@@ -477,8 +483,11 @@ mod tests {
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
 
+        // Update memory
+        backend.update_memory(mem.clone()).unwrap();
+
         // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000);
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Currently handles EventSet::IN only, otherwise an error is generated.
         assert_eq!(
@@ -522,7 +531,7 @@ mod tests {
         );
 
         // Artificial Vring
-        let vring = VringRwLock::new(mem.clone(), 0x1000);
+        let vring = VringRwLock::new(mem.clone(), 0x1000).unwrap();
 
         // Empty descriptor chain should be ignored
         assert!(backend
@@ -534,7 +543,7 @@ mod tests {
         // available than the capacity of the descriptor buffer.
         backend.set_quota(0x100);
         assert!(backend
-            .process_requests(vec![build_desc_chain(1, VIRTQ_DESC_F_WRITE)], &vring)
+            .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
             .unwrap());
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);

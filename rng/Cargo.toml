@@ -7,7 +7,7 @@ repository = "https://github.com/rust-vmm/vhost-device"
 readme = "README.md"
 keywords = ["rng", "vhost", "virt", "backend"]
 license = "Apache-2.0 OR BSD-3-Clause"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 clap = { version = ">=3.0",  features = ["derive"] }

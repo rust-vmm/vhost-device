@@ -32,7 +32,7 @@ const NUM_QUEUES: usize = 1;
 type Result<T> = std::result::Result<T, VuRngError>;
 type RngDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 
-#[derive(Debug, PartialEq, ThisError)]
+#[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-rng daemon.
 pub enum VuRngError {
     #[error("Descriptor not found")]
@@ -65,7 +65,7 @@ impl convert::From<VuRngError> for io::Error {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VuRngTimerConfig {
     period_ms: u128,
     period_start: Instant,

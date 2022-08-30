@@ -22,7 +22,7 @@ use crate::vhu_gpio::VhostUserGpioBackend;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, PartialEq, ThisError)]
+#[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to low level GPIO helpers
 pub enum Error {
     #[error("Invalid socket count: {0}")]

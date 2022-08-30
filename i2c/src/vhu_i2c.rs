@@ -36,7 +36,7 @@ const NUM_QUEUES: usize = 1;
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-i2c daemon.
 pub enum Error {
     #[error("Failed to handle event, didn't match EPOLLIN")]

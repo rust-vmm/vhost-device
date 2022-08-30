@@ -6,7 +6,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use log::{info, warn};
-use std::convert::TryFrom;
 use std::num::ParseIntError;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;

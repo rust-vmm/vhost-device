@@ -9,7 +9,6 @@ mod i2c;
 mod vhu_i2c;
 
 use log::{info, warn};
-use std::convert::TryFrom;
 use std::num::ParseIntError;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;

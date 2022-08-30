@@ -571,7 +571,6 @@ impl<D: I2cDevice> I2cMap<D> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use std::convert::TryFrom;
     use vmm_sys_util::tempfile::TempFile;
 
     // Update read-buffer of each write-buffer with index + 1 value.

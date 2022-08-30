@@ -6,7 +6,6 @@
 mod vhu_rng;
 
 use log::{info, warn};
-use std::convert::TryFrom;
 use std::fs::File;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;

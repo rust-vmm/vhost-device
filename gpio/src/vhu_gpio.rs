@@ -929,10 +929,13 @@ mod tests {
 
         backend.process_events(desc_chains.clone(), &vring).unwrap();
 
-        while backend.handles.read().unwrap()[GPIO as usize].is_some()
-            || backend.handles.read().unwrap()[(GPIO + 1) as usize].is_some()
-            || backend.handles.read().unwrap()[(GPIO + 2) as usize].is_some()
-        {}
+        while {
+            let h = backend.handles.read().unwrap();
+
+            h[GPIO as usize].is_some()
+                || h[(GPIO + 1) as usize].is_some()
+                || h[(GPIO + 2) as usize].is_some()
+        } {}
 
         validate_desc_chains(desc_chains, VIRTIO_GPIO_IRQ_STATUS_VALID, None);
     }

@@ -25,7 +25,7 @@ const VHU_RNG_MAX_PERIOD_MS: u128 = 65536;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, PartialEq, ThisError)]
+#[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-rng daemon.
 pub enum Error {
     #[error("RNG source file doesn't exists or can't be accessed")]
@@ -62,7 +62,7 @@ struct RngArgs {
     rng_source: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VuRngConfig {
     pub period_ms: u128,
     pub max_bytes: usize,

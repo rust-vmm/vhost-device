@@ -356,8 +356,6 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryFrom;
-
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};

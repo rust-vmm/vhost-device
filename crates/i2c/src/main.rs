@@ -30,7 +30,7 @@ pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
     #[error("Duplicate adapter detected: {0}")]
-    AdapterDuplicate(u32),
+    AdapterDuplicate(String),
     #[error("Invalid client address: {0}")]
     ClientAddressInvalid(u16),
     #[error("Duplicate client address detected: {0}")]
@@ -55,23 +55,23 @@ struct I2cArgs {
     socket_count: usize,
 
     /// List of I2C bus and clients in format
-    /// <bus>:<client_addr>[:<client_addr>][,<bus>:<client_addr>[:<client_addr>]].
+    /// <bus-name>:<client_addr>[:<client_addr>][,<bus-name>:<client_addr>[:<client_addr>]].
     #[clap(short = 'l', long)]
     device_list: String,
 }
 
 #[derive(Debug, PartialEq)]
 struct DeviceConfig {
-    adapter_no: u32,
+    adapter_name: String,
     addr: Vec<u16>,
 }
 
 impl DeviceConfig {
-    fn new(adapter_no: u32) -> Self {
-        DeviceConfig {
-            adapter_no,
+    fn new(name: &str) -> Result<Self> {
+        Ok(DeviceConfig {
+            adapter_name: name.trim().to_string(),
             addr: Vec::new(),
-        }
+        })
     }
 
     fn push(&mut self, addr: u16) -> Result<()> {
@@ -98,8 +98,10 @@ impl AdapterConfig {
         Self { inner: Vec::new() }
     }
 
-    fn contains_adapter_no(&self, adapter_no: u32) -> bool {
-        self.inner.iter().any(|elem| elem.adapter_no == adapter_no)
+    fn contains_adapter(&self, adapter_name: &str) -> bool {
+        self.inner
+            .iter()
+            .any(|elem| elem.adapter_name == adapter_name)
     }
 
     fn contains_addr(&self, addr: u16) -> bool {
@@ -107,8 +109,8 @@ impl AdapterConfig {
     }
 
     fn push(&mut self, device: DeviceConfig) -> Result<()> {
-        if self.contains_adapter_no(device.adapter_no) {
-            return Err(Error::AdapterDuplicate(device.adapter_no));
+        if self.contains_adapter(&device.adapter_name) {
+            return Err(Error::AdapterDuplicate(device.adapter_name));
         }
 
         for addr in device.addr.iter() {
@@ -131,8 +133,7 @@ impl TryFrom<&str> for AdapterConfig {
 
         for businfo in busses.iter() {
             let list: Vec<&str> = businfo.split(':').collect();
-            let bus_addr = list[0].parse::<u32>().map_err(Error::ParseFailure)?;
-            let mut adapter = DeviceConfig::new(bus_addr);
+            let mut adapter = DeviceConfig::new(list[0])?;
 
             for device_str in list[1..].iter() {
                 let addr = device_str.parse::<u16>().map_err(Error::ParseFailure)?;
@@ -245,7 +246,10 @@ mod tests {
 
     impl DeviceConfig {
         pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
-            DeviceConfig { adapter_no, addr }
+            DeviceConfig {
+                adapter_name: adapter_no.to_string(),
+                addr,
+            }
         }
     }
 
@@ -267,7 +271,7 @@ mod tests {
 
     #[test]
     fn test_device_config() {
-        let mut config = DeviceConfig::new(5);
+        let mut config = DeviceConfig::new_with(5, Vec::new());
         let invalid_addr = (MAX_I2C_VDEV + 1) as u16;
 
         config.push(5).unwrap();
@@ -287,13 +291,6 @@ mod tests {
     #[test]
     fn test_parse_failure() {
         let socket_name = "vi2c.sock";
-
-        // Invalid bus_addr
-        let cmd_args = I2cArgs::from_args(socket_name, "1:4,3d:5", 5);
-        assert_eq!(
-            I2cConfiguration::try_from(cmd_args).unwrap_err(),
-            Error::ParseFailure("3d".parse::<u32>().unwrap_err())
-        );
 
         // Invalid client address
         let cmd_args = I2cArgs::from_args(socket_name, "1:4d", 5);
@@ -347,17 +344,35 @@ mod tests {
 
     #[test]
     fn test_i2c_map_duplicate_device4() {
+        let mut config = AdapterConfig::new();
+
+        config.push(DeviceConfig::new_with(1, vec![4])).unwrap();
+        config
+            .push(DeviceConfig::new_with(2, vec![32, 21]))
+            .unwrap();
+
         assert_eq!(
-            AdapterConfig::try_from("1:4,2:32:21,5:4:23").unwrap_err(),
+            config
+                .push(DeviceConfig::new_with(5, vec![4, 23]))
+                .unwrap_err(),
             Error::ClientAddressDuplicate(4)
         );
     }
 
     #[test]
     fn test_duplicated_adapter_no() {
+        let mut config = AdapterConfig::new();
+
+        config.push(DeviceConfig::new_with(1, vec![4])).unwrap();
+        config
+            .push(DeviceConfig::new_with(5, vec![10, 23]))
+            .unwrap();
+
         assert_eq!(
-            AdapterConfig::try_from("1:4,1:32:21,5:10:23").unwrap_err(),
-            Error::AdapterDuplicate(1)
+            config
+                .push(DeviceConfig::new_with(1, vec![32, 21]))
+                .unwrap_err(),
+            Error::AdapterDuplicate(1.to_string())
         );
     }
 

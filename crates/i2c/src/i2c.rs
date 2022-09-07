@@ -7,8 +7,9 @@
 
 use log::info;
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
 
 use libc::{c_ulong, ioctl};
 use thiserror::Error as ThisError;
@@ -44,6 +45,12 @@ pub(crate) enum Error {
     AdapterFunctionInvalid(u64),
     #[error("Invalid Client Address")]
     ClientAddressInvalid,
+    #[error("Adapter not found")]
+    AdapterNotFound,
+    #[error("Std IO Error")]
+    StdIoErr,
+    #[error("Failed while parsing to integer")]
+    ParseFailure,
 }
 
 /// Linux I2C/SMBUS definitions
@@ -298,8 +305,8 @@ pub(crate) struct I2cReq {
 /// mock implementation for the I2C driver so that we can test the I2C
 /// functionality without the need of a physical device.
 pub(crate) trait I2cDevice {
-    // Open the device specified by the adapter number.
-    fn open(adapter_no: u32) -> Result<Self>
+    // Open the device specified by the adapter name.
+    fn open(adapter_name: &str) -> Result<Self>
     where
         Self: Sized;
 
@@ -338,10 +345,32 @@ impl PhysDevice {
             adapter_no,
         })
     }
+
+    fn find_adapter(name: &str) -> Result<u32> {
+        for entry in
+            fs::read_dir(Path::new("/sys/bus/i2c/devices/")).map_err(|_| Error::StdIoErr)?
+        {
+            let entry = entry.map_err(|_| Error::StdIoErr)?;
+            let mut path = entry.path();
+            path.push("name");
+            let adapter_name = fs::read_to_string(path).map_err(|_| Error::StdIoErr)?;
+
+            if adapter_name.trim() == name {
+                let path = entry.path();
+                let list: Vec<&str> = path.to_str().unwrap().split('-').collect();
+                let adapter_no = list[1].parse::<u32>().map_err(|_| Error::ParseFailure)?;
+
+                return Ok(adapter_no);
+            }
+        }
+
+        Err(Error::AdapterNotFound)
+    }
 }
 
 impl I2cDevice for PhysDevice {
-    fn open(adapter_no: u32) -> Result<Self> {
+    fn open(adapter_name: &str) -> Result<Self> {
+        let adapter_no = PhysDevice::find_adapter(adapter_name)?;
         let device_path = format!("/dev/i2c-{}", adapter_no);
 
         Self::open_with(&device_path, adapter_no)
@@ -529,7 +558,7 @@ impl<D: I2cDevice> I2cMap<D> {
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
 
         for (i, device_cfg) in device_config.inner.iter().enumerate() {
-            let device = D::open(device_cfg.adapter_no)?;
+            let device = D::open(&device_cfg.adapter_name)?;
             let adapter = I2cAdapter::new(device)?;
 
             // Check that all addresses corresponding to the adapter are valid.
@@ -575,6 +604,7 @@ impl<D: I2cDevice> I2cMap<D> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::DeviceConfig;
     use vmm_sys_util::tempfile::TempFile;
 
     // Update read-buffer of each write-buffer with index + 1 value.
@@ -613,12 +643,14 @@ pub(crate) mod tests {
     }
 
     impl I2cDevice for DummyDevice {
-        fn open(adapter_no: u32) -> Result<Self>
+        fn open(adapter_name: &str) -> Result<Self>
         where
             Self: Sized,
         {
             Ok(DummyDevice {
-                adapter_no,
+                adapter_no: adapter_name
+                    .parse::<u32>()
+                    .map_err(|_| Error::ParseFailure)?,
                 ..Default::default()
             })
         }
@@ -697,7 +729,11 @@ pub(crate) mod tests {
 
     #[test]
     fn test_i2c_map() {
-        let adapter_config = AdapterConfig::try_from("1:4,2:32:21,5:10:23").unwrap();
+        let adapter_config = AdapterConfig::new_with(vec![
+            DeviceConfig::new_with(1, vec![4]),
+            DeviceConfig::new_with(2, vec![32, 21]),
+            DeviceConfig::new_with(5, vec![10, 23]),
+        ]);
         let i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         assert_eq!(i2c_map.adapters.len(), 3);
@@ -714,7 +750,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_i2c_transfer() {
-        let adapter_config = AdapterConfig::try_from("1:3").unwrap();
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         i2c_map.adapters[0].smbus = false;
@@ -773,7 +809,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_smbus_transfer() {
-        let adapter_config = AdapterConfig::try_from("1:3").unwrap();
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         i2c_map.adapters[0].smbus = true;
@@ -879,7 +915,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_transfer_failure() {
-        let adapter_config = AdapterConfig::try_from("1:3").unwrap();
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         i2c_map.adapters[0].smbus = false;
@@ -900,7 +936,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_smbus_transfer_failure() {
-        let adapter_config = AdapterConfig::try_from("1:3").unwrap();
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
         i2c_map.adapters[0].smbus = true;
 
@@ -1059,8 +1095,8 @@ pub(crate) mod tests {
     fn test_phys_device_failure() {
         // Open failure
         assert_eq!(
-            PhysDevice::open(555555).unwrap_err(),
-            Error::DeviceOpenFailed(555555)
+            PhysDevice::open("555555").unwrap_err(),
+            Error::AdapterNotFound
         );
 
         assert_eq!(

@@ -34,12 +34,12 @@ Examples section below.
 .. option:: -l, --device-list=I2C-DEVICES
 
   I2c device list at the host OS in the format:
-      <bus>:<client_addr>[:<client_addr>],[<bus>:<client_addr>[:<client_addr>]]
+      <bus-name>:<client_addr>[:<client_addr>],[<bus-name>:<client_addr>[:<client_addr>]]
 
-      Example: --device-list "2:32:21,3:10:23"
+      Example: --device-list "i915 gmbus dpd:32:21,DPDDC-D:10:23"
 
   Here,
-      bus (decimal): adatper bus number. e.g. 2 for /dev/i2c-2, 3 for /dev/i2c-3.
+      bus-name: is adatper's name. e.g. value of /sys/bus/i2c/devices/i2c-0/name.
       client_addr (decimal): address for client device, 32 == 0x20.
 
 ## Examples
@@ -48,7 +48,7 @@ The daemon should be started first:
 
 ::
 
-  host# vhost-device-i2c --socket-path=vi2c.sock --socket-count=1 --device-list 0:32
+  host# vhost-device-i2c --socket-path=vi2c.sock --socket-count=1 --device-list "i915 gmbus dpd:32"
 
 The QEMU invocation needs to create a chardev socket the device can
 use to communicate as well as share the guests memory over a memfd.

@@ -17,13 +17,13 @@ env_logger = ">=0.9"
 libc = ">=0.2.95"
 log = ">=0.4.6"
 thiserror = "1.0"
-vhost = { version = "0.4", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.6.0"
+vhost = { version = "0.5", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.7.0"
 virtio-bindings = ">=0.1"
-virtio-queue = "0.5"
+virtio-queue = "0.6"
 vm-memory = ">=0.8"
 vmm-sys-util = "=0.10.0"
 
 [dev-dependencies]
-virtio-queue = { version = "0.5", features = ["test-utils"] }
+virtio-queue = { version = "0.6", features = ["test-utils"] }
 vm-memory = { version = ">=0.8.0", features = ["backend-mmap", "backend-atomic"] }

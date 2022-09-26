@@ -208,12 +208,19 @@ impl VhostUserVsockThread {
                 let mut unix_stream = self.thread_backend.stream_map.remove(&fd).unwrap();
 
                 // Local peer is sending a "connect PORT\n" command
-                let peer_port = Self::read_local_stream_port(&mut unix_stream).unwrap();
+                let peer_port = match Self::read_local_stream_port(&mut unix_stream) {
+                    Ok(port) => port,
+                    Err(err) => {
+                        warn!("Error while parsing \"connect PORT\n\" command: {:?}", err);
+                        return;
+                    }
+                };
 
                 // Allocate a local port number
                 let local_port = match self.allocate_local_port() {
                     Ok(lp) => lp,
-                    Err(_) => {
+                    Err(err) => {
+                        warn!("Error while allocating local port: {:?}", err);
                         return;
                     }
                 };

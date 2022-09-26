@@ -1,6 +1,6 @@
 use super::rxops::RxOps;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct RxQueue {
     /// Bitmap of rx operations.
     queue: u8,

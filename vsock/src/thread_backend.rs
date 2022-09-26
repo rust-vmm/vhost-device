@@ -141,7 +141,7 @@ impl VsockThreadBackend {
         if !self.conn_map.contains_key(&key) {
             // The packet contains a new connection request
             if pkt.op() == VSOCK_OP_REQUEST {
-                self.handle_new_guest_conn(&pkt);
+                self.handle_new_guest_conn(pkt);
             } else {
                 // TODO: send back RST
             }

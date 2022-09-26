@@ -398,17 +398,16 @@ pub mod tests {
         let virt_queue = MockSplitQueue::new(&mem, 16);
         let mut next_addr = virt_queue.desc_table().total_size() + 0x100;
         let mut flags = 0;
-        let mut head_flags;
 
         if write_only {
             flags |= VIRTQ_DESC_F_WRITE;
         }
 
-        if data_chain_len > 0 {
-            head_flags = flags | VIRTQ_DESC_F_NEXT
+        let mut head_flags = if data_chain_len > 0 {
+            flags | VIRTQ_DESC_F_NEXT
         } else {
-            head_flags = flags;
-        }
+            flags
+        };
 
         // vsock packet header
         // let header = vec![0 as u8; head_params.head_len];

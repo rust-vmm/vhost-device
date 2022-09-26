@@ -172,7 +172,7 @@ mod tests {
 
         // flush data of CONN_TX_BUF_SIZE amount
         let res_push = loc_tx_buf.push(&data);
-        assert_eq!(res_push.is_ok(), true);
+        assert!(res_push.is_ok());
         let res_flush = loc_tx_buf.flush_to(&mut cmp_vec);
         if let Ok(n) = res_flush {
             assert_eq!(loc_tx_buf.head, Wrapping(n as u32));

@@ -322,7 +322,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
     /// Get max number of bytes we can send to peer without overflowing
     /// the peer's buffer.
     fn peer_avail_credit(&self) -> usize {
-        (Wrapping(self.peer_buf_alloc as u32) - (self.rx_cnt - self.peer_fwd_cnt)).0 as usize
+        (Wrapping(self.peer_buf_alloc) - (self.rx_cnt - self.peer_fwd_cnt)).0 as usize
     }
 
     /// Check if we need a credit update from the peer before sending

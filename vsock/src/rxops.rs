@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum RxOps {
     /// VSOCK_OP_REQUEST
     Request = 0,

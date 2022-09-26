@@ -249,7 +249,7 @@ impl VhostUserVsockThread {
             } else {
                 // Previously connected connection
                 let key = self.thread_backend.listener_map.get(&fd).unwrap();
-                let vsock_conn = self.thread_backend.conn_map.get_mut(&key).unwrap();
+                let vsock_conn = self.thread_backend.conn_map.get_mut(key).unwrap();
 
                 if evset == epoll::Events::EPOLLOUT {
                     // Flush any remaining data from the tx buffer

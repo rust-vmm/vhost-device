@@ -1,5 +1,6 @@
 use super::vhu_vsock::{Error, Result, CONN_TX_BUF_SIZE};
 use std::{io::Write, num::Wrapping};
+use vm_memory::{bitmap::BitmapSlice, VolatileSlice};
 
 #[derive(Debug)]
 pub struct LocalTxBuf {
@@ -28,7 +29,7 @@ impl LocalTxBuf {
 
     /// Add new data to the tx buffer, push all or none.
     /// Returns LocalTxBufFull error if space not sufficient.
-    pub(crate) fn push(&mut self, data_buf: &[u8]) -> Result<()> {
+    pub(crate) fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {
         if CONN_TX_BUF_SIZE as usize - self.len() < data_buf.len() {
             // Tx buffer is full
             return Err(Error::LocalTxBufFull);
@@ -39,11 +40,13 @@ impl LocalTxBuf {
 
         // Check if we can fit the data buffer between head and end of buffer
         let len = std::cmp::min(CONN_TX_BUF_SIZE as usize - tail_idx, data_buf.len());
-        self.buf[tail_idx..tail_idx + len].copy_from_slice(&data_buf[..len]);
+        let txbuf = &mut self.buf[tail_idx..tail_idx + len];
+        data_buf.copy_to(txbuf);
 
         // Check if there is more data to be wrapped around
         if len < data_buf.len() {
-            self.buf[..(data_buf.len() - len)].copy_from_slice(&data_buf[len..]);
+            let remain_txbuf = &mut self.buf[..(data_buf.len() - len)];
+            data_buf.copy_to(remain_txbuf);
         }
 
         // Increment tail by the amount of data that has been added to the buffer
@@ -124,7 +127,8 @@ mod tests {
     #[test]
     fn test_txbuf_push() {
         let mut loc_tx_buf = LocalTxBuf::new();
-        let data = [0; CONN_TX_BUF_SIZE as usize];
+        let mut buf = [0; CONN_TX_BUF_SIZE as usize];
+        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
         // push data into empty tx buffer
         let res_push = loc_tx_buf.push(&data);
@@ -143,7 +147,8 @@ mod tests {
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE * 2));
 
         // only tail wraps at full
-        let data = vec![1; 4];
+        let mut buf = vec![1; 4];
+        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
         let mut cmp_data = vec![1; 4];
         cmp_data.append(&mut vec![0; (CONN_TX_BUF_SIZE - 4) as usize]);
         loc_tx_buf.head = Wrapping(4);
@@ -160,7 +165,8 @@ mod tests {
         let mut loc_tx_buf = LocalTxBuf::new();
 
         // data to be flushed
-        let data = vec![1; CONN_TX_BUF_SIZE as usize];
+        let mut buf = vec![1; CONN_TX_BUF_SIZE as usize];
+        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
         // target to which data is flushed
         let mut cmp_vec = Vec::with_capacity(data.len());
@@ -178,12 +184,14 @@ mod tests {
             assert_eq!(loc_tx_buf.head, Wrapping(n as u32));
             assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE));
             assert_eq!(n, cmp_vec.len());
-            assert_eq!(cmp_vec, data[..n]);
+            assert_eq!(cmp_vec, buf[..n]);
         }
 
         // wrapping head flush
-        let mut data = vec![0; (CONN_TX_BUF_SIZE / 2) as usize];
-        data.append(&mut vec![1; (CONN_TX_BUF_SIZE / 2) as usize]);
+        let mut buf = vec![0; (CONN_TX_BUF_SIZE / 2) as usize];
+        buf.append(&mut vec![1; (CONN_TX_BUF_SIZE / 2) as usize]);
+        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
+
         loc_tx_buf.head = Wrapping(0);
         loc_tx_buf.tail = Wrapping(0);
         let res_push = loc_tx_buf.push(&data);

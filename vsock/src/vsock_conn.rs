@@ -1,5 +1,4 @@
 use super::{
-    packet::*,
     rxops::*,
     rxqueue::*,
     txbuf::*,
@@ -16,6 +15,8 @@ use std::{
     num::Wrapping,
     os::unix::prelude::{AsRawFd, RawFd},
 };
+use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
+use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
 
 #[derive(Debug)]
 pub struct VsockConnection<S> {
@@ -117,7 +118,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
     /// Process a vsock packet that is meant for this connection.
     /// Forward data to the host-side application if the vsock packet
     /// contains a RW operation.
-    pub(crate) fn recv_pkt(&mut self, pkt: &mut VsockPacket) -> Result<()> {
+    pub(crate) fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Initialize all fields in the packet header
         self.init_pkt(pkt);
 
@@ -141,7 +142,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                     pkt.set_op(VSOCK_OP_CREDIT_REQUEST);
                     return Ok(());
                 }
-                let buf = pkt.buf_mut().ok_or(Error::PktBufMissing)?;
+                let buf = pkt.data_slice().ok_or(Error::PktBufMissing)?;
 
                 // Perform a credit check to find the maximum read size. The read
                 // data must fit inside a packet buffer and be within peer's
@@ -149,7 +150,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                 let max_read_len = std::cmp::min(buf.len(), self.peer_avail_credit());
 
                 // Read data from the stream directly into the buffer
-                if let Ok(read_cnt) = self.stream.read(&mut buf[..max_read_len]) {
+                if let Ok(read_cnt) = buf.read_from(0, &mut self.stream, max_read_len) {
                     if read_cnt == 0 {
                         // If no data was read then the stream was closed down unexpectedly.
                         // Send a shutdown packet to the guest-side application.
@@ -198,7 +199,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
     ///
     /// Returns:
     /// - always `Ok(())` to indicate that the packet has been consumed
-    pub(crate) fn send_pkt(&mut self, pkt: &VsockPacket) -> Result<()> {
+    pub(crate) fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
         // Update peer credit information
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
@@ -213,19 +214,21 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             }
             VSOCK_OP_RW => {
                 // Data has to be written to the host-side stream
-                if pkt.buf().is_none() {
-                    info!(
-                        "Dropping empty packet from guest (lp={}, pp={})",
-                        self.local_port, self.peer_port
-                    );
-                    return Ok(());
-                }
-
-                let buf_slice = &pkt.buf().unwrap()[..(pkt.len() as usize)];
-                if let Err(err) = self.send_bytes(buf_slice) {
-                    // TODO: Terminate this connection
-                    dbg!("err:{:?}", err);
-                    return Ok(());
+                match pkt.data_slice() {
+                    None => {
+                        info!(
+                            "Dropping empty packet from guest (lp={}, pp={})",
+                            self.local_port, self.peer_port
+                        );
+                        return Ok(());
+                    }
+                    Some(buf) => {
+                        if let Err(err) = self.send_bytes(buf) {
+                            // TODO: Terminate this connection
+                            dbg!("err:{:?}", err);
+                            return Ok(());
+                        }
+                    }
                 }
             }
             VSOCK_OP_CREDIT_UPDATE => {
@@ -271,7 +274,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
     /// Returns:
     /// - Ok(cnt) where cnt is the number of bytes written to the stream
     /// - Err(Error::UnixWrite) if there was an error writing to the stream
-    fn send_bytes(&mut self, buf: &[u8]) -> Result<()> {
+    fn send_bytes<B: BitmapSlice>(&mut self, buf: &VolatileSlice<B>) -> Result<()> {
         if !self.tx_buf.is_empty() {
             // Data is already present in the buffer and the backend
             // is waiting for a EPOLLOUT event to flush it
@@ -279,15 +282,19 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
         }
 
         // Write data to the stream
-        let written_count = match self.stream.write(buf) {
+        let written_count = match buf.write_to(0, &mut self.stream, buf.len()) {
             Ok(cnt) => cnt,
-            Err(e) => {
+            Err(vm_memory::VolatileMemoryError::IOError(e)) => {
                 if e.kind() == ErrorKind::WouldBlock {
                     0
                 } else {
                     println!("send_bytes error: {:?}", e);
                     return Err(Error::UnixWrite);
                 }
+            }
+            Err(e) => {
+                println!("send_bytes error: {:?}", e);
+                return Err(Error::UnixWrite);
             }
         };
 
@@ -297,18 +304,19 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
         self.rx_queue.enqueue(RxOps::CreditUpdate);
 
         if written_count != buf.len() {
-            return self.tx_buf.push(&buf[written_count..]);
+            return self.tx_buf.push(&buf.offset(written_count).unwrap());
         }
 
         Ok(())
     }
 
     /// Initialize all header fields in the vsock packet.
-    fn init_pkt<'a>(&self, pkt: &'a mut VsockPacket) -> &'a mut VsockPacket {
+    fn init_pkt<'a, 'b, B: BitmapSlice>(
+        &self,
+        pkt: &'a mut VsockPacket<'b, B>,
+    ) -> &'a mut VsockPacket<'b, B> {
         // Zero out the packet header
-        for b in pkt.hdr_mut() {
-            *b = 0;
-        }
+        pkt.set_header_from_raw(&[0u8; PKT_HEADER_SIZE]).unwrap();
 
         pkt.set_src_cid(self.local_cid)
             .set_dst_cid(self.guest_cid)
@@ -337,9 +345,103 @@ mod tests {
     use byteorder::{ByteOrder, LittleEndian};
 
     use super::*;
-    use crate::packet::tests::{prepare_desc_chain_vsock, HeadParams};
-    use crate::vhu_vsock::VSOCK_HOST_CID;
+    use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
     use std::io::Result as IoResult;
+    use std::ops::Deref;
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, DescriptorChain, Queue, QueueOwnedT};
+    use vm_memory::{
+        Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard,
+        GuestMemoryMmap,
+    };
+
+    struct HeadParams {
+        head_len: usize,
+        data_len: u32,
+    }
+
+    impl HeadParams {
+        pub fn new(head_len: usize, data_len: u32) -> Self {
+            Self { head_len, data_len }
+        }
+        fn construct_head(&self) -> Vec<u8> {
+            let mut header = vec![0_u8; self.head_len];
+            if self.head_len == PKT_HEADER_SIZE {
+                // Offset into the header for data length
+                const HDROFF_LEN: usize = 24;
+                LittleEndian::write_u32(&mut header[HDROFF_LEN..], self.data_len);
+            }
+            header
+        }
+    }
+
+    fn prepare_desc_chain_vsock(
+        write_only: bool,
+        head_params: &HeadParams,
+        data_chain_len: u16,
+        head_data_len: u32,
+    ) -> (
+        GuestMemoryAtomic<GuestMemoryMmap>,
+        DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+    ) {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let virt_queue = MockSplitQueue::new(&mem, 16);
+        let mut next_addr = virt_queue.desc_table().total_size() + 0x100;
+        let mut flags = 0;
+
+        if write_only {
+            flags |= VRING_DESC_F_WRITE;
+        }
+
+        let mut head_flags = if data_chain_len > 0 {
+            flags | VRING_DESC_F_NEXT
+        } else {
+            flags
+        };
+
+        // vsock packet header
+        // let header = vec![0 as u8; head_params.head_len];
+        let header = head_params.construct_head();
+        let head_desc =
+            Descriptor::new(next_addr, head_params.head_len as u32, head_flags as u16, 1);
+        mem.write(&header, head_desc.addr()).unwrap();
+        assert!(virt_queue.desc_table().store(0, head_desc).is_ok());
+        next_addr += head_params.head_len as u64;
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, virt_queue.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, virt_queue.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // chain len excludes the head
+        for i in 0..(data_chain_len) {
+            // last descr in chain
+            if i == data_chain_len - 1 {
+                head_flags &= !VRING_DESC_F_NEXT;
+            }
+            // vsock data
+            let data = vec![0_u8; head_data_len as usize];
+            let data_desc = Descriptor::new(next_addr, data.len() as u32, head_flags as u16, i + 2);
+            mem.write(&data, data_desc.addr()).unwrap();
+            assert!(virt_queue.desc_table().store(i + 1, data_desc).is_ok());
+            next_addr += head_data_len as u64;
+        }
+
+        // Create descriptor chain from pre-filled memory
+        (
+            GuestMemoryAtomic::new(mem.clone()),
+            virt_queue
+                .create_queue::<Queue>()
+                .unwrap()
+                .iter(GuestMemoryAtomic::new(mem.clone()).memory())
+                .unwrap()
+                .next()
+                .unwrap(),
+        )
+    }
 
     struct VsockDummySocket {
         data: Vec<u8>,
@@ -435,7 +537,7 @@ mod tests {
     #[test]
     fn test_vsock_conn_init_pkt() {
         // parameters for packet head construction
-        let head_params = HeadParams::new(VSOCK_PKT_HDR_SIZE, 10);
+        let head_params = HeadParams::new(PKT_HEADER_SIZE, 10);
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -444,7 +546,10 @@ mod tests {
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 2, 10);
-        let mut vsock_pkt = VsockPacket::from_rx_virtq_head(&mut descr_chain, mem).unwrap();
+        let mem = mem.memory();
+        let mut vsock_pkt =
+            VsockPacket::from_rx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
 
         // initialize a vsock packet for the guest
         vsock_conn_local.init_pkt(&mut vsock_pkt);
@@ -453,7 +558,7 @@ mod tests {
         assert_eq!(vsock_pkt.dst_cid(), 3);
         assert_eq!(vsock_pkt.src_port(), 5000);
         assert_eq!(vsock_pkt.dst_port(), 5001);
-        assert_eq!(vsock_pkt.pkt_type(), VSOCK_TYPE_STREAM);
+        assert_eq!(vsock_pkt.type_(), VSOCK_TYPE_STREAM);
         assert_eq!(vsock_pkt.buf_alloc(), CONN_TX_BUF_SIZE);
         assert_eq!(vsock_pkt.fwd_cnt(), 0);
     }
@@ -461,7 +566,7 @@ mod tests {
     #[test]
     fn test_vsock_conn_recv_pkt() {
         // parameters for packet head construction
-        let head_params = HeadParams::new(VSOCK_PKT_HDR_SIZE, 5);
+        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -470,7 +575,10 @@ mod tests {
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mut vsock_pkt = VsockPacket::from_rx_virtq_head(&mut descr_chain, mem).unwrap();
+        let mem = mem.memory();
+        let mut vsock_pkt =
+            VsockPacket::from_rx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
 
         // VSOCK_OP_REQUEST: new local conn request
         vsock_conn_local.rx_queue.enqueue(RxOps::Request);
@@ -519,7 +627,9 @@ mod tests {
         assert_eq!(vsock_pkt.op(), VSOCK_OP_RW);
         assert!(!vsock_conn_local.rx_queue.pending_rx());
         assert_eq!(vsock_pkt.len(), 5);
-        assert_eq!(vsock_pkt.buf().unwrap(), b"hello");
+        let buf = &mut [0u8; 5];
+        assert!(vsock_pkt.data_slice().unwrap().read_slice(buf, 0).is_ok());
+        assert_eq!(buf, b"hello");
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
         vsock_conn_local.rx_queue.enqueue(RxOps::Response);
@@ -545,7 +655,7 @@ mod tests {
     #[test]
     fn test_vsock_conn_send_pkt() {
         // parameters for packet head construction
-        let head_params = HeadParams::new(VSOCK_PKT_HDR_SIZE, 5);
+        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -554,13 +664,13 @@ mod tests {
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
-        let mut vsock_pkt = VsockPacket::from_tx_virtq_head(&mut descr_chain, mem).unwrap();
+        let mem = mem.memory();
+        let mut vsock_pkt =
+            VsockPacket::from_tx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
 
         // peer credit information
-        const HDROFF_BUF_ALLOC: usize = 36;
-        const HDROFF_FWD_CNT: usize = 40;
-        LittleEndian::write_u32(&mut vsock_pkt.hdr_mut()[HDROFF_BUF_ALLOC..], 65536);
-        LittleEndian::write_u32(&mut vsock_pkt.hdr_mut()[HDROFF_FWD_CNT..], 1024);
+        vsock_pkt.set_buf_alloc(65536).set_fwd_cnt(1024);
 
         // check if peer credit information is updated currently
         let credit_check = vsock_conn_local.send_pkt(&vsock_pkt);
@@ -579,7 +689,8 @@ mod tests {
 
         // VSOCK_OP_RW
         vsock_pkt.set_op(VSOCK_OP_RW);
-        vsock_pkt.buf_mut().unwrap().copy_from_slice(b"hello");
+        let buf = b"hello";
+        assert!(vsock_pkt.data_slice().unwrap().write_slice(buf, 0).is_ok());
         let rw_response = vsock_conn_local.send_pkt(&vsock_pkt);
         assert!(rw_response.is_ok());
         let mut resp_buf = vec![0; 5];

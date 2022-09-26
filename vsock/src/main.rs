@@ -1,4 +1,3 @@
-mod packet;
 mod rxops;
 mod rxqueue;
 mod thread_backend;

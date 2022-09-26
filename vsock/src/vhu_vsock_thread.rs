@@ -1,8 +1,10 @@
 use super::{
-    packet::*,
     rxops::*,
     thread_backend::*,
-    vhu_vsock::{ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, VSOCK_HOST_CID},
+    vhu_vsock::{
+        ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, CONN_TX_BUF_SIZE,
+        VSOCK_HOST_CID,
+    },
     vsock_conn::*,
 };
 use futures::executor::{ThreadPool, ThreadPoolBuilder};
@@ -12,6 +14,7 @@ use std::{
     io,
     io::Read,
     num::Wrapping,
+    ops::Deref,
     os::unix::{
         net::{UnixListener, UnixStream},
         prelude::{AsRawFd, FromRawFd, RawFd},
@@ -20,6 +23,7 @@ use std::{
 };
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
+use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
@@ -381,27 +385,27 @@ impl VhostUserVsockThread {
             .next()
         {
             used_any = true;
-            let atomic_mem = atomic_mem.clone();
+            let mem = atomic_mem.clone().memory();
 
             let head_idx = avail_desc.head_index();
-            let used_len =
-                match VsockPacket::from_rx_virtq_head(&mut avail_desc, atomic_mem.clone()) {
-                    Ok(mut pkt) => {
-                        if self.thread_backend.recv_pkt(&mut pkt).is_ok() {
-                            pkt.hdr().len() + pkt.len() as usize
-                        } else {
-                            queue
-                                .iter(atomic_mem.memory())
-                                .unwrap()
-                                .go_to_previous_position();
-                            break;
-                        }
+            let used_len = match VsockPacket::from_rx_virtq_chain(
+                mem.deref(),
+                &mut avail_desc,
+                CONN_TX_BUF_SIZE,
+            ) {
+                Ok(mut pkt) => {
+                    if self.thread_backend.recv_pkt(&mut pkt).is_ok() {
+                        PKT_HEADER_SIZE + pkt.len() as usize
+                    } else {
+                        queue.iter(mem).unwrap().go_to_previous_position();
+                        break;
                     }
-                    Err(e) => {
-                        warn!("vsock: RX queue error: {:?}", e);
-                        0
-                    }
-                };
+                }
+                Err(e) => {
+                    warn!("vsock: RX queue error: {:?}", e);
+                    0
+                }
+            };
 
             let vring = vring.clone();
             let event_idx = self.event_idx;
@@ -484,10 +488,14 @@ impl VhostUserVsockThread {
             .next()
         {
             used_any = true;
-            let atomic_mem = atomic_mem.clone();
+            let mem = atomic_mem.clone().memory();
 
             let head_idx = avail_desc.head_index();
-            let pkt = match VsockPacket::from_tx_virtq_head(&mut avail_desc, atomic_mem.clone()) {
+            let pkt = match VsockPacket::from_tx_virtq_chain(
+                mem.deref(),
+                &mut avail_desc,
+                CONN_TX_BUF_SIZE,
+            ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
                     dbg!("vsock: error reading TX packet: {:?}", e);
@@ -499,7 +507,7 @@ impl VhostUserVsockThread {
                 vring
                     .get_mut()
                     .get_queue_mut()
-                    .iter(atomic_mem.memory())
+                    .iter(mem)
                     .unwrap()
                     .go_to_previous_position();
                 break;

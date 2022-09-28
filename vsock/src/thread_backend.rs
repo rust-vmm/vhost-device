@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
 #![deny(missing_docs)]
 
 use super::{

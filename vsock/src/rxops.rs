@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum RxOps {
     /// VSOCK_OP_REQUEST

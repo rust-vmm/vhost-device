@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
 use super::vhu_vsock::{Error, Result, CONN_TX_BUF_SIZE};
 use std::{io::Write, num::Wrapping};
 use vm_memory::{bitmap::BitmapSlice, VolatileSlice};

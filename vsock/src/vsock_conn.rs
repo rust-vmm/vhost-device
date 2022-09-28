@@ -300,10 +300,12 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             }
         };
 
-        // Increment forwarded count by number of bytes written to the stream
-        self.fwd_cnt += Wrapping(written_count as u32);
-        // TODO: https://github.com/torvalds/linux/commit/c69e6eafff5f725bc29dcb8b52b6782dca8ea8a2
-        self.rx_queue.enqueue(RxOps::CreditUpdate);
+        if written_count > 0 {
+            // Increment forwarded count by number of bytes written to the stream
+            self.fwd_cnt += Wrapping(written_count as u32);
+            // TODO: https://github.com/torvalds/linux/commit/c69e6eafff5f725bc29dcb8b52b6782dca8ea8a2
+            self.rx_queue.enqueue(RxOps::CreditUpdate);
+        }
 
         if written_count != buf.len() {
             return self.tx_buf.push(&buf.offset(written_count).unwrap());

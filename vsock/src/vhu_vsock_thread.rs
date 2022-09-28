@@ -269,8 +269,10 @@ impl VhostUserVsockThread {
                     // Flush any remaining data from the tx buffer
                     match vsock_conn.tx_buf.flush_to(&mut vsock_conn.stream) {
                         Ok(cnt) => {
-                            vsock_conn.fwd_cnt += Wrapping(cnt as u32);
-                            vsock_conn.rx_queue.enqueue(RxOps::CreditUpdate);
+                            if cnt > 0 {
+                                vsock_conn.fwd_cnt += Wrapping(cnt as u32);
+                                vsock_conn.rx_queue.enqueue(RxOps::CreditUpdate);
+                            }
                             self.thread_backend.backend_rxq.push_back(ConnMapKey::new(
                                 vsock_conn.local_port,
                                 vsock_conn.peer_port,

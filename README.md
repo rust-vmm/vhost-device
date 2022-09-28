@@ -29,10 +29,10 @@ coverage.
 ## Separation of Concerns
 
 The binaries built by this repository can be run with any VMM which
-can act as a vhost-user master. Typically they have been tested with
+can act as a vhost-user frontend. Typically they have been tested with
 [QEMU](https://www.qemu.org) although the rust-vmm project does
 provide a [vhost-user
-master](https://github.com/rust-vmm/vhost/tree/main/src/vhost_user)
+frontend](https://github.com/rust-vmm/vhost/tree/main/src/vhost_user)
 crate for rust based VMMs.
 
 While it's possible to implement all parts of the backend inside the

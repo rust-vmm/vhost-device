@@ -41,6 +41,8 @@ pub struct VhostUserVsockThread {
     pub event_idx: bool,
     /// Host socket raw file descriptor.
     host_sock: RawFd,
+    /// Host socket path
+    host_sock_path: String,
     /// Listener listening for new connections on the host.
     host_listener: UnixListener,
     /// Used to kill the thread.
@@ -62,11 +64,11 @@ pub struct VhostUserVsockThread {
 impl VhostUserVsockThread {
     /// Create a new instance of VhostUserVsockThread.
     pub(crate) fn new(uds_path: String, guest_cid: u64) -> Result<Self> {
-        // TODO: better error handling
-        if let Ok(()) = std::fs::remove_file(uds_path.clone()) {}
+        // TODO: better error handling, maybe add a param to force the unlink
+        let _ = std::fs::remove_file(uds_path.clone());
         let host_sock = UnixListener::bind(&uds_path)
             .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
-            .unwrap();
+            .map_err(Error::UnixBind)?;
 
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
@@ -77,6 +79,7 @@ impl VhostUserVsockThread {
             mem: None,
             event_idx: false,
             host_sock: host_sock.as_raw_fd(),
+            host_sock_path: uds_path.clone(),
             host_listener: host_sock,
             kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
             vring_worker: None,
@@ -205,7 +208,13 @@ impl VhostUserVsockThread {
                     // Has to be EPOLLIN as it was not connected previously
                     return;
                 }
-                let mut unix_stream = self.thread_backend.stream_map.remove(&fd).unwrap();
+                let mut unix_stream = match self.thread_backend.stream_map.remove(&fd) {
+                    Some(uds) => uds,
+                    None => {
+                        warn!("Error while searching fd in the stream map");
+                        return;
+                    }
+                };
 
                 // Local peer is sending a "connect PORT\n" command
                 let peer_port = match Self::read_local_stream_port(&mut unix_stream) {
@@ -570,5 +579,11 @@ impl VhostUserVsockThread {
             self.process_tx_queue(vring_lock)?;
         }
         Ok(false)
+    }
+}
+
+impl Drop for VhostUserVsockThread {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.host_sock_path);
     }
 }

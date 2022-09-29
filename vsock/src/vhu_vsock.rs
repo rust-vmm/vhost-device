@@ -78,6 +78,8 @@ pub(crate) enum Error {
     HandleUnknownEvent,
     #[error("Failed to accept new local socket connection")]
     UnixAccept(std::io::Error),
+    #[error("Failed to bind a unix stream")]
+    UnixBind(std::io::Error),
     #[error("Failed to create an epoll fd")]
     EpollFdCreate(std::io::Error),
     #[error("Failed to add to epoll")]
@@ -118,6 +120,8 @@ pub(crate) enum Error {
     NoFreeLocalPort,
     #[error("Backend rx queue is empty")]
     EmptyBackendRxQ,
+    #[error("Failed to create an EventFd")]
+    EventFdCreate(std::io::Error),
 }
 
 impl std::convert::From<Error> for std::io::Error {
@@ -217,17 +221,17 @@ pub struct VhostUserVsockBackend {
 
 impl VhostUserVsockBackend {
     pub(crate) fn new(vsock_config: VsockConfig) -> Result<Self> {
-        let thread = Mutex::new(
-            VhostUserVsockThread::new(vsock_config.get_uds_path(), vsock_config.get_guest_cid())
-                .unwrap(),
-        );
+        let thread = Mutex::new(VhostUserVsockThread::new(
+            vsock_config.get_uds_path(),
+            vsock_config.get_guest_cid(),
+        )?);
         let queues_per_thread = vec![QUEUE_MASK];
 
         Ok(Self {
             guest_cid: vsock_config.get_guest_cid(),
             threads: vec![thread],
             queues_per_thread,
-            exit_event: EventFd::new(EFD_NONBLOCK).expect("Creating exit eventfd"),
+            exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
         })
     }
 }
@@ -322,7 +326,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        Some(self.exit_event.try_clone().expect("Cloning exit eventfd"))
+        self.exit_event.try_clone().ok()
     }
 }
 

@@ -70,3 +70,42 @@ fn main() {
     let vsock_config = VsockConfig::try_from(VsockArgs::parse()).unwrap();
     start_backend_server(vsock_config);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vsock_server() {
+        const CID: u64 = 3;
+        const VHOST_SOCKET_PATH: &str = "test_vsock_server.socket";
+        const VSOCK_SOCKET_PATH: &str = "test_vsock_server.vsock";
+
+        let vsock_config = VsockConfig::new(
+            CID,
+            VHOST_SOCKET_PATH.to_string(),
+            VSOCK_SOCKET_PATH.to_string(),
+        );
+
+        let vsock_backend = Arc::new(RwLock::new(
+            VhostUserVsockBackend::new(vsock_config).unwrap(),
+        ));
+
+        let vsock_daemon = VhostUserDaemon::new(
+            String::from("vhost-user-vsock"),
+            vsock_backend.clone(),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .unwrap();
+
+        let vring_workers = vsock_daemon.get_epoll_handlers();
+
+        // VhostUserVsockBackend support a single thread that handles the TX and RX queues
+        assert_eq!(vsock_backend.read().unwrap().threads.len(), 1);
+
+        assert_eq!(
+            vring_workers.len(),
+            vsock_backend.read().unwrap().threads.len()
+        );
+    }
+}

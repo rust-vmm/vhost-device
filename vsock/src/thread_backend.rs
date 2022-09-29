@@ -238,3 +238,61 @@ impl VsockThreadBackend {
         dbg!("New guest conn error: Enqueue RST");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vhu_vsock::VSOCK_OP_RW;
+    use std::os::unix::net::UnixListener;
+    use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
+
+    const DATA_LEN: usize = 16;
+
+    #[test]
+    fn test_vsock_thread_backend() {
+        const VSOCK_SOCKET_PATH: &str = "test_vsock_thread_backend.vsock";
+        const VSOCK_PEER_PORT: u32 = 1234;
+        const VSOCK_PEER_PATH: &str = "test_vsock_thread_backend.vsock_1234";
+
+        let _ = std::fs::remove_file(VSOCK_PEER_PATH);
+        let _listener = UnixListener::bind(VSOCK_PEER_PATH).unwrap();
+
+        let epoll_fd = epoll::create(false).unwrap();
+        let mut vtp = VsockThreadBackend::new(VSOCK_SOCKET_PATH.to_string(), epoll_fd);
+
+        assert!(!vtp.pending_rx());
+
+        let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
+        let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+
+        let mut packet = unsafe { VsockPacket::new(hdr_raw, Some(data_raw)).unwrap() };
+
+        assert_eq!(
+            vtp.recv_pkt(&mut packet).unwrap_err().to_string(),
+            Error::EmptyBackendRxQ.to_string()
+        );
+
+        assert!(vtp.send_pkt(&packet).is_ok());
+
+        packet.set_type(VSOCK_TYPE_STREAM);
+        assert!(vtp.send_pkt(&packet).is_ok());
+
+        packet.set_dst_cid(VSOCK_HOST_CID);
+        packet.set_dst_port(VSOCK_PEER_PORT);
+        assert!(vtp.send_pkt(&packet).is_ok());
+
+        packet.set_op(VSOCK_OP_REQUEST);
+        assert!(vtp.send_pkt(&packet).is_ok());
+
+        packet.set_op(VSOCK_OP_RW);
+        assert!(vtp.send_pkt(&packet).is_ok());
+
+        packet.set_op(VSOCK_OP_RST);
+        assert!(vtp.send_pkt(&packet).is_ok());
+
+        assert!(vtp.recv_pkt(&mut packet).is_ok());
+
+        // cleanup
+        let _ = std::fs::remove_file(VSOCK_PEER_PATH);
+    }
+}

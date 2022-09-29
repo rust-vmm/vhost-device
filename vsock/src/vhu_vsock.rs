@@ -346,17 +346,145 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::convert::TryInto;
+    use vhost_user_backend::VringT;
+    use vm_memory::GuestAddress;
+
+    impl VsockArgs {
+        fn from_args(guest_cid: u64, socket: &str, uds_path: &str) -> Self {
+            VsockArgs {
+                guest_cid,
+                socket: socket.to_string(),
+                uds_path: uds_path.to_string(),
+            }
+        }
+    }
 
     #[test]
     fn test_vsock_config_setup() {
-        let vsock_config = VsockConfig::new(
-            3,
-            "/tmp/vhost4.socket".to_string(),
-            "/tmp/vm4.vsock".to_string(),
-        );
+        let vsock_args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
 
+        let vsock_config = VsockConfig::try_from(vsock_args);
+        assert!(vsock_config.is_ok());
+
+        let vsock_config = vsock_config.unwrap();
         assert_eq!(vsock_config.get_guest_cid(), 3);
         assert_eq!(vsock_config.get_socket_path(), "/tmp/vhost4.socket");
         assert_eq!(vsock_config.get_uds_path(), "/tmp/vm4.vsock");
+    }
+
+    #[test]
+    fn test_vsock_backend() {
+        const CID: u64 = 3;
+        const VHOST_SOCKET_PATH: &str = "test_vsock_backend.socket";
+        const VSOCK_SOCKET_PATH: &str = "test_vsock_backend.vsock";
+
+        let vsock_args = VsockArgs::from_args(CID, VHOST_SOCKET_PATH, VSOCK_SOCKET_PATH);
+        let vsock_config = VsockConfig::try_from(vsock_args);
+
+        let vsock_backend = VhostUserVsockBackend::new(vsock_config.unwrap());
+
+        assert!(vsock_backend.is_ok());
+        let mut vsock_backend = vsock_backend.unwrap();
+
+        assert_eq!(vsock_backend.num_queues(), NUM_QUEUES);
+        assert_eq!(vsock_backend.max_queue_size(), QUEUE_SIZE);
+        assert_ne!(vsock_backend.features(), 0);
+        assert!(!vsock_backend.protocol_features().is_empty());
+        vsock_backend.set_event_idx(false);
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        let vrings = [
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x2000).unwrap(),
+        ];
+
+        assert!(vsock_backend.update_memory(mem).is_ok());
+
+        let queues_per_thread = vsock_backend.queues_per_thread();
+        assert_eq!(queues_per_thread.len(), 1);
+        assert_eq!(queues_per_thread[0], 0b11);
+
+        let config = vsock_backend.get_config(0, 8);
+        assert_eq!(config.len(), 8);
+        let cid = u64::from_le_bytes(config.try_into().unwrap());
+        assert_eq!(cid, CID);
+
+        let exit = vsock_backend.exit_event(0);
+        assert!(exit.is_some());
+        exit.unwrap().write(1).unwrap();
+
+        let ret = vsock_backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        let ret = vsock_backend.handle_event(TX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        let ret = vsock_backend.handle_event(EVT_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        let ret = vsock_backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        // cleanup
+        let _ = std::fs::remove_file(VHOST_SOCKET_PATH);
+        let _ = std::fs::remove_file(VSOCK_SOCKET_PATH);
+    }
+
+    #[test]
+    fn test_vsock_backend_failures() {
+        const CID: u64 = 3;
+        const VHOST_SOCKET_PATH: &str = "test_vsock_backend_failures.socket";
+        const VSOCK_SOCKET_PATH: &str = "test_vsock_backend_failures.vsock";
+
+        let vsock_args =
+            VsockArgs::from_args(CID, "/sys/not_allowed.socket", "/sys/not_allowed.vsock");
+        let vsock_config = VsockConfig::try_from(vsock_args);
+
+        let vsock_backend = VhostUserVsockBackend::new(vsock_config.unwrap());
+        assert!(vsock_backend.is_err());
+
+        let vsock_args = VsockArgs::from_args(CID, VHOST_SOCKET_PATH, VSOCK_SOCKET_PATH);
+        let vsock_config = VsockConfig::try_from(vsock_args);
+
+        let mut vsock_backend = VhostUserVsockBackend::new(vsock_config.unwrap()).unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        let vrings = [
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x2000).unwrap(),
+        ];
+
+        vsock_backend.update_memory(mem).unwrap();
+
+        // reading out of the config space, expecting empty config
+        let config = vsock_backend.get_config(2, 8);
+        assert_eq!(config.len(), 0);
+
+        assert_eq!(
+            vsock_backend
+                .handle_event(RX_QUEUE_EVENT, EventSet::OUT, &vrings, 0)
+                .unwrap_err()
+                .to_string(),
+            Error::HandleEventNotEpollIn.to_string()
+        );
+        assert_eq!(
+            vsock_backend
+                .handle_event(BACKEND_EVENT + 1, EventSet::IN, &vrings, 0)
+                .unwrap_err()
+                .to_string(),
+            Error::HandleUnknownEvent.to_string()
+        );
+
+        // cleanup
+        let _ = std::fs::remove_file(VHOST_SOCKET_PATH);
+        let _ = std::fs::remove_file(VSOCK_SOCKET_PATH);
     }
 }

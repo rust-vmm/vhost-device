@@ -587,3 +587,95 @@ impl Drop for VhostUserVsockThread {
         let _ = std::fs::remove_file(&self.host_sock_path);
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vm_memory::GuestAddress;
+
+    impl VhostUserVsockThread {
+        pub fn get_epoll_file(&self) -> &File {
+            &self.epoll_file
+        }
+    }
+
+    #[test]
+    fn test_vsock_thread() {
+        let t = VhostUserVsockThread::new("test_vsock_thread.vsock".to_string(), 3);
+        assert!(t.is_ok());
+
+        let mut t = t.unwrap();
+        let epoll_fd = t.get_epoll_file().as_raw_fd();
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        t.mem = Some(mem.clone());
+
+        let dummy_fd = EventFd::new(0).unwrap();
+
+        assert!(VhostUserVsockThread::epoll_register(
+            epoll_fd,
+            dummy_fd.as_raw_fd(),
+            epoll::Events::EPOLLOUT
+        )
+        .is_ok());
+        assert!(VhostUserVsockThread::epoll_modify(
+            epoll_fd,
+            dummy_fd.as_raw_fd(),
+            epoll::Events::EPOLLIN
+        )
+        .is_ok());
+        assert!(VhostUserVsockThread::epoll_unregister(epoll_fd, dummy_fd.as_raw_fd()).is_ok());
+        assert!(VhostUserVsockThread::epoll_register(
+            epoll_fd,
+            dummy_fd.as_raw_fd(),
+            epoll::Events::EPOLLIN
+        )
+        .is_ok());
+
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        assert!(t.process_tx(&vring, false).is_ok());
+        assert!(t.process_tx(&vring, true).is_ok());
+        // add backend_rxq to avoid that RX processing is skipped
+        t.thread_backend
+            .backend_rxq
+            .push_back(ConnMapKey::new(0, 0));
+        assert!(t.process_rx(&vring, false).is_ok());
+        assert!(t.process_rx(&vring, true).is_ok());
+
+        dummy_fd.write(1).unwrap();
+
+        t.process_backend_evt(EventSet::empty());
+    }
+
+    #[test]
+    fn test_vsock_thread_failures() {
+        let t = VhostUserVsockThread::new("/sys/not_allowed.vsock".to_string(), 3);
+        assert!(t.is_err());
+
+        let mut t =
+            VhostUserVsockThread::new("test_vsock_thread_failures.vsock".to_string(), 3).unwrap();
+        assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
+        assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
+        assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // memory is not configured, so processing TX should fail
+        assert!(t.process_tx(&vring, false).is_err());
+        assert!(t.process_tx(&vring, true).is_err());
+
+        // add backend_rxq to avoid that RX processing is skipped
+        t.thread_backend
+            .backend_rxq
+            .push_back(ConnMapKey::new(0, 0));
+        assert!(t.process_rx(&vring, false).is_err());
+        assert!(t.process_rx(&vring, true).is_err());
+    }
+}

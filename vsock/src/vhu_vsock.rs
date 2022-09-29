@@ -2,17 +2,16 @@
 
 use super::vhu_vsock_thread::*;
 use clap::Parser;
-use core::slice;
 use std::convert::TryFrom;
-use std::{io, mem, result, sync::Mutex, u16, u32, u64, u8};
+use std::{io, result, sync::Mutex, u16, u32, u64, u8};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock};
 use virtio_bindings::bindings::{
-    virtio_blk::__u64, virtio_net::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_net::VIRTIO_F_VERSION_1,
+    virtio_net::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_net::VIRTIO_F_VERSION_1,
     virtio_ring::VIRTIO_RING_F_EVENT_IDX,
 };
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le64};
 use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
@@ -212,8 +211,17 @@ impl ConnMapKey {
     }
 }
 
+/// Virtio Vsock Configuration
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[repr(C)]
+struct VirtioVsockConfig {
+    pub guest_cid: Le64,
+}
+
+unsafe impl ByteValued for VirtioVsockConfig {}
+
 pub struct VhostUserVsockBackend {
-    guest_cid: __u64,
+    config: VirtioVsockConfig,
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
     pub exit_event: EventFd,
@@ -228,7 +236,9 @@ impl VhostUserVsockBackend {
         let queues_per_thread = vec![QUEUE_MASK];
 
         Ok(Self {
-            guest_cid: vsock_config.get_guest_cid(),
+            config: VirtioVsockConfig {
+                guest_cid: From::from(vsock_config.get_guest_cid()),
+            },
             threads: vec![thread],
             queues_per_thread,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
@@ -311,14 +321,17 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
         Ok(false)
     }
 
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        let buf = unsafe {
-            slice::from_raw_parts(
-                &self.guest_cid as *const __u64 as *const _,
-                mem::size_of::<__u64>(),
-            )
-        };
-        buf.to_vec()
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        let offset = offset as usize;
+        let size = size as usize;
+
+        let buf = self.config.as_slice();
+
+        if offset + size > buf.len() {
+            return Vec::new();
+        }
+
+        buf[offset..offset + size].to_vec()
     }
 
     fn queues_per_thread(&self) -> Vec<u64> {

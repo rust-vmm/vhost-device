@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-#![deny(missing_docs)]
-
 use super::{
     rxops::*,
     vhu_vsock::{
@@ -22,7 +20,6 @@ use std::{
 use virtio_vsock::packet::VsockPacket;
 use vm_memory::bitmap::BitmapSlice;
 
-// TODO: convert UnixStream to Arc<Mutex<UnixStream>>
 pub struct VsockThreadBackend {
     /// Map of ConnMapKey objects indexed by raw file descriptors.
     pub listener_map: HashMap<RawFd, ConnMapKey>,

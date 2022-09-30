@@ -675,6 +675,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "clap 3.2.22",
+ "env_logger",
  "epoll",
  "futures",
  "log",

@@ -290,12 +290,12 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                 if e.kind() == ErrorKind::WouldBlock {
                     0
                 } else {
-                    println!("send_bytes error: {:?}", e);
+                    dbg!("send_bytes error: {:?}", e);
                     return Err(Error::UnixWrite);
                 }
             }
             Err(e) => {
-                println!("send_bytes error: {:?}", e);
+                dbg!("send_bytes error: {:?}", e);
                 return Err(Error::UnixWrite);
             }
         };

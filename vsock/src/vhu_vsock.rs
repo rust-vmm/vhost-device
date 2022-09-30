@@ -278,10 +278,6 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
         let vring_rx = &vrings[0];
         let vring_tx = &vrings[1];
 
-        if evset == EventSet::OUT {
-            dbg!("received epollout");
-        }
-
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }

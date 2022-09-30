@@ -9,9 +9,9 @@ mod vhu_vsock_thread;
 mod vsock_conn;
 
 use clap::Parser;
+use log::{info, warn};
 use std::{
     convert::TryFrom,
-    process,
     sync::{Arc, RwLock},
 };
 use vhost::{vhost_user, vhost_user::Listener};
@@ -38,48 +38,35 @@ pub(crate) fn start_backend_server(vsock_config: VsockConfig) {
 
         let mut vring_workers = vsock_daemon.get_epoll_handlers();
 
-        if vring_workers.len() != vsock_backend.read().unwrap().threads.len() {
-            println!("Number of vring workers must be identical to number of backend threads");
-        }
-
         for thread in vsock_backend.read().unwrap().threads.iter() {
             thread
                 .lock()
                 .unwrap()
                 .set_vring_worker(Some(vring_workers.remove(0)));
         }
-        if let Err(e) = vsock_daemon.start(listener) {
-            dbg!("Failed to start vsock daemon: {:?}", e);
-            process::exit(1);
-        }
+
+        vsock_daemon.start(listener).unwrap();
 
         match vsock_daemon.wait() {
             Ok(()) => {
-                println!("Stopping cleanly");
-                process::exit(0);
+                info!("Stopping cleanly");
             }
             Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-                println!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                continue;
+                info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
             }
             Err(e) => {
-                println!("Error running daemon: {:?}", e);
+                warn!("Error running daemon: {:?}", e);
             }
         }
 
-        vsock_backend
-            .read()
-            .unwrap()
-            .exit_event
-            .write(1)
-            .expect("Shutting down worker thread");
-
-        println!("Vsock daemon is finished");
+        // No matter the result, we need to shut down the worker thread.
+        vsock_backend.read().unwrap().exit_event.write(1).unwrap();
     }
 }
 
 fn main() {
-    let vsock_config = VsockConfig::try_from(VsockArgs::parse()).unwrap();
+    env_logger::init();
 
+    let vsock_config = VsockConfig::try_from(VsockArgs::parse()).unwrap();
     start_backend_server(vsock_config);
 }

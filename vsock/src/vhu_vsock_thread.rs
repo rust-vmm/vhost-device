@@ -365,7 +365,6 @@ impl VhostUserVsockThread {
             epoll::Events::EPOLLIN,
         )?;
 
-        // self.register_listener(stream_fd, BACKEND_EVENT);
         Ok(())
     }
 
@@ -461,11 +460,6 @@ impl VhostUserVsockThread {
                 if !vring.enable_notification().unwrap() {
                     break;
                 }
-                // TODO: This may not be required because of
-                // previous pending_rx check
-                // if !work {
-                //     break;
-                // }
             }
         } else {
             self.process_rx_queue(vring)?;

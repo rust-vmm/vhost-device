@@ -26,7 +26,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, PartialEq, ThisError)]
 /// Errors related to low level i2c helpers
-pub enum Error {
+pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
     #[error("Invalid device list")]

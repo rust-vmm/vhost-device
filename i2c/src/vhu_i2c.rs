@@ -38,7 +38,7 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-i2c daemon.
-pub enum Error {
+pub(crate) enum Error {
     #[error("Failed to handle event, didn't match EPOLLIN")]
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
@@ -94,7 +94,7 @@ struct VirtioI2cInHdr {
 }
 unsafe impl ByteValued for VirtioI2cInHdr {}
 
-pub struct VhostUserI2cBackend<D: I2cDevice> {
+pub(crate) struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
     pub exit_event: EventFd,

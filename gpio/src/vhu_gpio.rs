@@ -10,7 +10,10 @@ use std::mem::size_of;
 use std::slice::from_raw_parts;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
-use std::{convert, io};
+use std::{
+    convert,
+    io::{self, Result as IoResult},
+};
 
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -44,7 +47,6 @@ const REQUEST_QUEUE: u16 = 0;
 const EVENT_QUEUE: u16 = 1;
 
 type Result<T> = std::result::Result<T, Error>;
-type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 /// Errors related to vhost-device-gpio-daemon.
@@ -416,10 +418,7 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         dbg!(self.event_idx = enabled);
     }
 
-    fn update_memory(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    ) -> VhostUserBackendResult<()> {
+    fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
         self.mem = Some(mem);
         Ok(())
     }
@@ -430,7 +429,7 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> VhostUserBackendResult<bool> {
+    ) -> IoResult<bool> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }

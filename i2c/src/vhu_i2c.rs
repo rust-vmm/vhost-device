@@ -8,7 +8,10 @@
 use log::warn;
 use std::mem::size_of;
 use std::sync::Arc;
-use std::{convert, io};
+use std::{
+    convert,
+    io::{self, Result as IoResult},
+};
 
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -34,7 +37,6 @@ const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 1;
 
 type Result<T> = std::result::Result<T, Error>;
-type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-i2c daemon.
@@ -300,10 +302,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         dbg!(self.event_idx = enabled);
     }
 
-    fn update_memory(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    ) -> VhostUserBackendResult<()> {
+    fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
         self.mem = Some(mem);
         Ok(())
     }
@@ -314,7 +313,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> VhostUserBackendResult<bool> {
+    ) -> IoResult<bool> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }

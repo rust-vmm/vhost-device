@@ -119,7 +119,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
             ));
 
             let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-user-RNG-daemon"),
+                String::from("vhost-device-rng-backend"),
                 Arc::clone(&vu_rng_backend),
                 GuestMemoryAtomic::new(GuestMemoryMmap::new()),
             )

@@ -55,8 +55,6 @@ pub(crate) enum VuRngError {
     UnexpectedRngSourceError,
     #[error("Previous Time value is later than current time")]
     UnexpectedTimerValue,
-    #[error("Unexpected VirtQueue error")]
-    UnexpectedVirtQueueError,
 }
 
 impl convert::From<VuRngError> for io::Error {

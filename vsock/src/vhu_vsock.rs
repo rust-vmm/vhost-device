@@ -1,5 +1,5 @@
 use super::vhu_vsock_thread::*;
-use clap::ArgMatches;
+use clap::Parser;
 use core::slice;
 use std::convert::TryFrom;
 use std::{io, mem, result, sync::Mutex, u16, u32, u64, u8};
@@ -116,16 +116,28 @@ pub(crate) enum Error {
     NoFreeLocalPort,
     #[error("Backend rx queue is empty")]
     EmptyBackendRxQ,
-    #[error("Invalid socket path as cmd line argument")]
-    SocketPathMissing,
-    #[error("Invalid UDS path as cmd line argument")]
-    UDSPathMissing,
 }
 
 impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
         std::io::Error::new(io::ErrorKind::Other, e)
     }
+}
+
+#[derive(Parser, Debug)]
+#[clap(version, about, long_about = None)]
+pub(crate) struct VsockArgs {
+    /// Context identifier of the guest which uniquely identifies the device for its lifetime.
+    #[clap(long, default_value_t = 3)]
+    guest_cid: u64,
+
+    /// Unix socket to which a hypervisor connects to and sets up the control path with the device.
+    #[clap(long)]
+    socket: String,
+
+    /// Unix socket to which a host-side application connects to.
+    #[clap(long)]
+    uds_path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -166,25 +178,14 @@ impl VsockConfig {
     }
 }
 
-impl TryFrom<ArgMatches> for VsockConfig {
+impl TryFrom<VsockArgs> for VsockConfig {
     type Error = Error;
 
-    fn try_from(cmd_args: ArgMatches) -> Result<Self> {
-        let guest_cid = cmd_args
-            .value_of("guest_cid")
-            .unwrap_or("3")
-            .parse::<u64>()
-            .unwrap_or(3);
-        let socket = cmd_args
-            .value_of("socket")
-            .ok_or(Error::SocketPathMissing)?
-            .to_string();
-        let uds_path = cmd_args
-            .value_of("uds_path")
-            .ok_or(Error::UDSPathMissing)?
-            .to_string();
+    fn try_from(cmd_args: VsockArgs) -> Result<Self> {
+        let socket = cmd_args.socket.trim().to_string();
+        let uds_path = cmd_args.uds_path.trim().to_string();
 
-        Ok(VsockConfig::new(guest_cid, socket, uds_path))
+        Ok(VsockConfig::new(cmd_args.guest_cid, socket, uds_path))
     }
 }
 

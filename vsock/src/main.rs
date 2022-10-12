@@ -7,7 +7,7 @@ mod vhu_vsock;
 mod vhu_vsock_thread;
 mod vsock_conn;
 
-use clap::{load_yaml, App};
+use clap::Parser;
 use std::{
     convert::TryFrom,
     process,
@@ -15,7 +15,7 @@ use std::{
 };
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vhu_vsock::{VhostUserVsockBackend, VsockConfig};
+use vhu_vsock::{VhostUserVsockBackend, VsockArgs, VsockConfig};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 /// This is the public API through which an external program starts the
@@ -78,10 +78,7 @@ pub(crate) fn start_backend_server(vsock_config: VsockConfig) {
 }
 
 fn main() {
-    let yaml = load_yaml!("cli.yaml");
-    let vsock_args = App::from_yaml(yaml).get_matches();
-
-    let vsock_config = VsockConfig::try_from(vsock_args).unwrap();
+    let vsock_config = VsockConfig::try_from(VsockArgs::parse()).unwrap();
 
     start_backend_server(vsock_config);
 }

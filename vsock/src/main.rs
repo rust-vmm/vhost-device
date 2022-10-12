@@ -16,8 +16,35 @@ use std::{
 };
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vhu_vsock::{VhostUserVsockBackend, VsockArgs, VsockConfig};
+use vhu_vsock::{Error, Result, VhostUserVsockBackend, VsockConfig};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+#[derive(Parser, Debug)]
+#[clap(version, about, long_about = None)]
+struct VsockArgs {
+    /// Context identifier of the guest which uniquely identifies the device for its lifetime.
+    #[clap(long, default_value_t = 3)]
+    guest_cid: u64,
+
+    /// Unix socket to which a hypervisor conencts to and sets up the control path with the device.
+    #[clap(long)]
+    socket: String,
+
+    /// Unix socket to which a host-side application connects to.
+    #[clap(long)]
+    uds_path: String,
+}
+
+impl TryFrom<VsockArgs> for VsockConfig {
+    type Error = Error;
+
+    fn try_from(cmd_args: VsockArgs) -> Result<Self> {
+        let socket = cmd_args.socket.trim().to_string();
+        let uds_path = cmd_args.uds_path.trim().to_string();
+
+        Ok(VsockConfig::new(cmd_args.guest_cid, socket, uds_path))
+    }
+}
 
 /// This is the public API through which an external program starts the
 /// vhost-user-vsock backend server.
@@ -74,6 +101,29 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl VsockArgs {
+        fn from_args(guest_cid: u64, socket: &str, uds_path: &str) -> Self {
+            VsockArgs {
+                guest_cid,
+                socket: socket.to_string(),
+                uds_path: uds_path.to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn test_vsock_config_setup() {
+        let vsock_args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
+
+        let vsock_config = VsockConfig::try_from(vsock_args);
+        assert!(vsock_config.is_ok());
+
+        let vsock_config = vsock_config.unwrap();
+        assert_eq!(vsock_config.get_guest_cid(), 3);
+        assert_eq!(vsock_config.get_socket_path(), "/tmp/vhost4.socket");
+        assert_eq!(vsock_config.get_uds_path(), "/tmp/vm4.vsock");
+    }
 
     #[test]
     fn test_vsock_server() {

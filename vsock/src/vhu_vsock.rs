@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use super::vhu_vsock_thread::*;
-use clap::Parser;
-use std::convert::TryFrom;
 use std::{io, result, sync::Mutex, u16, u32, u64, u8};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -130,22 +128,6 @@ impl std::convert::From<Error> for std::io::Error {
     }
 }
 
-#[derive(Parser, Debug)]
-#[clap(version, about, long_about = None)]
-pub(crate) struct VsockArgs {
-    /// Context identifier of the guest which uniquely identifies the device for its lifetime.
-    #[clap(long, default_value_t = 3)]
-    guest_cid: u64,
-
-    /// Unix socket to which a hypervisor connects to and sets up the control path with the device.
-    #[clap(long)]
-    socket: String,
-
-    /// Unix socket to which a host-side application connects to.
-    #[clap(long)]
-    uds_path: String,
-}
-
 #[derive(Debug, Clone)]
 /// This structure is the public API through which an external program
 /// is allowed to configure the backend.
@@ -181,17 +163,6 @@ impl VsockConfig {
     /// requests from the guest.
     pub fn get_socket_path(&self) -> String {
         String::from(&self.socket)
-    }
-}
-
-impl TryFrom<VsockArgs> for VsockConfig {
-    type Error = Error;
-
-    fn try_from(cmd_args: VsockArgs) -> Result<Self> {
-        let socket = cmd_args.socket.trim().to_string();
-        let uds_path = cmd_args.uds_path.trim().to_string();
-
-        Ok(VsockConfig::new(cmd_args.guest_cid, socket, uds_path))
     }
 }
 
@@ -351,39 +322,19 @@ mod tests {
     use vhost_user_backend::VringT;
     use vm_memory::GuestAddress;
 
-    impl VsockArgs {
-        fn from_args(guest_cid: u64, socket: &str, uds_path: &str) -> Self {
-            VsockArgs {
-                guest_cid,
-                socket: socket.to_string(),
-                uds_path: uds_path.to_string(),
-            }
-        }
-    }
-
-    #[test]
-    fn test_vsock_config_setup() {
-        let vsock_args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
-
-        let vsock_config = VsockConfig::try_from(vsock_args);
-        assert!(vsock_config.is_ok());
-
-        let vsock_config = vsock_config.unwrap();
-        assert_eq!(vsock_config.get_guest_cid(), 3);
-        assert_eq!(vsock_config.get_socket_path(), "/tmp/vhost4.socket");
-        assert_eq!(vsock_config.get_uds_path(), "/tmp/vm4.vsock");
-    }
-
     #[test]
     fn test_vsock_backend() {
         const CID: u64 = 3;
         const VHOST_SOCKET_PATH: &str = "test_vsock_backend.socket";
         const VSOCK_SOCKET_PATH: &str = "test_vsock_backend.vsock";
 
-        let vsock_args = VsockArgs::from_args(CID, VHOST_SOCKET_PATH, VSOCK_SOCKET_PATH);
-        let vsock_config = VsockConfig::try_from(vsock_args);
+        let vsock_config = VsockConfig::new(
+            CID,
+            VHOST_SOCKET_PATH.to_string(),
+            VSOCK_SOCKET_PATH.to_string(),
+        );
 
-        let vsock_backend = VhostUserVsockBackend::new(vsock_config.unwrap());
+        let vsock_backend = VhostUserVsockBackend::new(vsock_config);
 
         assert!(vsock_backend.is_ok());
         let mut vsock_backend = vsock_backend.unwrap();
@@ -444,17 +395,22 @@ mod tests {
         const VHOST_SOCKET_PATH: &str = "test_vsock_backend_failures.socket";
         const VSOCK_SOCKET_PATH: &str = "test_vsock_backend_failures.vsock";
 
-        let vsock_args =
-            VsockArgs::from_args(CID, "/sys/not_allowed.socket", "/sys/not_allowed.vsock");
-        let vsock_config = VsockConfig::try_from(vsock_args);
+        let vsock_config = VsockConfig::new(
+            CID,
+            "/sys/not_allowed.socket".to_string(),
+            "/sys/not_allowed.vsock".to_string(),
+        );
 
-        let vsock_backend = VhostUserVsockBackend::new(vsock_config.unwrap());
+        let vsock_backend = VhostUserVsockBackend::new(vsock_config);
         assert!(vsock_backend.is_err());
 
-        let vsock_args = VsockArgs::from_args(CID, VHOST_SOCKET_PATH, VSOCK_SOCKET_PATH);
-        let vsock_config = VsockConfig::try_from(vsock_args);
+        let vsock_config = VsockConfig::new(
+            CID,
+            VHOST_SOCKET_PATH.to_string(),
+            VSOCK_SOCKET_PATH.to_string(),
+        );
 
-        let mut vsock_backend = VhostUserVsockBackend::new(vsock_config.unwrap()).unwrap();
+        let mut vsock_backend = VhostUserVsockBackend::new(vsock_config).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );

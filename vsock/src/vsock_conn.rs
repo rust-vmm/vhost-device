@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use super::{
+use std::{
+    io::{ErrorKind, Read, Write},
+    num::Wrapping,
+    os::unix::prelude::{AsRawFd, RawFd},
+};
+
+use log::info;
+use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
+use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
+
+use crate::{
     rxops::*,
     rxqueue::*,
     txbuf::*,
@@ -11,14 +21,6 @@ use super::{
     },
     vhu_vsock_thread::VhostUserVsockThread,
 };
-use log::info;
-use std::{
-    io::{ErrorKind, Read, Write},
-    num::Wrapping,
-    os::unix::prelude::{AsRawFd, RawFd},
-};
-use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
-use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
 
 #[derive(Debug)]
 pub(crate) struct VsockConnection<S> {

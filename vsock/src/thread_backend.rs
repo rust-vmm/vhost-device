@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use super::{
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    os::unix::{
+        net::UnixStream,
+        prelude::{AsRawFd, FromRawFd, RawFd},
+    },
+};
+
+use log::{info, warn};
+use virtio_vsock::packet::VsockPacket;
+use vm_memory::bitmap::BitmapSlice;
+
+use crate::{
     rxops::*,
     vhu_vsock::{
         ConnMapKey, Error, Result, VSOCK_HOST_CID, VSOCK_OP_REQUEST, VSOCK_OP_RST,
@@ -9,16 +21,6 @@ use super::{
     vhu_vsock_thread::VhostUserVsockThread,
     vsock_conn::*,
 };
-use log::{info, warn};
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    os::unix::{
-        net::UnixStream,
-        prelude::{AsRawFd, FromRawFd, RawFd},
-    },
-};
-use virtio_vsock::packet::VsockPacket;
-use vm_memory::bitmap::BitmapSlice;
 
 pub(crate) struct VsockThreadBackend {
     /// Map of ConnMapKey objects indexed by raw file descriptors.

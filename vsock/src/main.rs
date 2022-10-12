@@ -8,16 +8,18 @@ mod vhu_vsock;
 mod vhu_vsock_thread;
 mod vsock_conn;
 
-use clap::Parser;
-use log::{info, warn};
 use std::{
     convert::TryFrom,
     sync::{Arc, RwLock},
 };
+
+use clap::Parser;
+use log::{info, warn};
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vhu_vsock::{Error, Result, VhostUserVsockBackend, VsockConfig};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+use crate::vhu_vsock::{Error, Result, VhostUserVsockBackend, VsockConfig};
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]

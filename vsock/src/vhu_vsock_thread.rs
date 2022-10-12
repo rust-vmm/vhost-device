@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use super::{
-    rxops::*,
-    thread_backend::*,
-    vhu_vsock::{
-        ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, CONN_TX_BUF_SIZE,
-        VSOCK_HOST_CID,
-    },
-    vsock_conn::*,
-};
-use futures::executor::{ThreadPool, ThreadPoolBuilder};
-use log::warn;
 use std::{
     fs::File,
     io,
@@ -23,11 +12,24 @@ use std::{
     },
     sync::{Arc, RwLock},
 };
+
+use futures::executor::{ThreadPool, ThreadPoolBuilder};
+use log::warn;
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::epoll::EventSet;
+
+use crate::{
+    rxops::*,
+    thread_backend::*,
+    vhu_vsock::{
+        ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, CONN_TX_BUF_SIZE,
+        VSOCK_HOST_CID,
+    },
+    vsock_conn::*,
+};
 
 type ArcVhostBknd = Arc<RwLock<VhostUserVsockBackend>>;
 

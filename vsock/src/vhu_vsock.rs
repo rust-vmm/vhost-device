@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use super::vhu_vsock_thread::*;
 use std::{io, result, sync::Mutex, u16, u32, u64, u8};
+
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock};
@@ -14,6 +14,8 @@ use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
 };
+
+use crate::vhu_vsock_thread::*;
 
 const NUM_QUEUES: usize = 2;
 const QUEUE_SIZE: usize = 256;

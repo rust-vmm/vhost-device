@@ -5,7 +5,7 @@ use std::{io::Write, num::Wrapping};
 use vm_memory::{bitmap::BitmapSlice, VolatileSlice};
 
 #[derive(Debug)]
-pub struct LocalTxBuf {
+pub(crate) struct LocalTxBuf {
     /// Buffer holding data to be forwarded to a host-side application
     buf: Vec<u8>,
     /// Index into buffer from which data can be consumed from the buffer
@@ -31,7 +31,7 @@ impl LocalTxBuf {
 
     /// Add new data to the tx buffer, push all or none.
     /// Returns LocalTxBufFull error if space not sufficient.
-    pub(crate) fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {
+    pub fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {
         if CONN_TX_BUF_SIZE as usize - self.len() < data_buf.len() {
             // Tx buffer is full
             return Err(Error::LocalTxBufFull);
@@ -58,7 +58,7 @@ impl LocalTxBuf {
     }
 
     /// Flush buf data to stream.
-    pub(crate) fn flush_to<S: Write>(&mut self, stream: &mut S) -> Result<usize> {
+    pub fn flush_to<S: Write>(&mut self, stream: &mut S) -> Result<usize> {
         if self.is_empty() {
             // No data to be flushed
             return Ok(0);

@@ -3,7 +3,7 @@
 use super::rxops::RxOps;
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct RxQueue {
+pub(crate) struct RxQueue {
     /// Bitmap of rx operations.
     queue: u8,
 }

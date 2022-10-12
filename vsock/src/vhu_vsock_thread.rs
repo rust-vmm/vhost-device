@@ -27,14 +27,11 @@ use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vmm_sys_util::{
-    epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
-};
+use vmm_sys_util::epoll::EventSet;
 
 type ArcVhostBknd = Arc<RwLock<VhostUserVsockBackend>>;
 
-pub struct VhostUserVsockThread {
+pub(crate) struct VhostUserVsockThread {
     /// Guest memory map.
     pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     /// VIRTIO_RING_F_EVENT_IDX.
@@ -45,8 +42,6 @@ pub struct VhostUserVsockThread {
     host_sock_path: String,
     /// Listener listening for new connections on the host.
     host_listener: UnixListener,
-    /// Used to kill the thread.
-    pub kill_evt: EventFd,
     /// Instance of VringWorker.
     vring_worker: Option<Arc<VringEpollHandler<ArcVhostBknd, VringRwLock, ()>>>,
     /// epoll fd to which new host connections are added.
@@ -63,7 +58,7 @@ pub struct VhostUserVsockThread {
 
 impl VhostUserVsockThread {
     /// Create a new instance of VhostUserVsockThread.
-    pub(crate) fn new(uds_path: String, guest_cid: u64) -> Result<Self> {
+    pub fn new(uds_path: String, guest_cid: u64) -> Result<Self> {
         // TODO: better error handling, maybe add a param to force the unlink
         let _ = std::fs::remove_file(uds_path.clone());
         let host_sock = UnixListener::bind(&uds_path)
@@ -81,7 +76,6 @@ impl VhostUserVsockThread {
             host_sock: host_sock.as_raw_fd(),
             host_sock_path: uds_path.clone(),
             host_listener: host_sock,
-            kill_evt: EventFd::new(EFD_NONBLOCK).unwrap(),
             vring_worker: None,
             epoll_file,
             thread_backend: VsockThreadBackend::new(uds_path, epoll_fd),
@@ -99,7 +93,7 @@ impl VhostUserVsockThread {
     }
 
     /// Register a file with an epoll to listen for events in evset.
-    pub(crate) fn epoll_register(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
+    pub fn epoll_register(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
@@ -112,7 +106,7 @@ impl VhostUserVsockThread {
     }
 
     /// Remove a file from the epoll.
-    pub(crate) fn epoll_unregister(epoll_fd: RawFd, fd: RawFd) -> Result<()> {
+    pub fn epoll_unregister(epoll_fd: RawFd, fd: RawFd) -> Result<()> {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_DEL,
@@ -125,7 +119,7 @@ impl VhostUserVsockThread {
     }
 
     /// Modify the events we listen to for the fd in the epoll.
-    pub(crate) fn epoll_modify(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
+    pub fn epoll_modify(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_MOD,
@@ -462,7 +456,7 @@ impl VhostUserVsockThread {
     }
 
     /// Wrapper to process rx queue based on whether event idx is enabled or not.
-    pub(crate) fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+    pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -562,7 +556,7 @@ impl VhostUserVsockThread {
     }
 
     /// Wrapper to process tx queue based on whether event idx is enabled or not.
-    pub(crate) fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<bool> {
+    pub fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<bool> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -591,9 +585,10 @@ impl Drop for VhostUserVsockThread {
 mod tests {
     use super::*;
     use vm_memory::GuestAddress;
+    use vmm_sys_util::eventfd::EventFd;
 
     impl VhostUserVsockThread {
-        pub fn get_epoll_file(&self) -> &File {
+        fn get_epoll_file(&self) -> &File {
             &self.epoll_file
         }
     }

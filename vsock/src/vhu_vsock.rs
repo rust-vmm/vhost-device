@@ -26,42 +26,43 @@ const RX_QUEUE_EVENT: u16 = 0;
 const TX_QUEUE_EVENT: u16 = 1;
 // New descriptors are pending on the event queue.
 const EVT_QUEUE_EVENT: u16 = 2;
-// Notification coming from the backend.
-pub const BACKEND_EVENT: u16 = 3;
 
-// Vsock connection TX buffer capacity
-// TODO: Make this value configurable
-pub const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+/// Notification coming from the backend.
+pub(crate) const BACKEND_EVENT: u16 = 3;
 
-// CID of the host
-pub const VSOCK_HOST_CID: u64 = 2;
+/// Vsock connection TX buffer capacity
+/// TODO: Make this value configurable
+pub(crate) const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
-// Connection oriented packet
-pub const VSOCK_TYPE_STREAM: u16 = 1;
+/// CID of the host
+pub(crate) const VSOCK_HOST_CID: u64 = 2;
+
+/// Connection oriented packet
+pub(crate) const VSOCK_TYPE_STREAM: u16 = 1;
 
 // Vsock packet operation ID
-//
-// Connection request
-pub const VSOCK_OP_REQUEST: u16 = 1;
-// Connection response
-pub const VSOCK_OP_RESPONSE: u16 = 2;
-// Connection reset
-pub const VSOCK_OP_RST: u16 = 3;
-// Shutdown connection
-pub const VSOCK_OP_SHUTDOWN: u16 = 4;
-// Data read/write
-pub const VSOCK_OP_RW: u16 = 5;
-// Flow control credit update
-pub const VSOCK_OP_CREDIT_UPDATE: u16 = 6;
-// Flow control credit request
-pub const VSOCK_OP_CREDIT_REQUEST: u16 = 7;
+
+/// Connection request
+pub(crate) const VSOCK_OP_REQUEST: u16 = 1;
+/// Connection response
+pub(crate) const VSOCK_OP_RESPONSE: u16 = 2;
+/// Connection reset
+pub(crate) const VSOCK_OP_RST: u16 = 3;
+/// Shutdown connection
+pub(crate) const VSOCK_OP_SHUTDOWN: u16 = 4;
+/// Data read/write
+pub(crate) const VSOCK_OP_RW: u16 = 5;
+/// Flow control credit update
+pub(crate) const VSOCK_OP_CREDIT_UPDATE: u16 = 6;
+/// Flow control credit request
+pub(crate) const VSOCK_OP_CREDIT_REQUEST: u16 = 7;
 
 // Vsock packet flags
-//
-// VSOCK_OP_SHUTDOWN: Packet sender will receive no more data
-pub const VSOCK_FLAGS_SHUTDOWN_RCV: u32 = 1;
-// VSOCK_OP_SHUTDOWN: Packet sender will send no more data
-pub const VSOCK_FLAGS_SHUTDOWN_SEND: u32 = 2;
+
+/// VSOCK_OP_SHUTDOWN: Packet sender will receive no more data
+pub(crate) const VSOCK_FLAGS_SHUTDOWN_RCV: u32 = 1;
+/// VSOCK_OP_SHUTDOWN: Packet sender will send no more data
+pub(crate) const VSOCK_FLAGS_SHUTDOWN_SEND: u32 = 2;
 
 // Queue mask to select vrings.
 const QUEUE_MASK: u64 = 0b11;
@@ -197,7 +198,7 @@ impl TryFrom<VsockArgs> for VsockConfig {
 /// A local port and peer port pair used to retrieve
 /// the corresponding connection.
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
-pub struct ConnMapKey {
+pub(crate) struct ConnMapKey {
     local_port: u32,
     peer_port: u32,
 }
@@ -220,7 +221,7 @@ struct VirtioVsockConfig {
 
 unsafe impl ByteValued for VirtioVsockConfig {}
 
-pub struct VhostUserVsockBackend {
+pub(crate) struct VhostUserVsockBackend {
     config: VirtioVsockConfig,
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
@@ -228,7 +229,7 @@ pub struct VhostUserVsockBackend {
 }
 
 impl VhostUserVsockBackend {
-    pub(crate) fn new(vsock_config: VsockConfig) -> Result<Self> {
+    pub fn new(vsock_config: VsockConfig) -> Result<Self> {
         let thread = Mutex::new(VhostUserVsockThread::new(
             vsock_config.get_uds_path(),
             vsock_config.get_guest_cid(),

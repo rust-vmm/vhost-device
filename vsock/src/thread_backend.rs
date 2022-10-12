@@ -20,7 +20,7 @@ use std::{
 use virtio_vsock::packet::VsockPacket;
 use vm_memory::bitmap::BitmapSlice;
 
-pub struct VsockThreadBackend {
+pub(crate) struct VsockThreadBackend {
     /// Map of ConnMapKey objects indexed by raw file descriptors.
     pub listener_map: HashMap<RawFd, ConnMapKey>,
     /// Map of vsock connection objects indexed by ConnMapKey objects.
@@ -63,7 +63,7 @@ impl VsockThreadBackend {
     /// Returns:
     /// - `Ok(())` if the packet was successfully filled in
     /// - `Err(Error::EmptyBackendRxQ) if there was no available data
-    pub(crate) fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
+    pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Pop an event from the backend_rxq
         let key = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
         let conn = match self.conn_map.get_mut(&key) {
@@ -117,7 +117,7 @@ impl VsockThreadBackend {
     ///
     /// Returns:
     /// - always `Ok(())` if packet has been consumed correctly
-    pub(crate) fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
+    pub fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
         let key = ConnMapKey::new(pkt.dst_port(), pkt.src_port());
 
         // TODO: Rst if packet has unsupported type

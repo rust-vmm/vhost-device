@@ -21,7 +21,7 @@ use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
 
 #[derive(Debug)]
-pub struct VsockConnection<S> {
+pub(crate) struct VsockConnection<S> {
     /// Host-side stream corresponding to this vsock connection.
     pub stream: S,
     /// Specifies if the stream is connected to a listener on the host.
@@ -120,7 +120,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
     /// Process a vsock packet that is meant for this connection.
     /// Forward data to the host-side application if the vsock packet
     /// contains a RW operation.
-    pub(crate) fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
+    pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Initialize all fields in the packet header
         self.init_pkt(pkt);
 
@@ -201,7 +201,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
     ///
     /// Returns:
     /// - always `Ok(())` to indicate that the packet has been consumed
-    pub(crate) fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
+    pub fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
         // Update peer credit information
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
@@ -365,7 +365,7 @@ mod tests {
     }
 
     impl HeadParams {
-        pub fn new(head_len: usize, data_len: u32) -> Self {
+        fn new(head_len: usize, data_len: u32) -> Self {
             Self { head_len, data_len }
         }
         fn construct_head(&self) -> Vec<u8> {

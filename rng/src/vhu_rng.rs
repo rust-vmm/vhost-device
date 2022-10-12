@@ -34,7 +34,7 @@ type RngDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 #[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-rng daemon.
-pub enum VuRngError {
+pub(crate) enum VuRngError {
     #[error("Descriptor not found")]
     DescriptorNotFound,
     #[error("Notification send failed")]
@@ -55,8 +55,6 @@ pub enum VuRngError {
     UnexpectedRngSourceError,
     #[error("Previous Time value is later than current time")]
     UnexpectedTimerValue,
-    #[error("Unexpected VirtQueue error")]
-    UnexpectedVirtQueueError,
 }
 
 impl convert::From<VuRngError> for io::Error {
@@ -66,7 +64,7 @@ impl convert::From<VuRngError> for io::Error {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VuRngTimerConfig {
+pub(crate) struct VuRngTimerConfig {
     period_ms: u128,
     period_start: Instant,
     max_bytes: usize,
@@ -84,7 +82,7 @@ impl VuRngTimerConfig {
     }
 }
 
-pub struct VuRngBackend<T: Read> {
+pub(crate) struct VuRngBackend<T: Read> {
     event_idx: bool,
     timer: VuRngTimerConfig,
     rng_source: Arc<Mutex<T>>,

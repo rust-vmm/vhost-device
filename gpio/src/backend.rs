@@ -23,7 +23,7 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to low level GPIO helpers
-pub enum Error {
+pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
     #[error("Socket count ({0}) doesn't match device count {1}")]

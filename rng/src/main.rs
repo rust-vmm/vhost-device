@@ -26,7 +26,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-rng daemon.
-pub enum Error {
+pub(crate) enum Error {
     #[error("RNG source file doesn't exists or can't be accessed")]
     AccessRngSourceFile,
     #[error("Period is too big: {0}")]
@@ -62,7 +62,7 @@ struct RngArgs {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VuRngConfig {
+pub(crate) struct VuRngConfig {
     pub period_ms: u128,
     pub max_bytes: usize,
     pub count: u32,
@@ -98,7 +98,7 @@ impl TryFrom<RngArgs> for VuRngConfig {
     }
 }
 
-pub fn start_backend(config: VuRngConfig) -> Result<()> {
+pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
     let mut handles = Vec::new();
     let file = File::open(&config.rng_source).map_err(|_| Error::AccessRngSourceFile)?;
     let random_file = Arc::new(Mutex::new(file));
@@ -119,7 +119,7 @@ pub fn start_backend(config: VuRngConfig) -> Result<()> {
             ));
 
             let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-user-RNG-daemon"),
+                String::from("vhost-device-rng-backend"),
                 Arc::clone(&vu_rng_backend),
                 GuestMemoryAtomic::new(GuestMemoryMmap::new()),
             )

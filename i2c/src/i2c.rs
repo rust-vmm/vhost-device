@@ -27,7 +27,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 /// Errors related to low level i2c helpers
-pub enum Error {
+pub(crate) enum Error {
     #[error("Incorrect message length for {0} operation: {1}")]
     MessageLengthInvalid(&'static str, usize),
     #[error("Invalid SMBUS command: {0}")]
@@ -74,7 +74,7 @@ const I2C_FUNC_SMBUS_ALL: u64 =
     I2C_FUNC_SMBUS_BYTE | I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA;
 
 /// I2C protocol definitions
-pub const I2C_M_RD: u16 = 0x0001; // read data, from slave to master
+pub(crate) const I2C_M_RD: u16 = 0x0001; // read data, from slave to master
 
 /// Copied (partially) from Linux's include/uapi/linux/i2c.h
 ///
@@ -115,7 +115,7 @@ struct I2cMsg {
 
 /// This is the structure as used in the I2C_RDWR ioctl call
 #[repr(C)]
-pub struct I2cRdwrIoctlData {
+pub(crate) struct I2cRdwrIoctlData {
     msgs: *mut I2cMsg,
     nmsgs: u32,
 }
@@ -157,14 +157,14 @@ impl I2cSmbusData {
 
 /// This is the structure as used in the I2C_SMBUS ioctl call
 #[repr(C)]
-pub struct I2cSmbusIoctlData {
+pub(crate) struct I2cSmbusIoctlData {
     read_write: u8,
     command: u8,
     size: u32,
     data: *mut I2cSmbusData,
 }
 
-pub struct SmbusMsg {
+pub(crate) struct SmbusMsg {
     read_write: u8,
     command: u8,
     size: u32,
@@ -284,7 +284,7 @@ impl SmbusMsg {
 }
 
 /// I2C definitions
-pub struct I2cReq {
+pub(crate) struct I2cReq {
     pub addr: u16,
     pub flags: u16,
     pub len: u16,
@@ -297,7 +297,7 @@ pub struct I2cReq {
 /// be used outside of this crate. The purpose of this trait is to provide a
 /// mock implementation for the I2C driver so that we can test the I2C
 /// functionality without the need of a physical device.
-pub trait I2cDevice {
+pub(crate) trait I2cDevice {
     // Open the device specified by the adapter number.
     fn open(device_path: &str, adapter_no: u32) -> Result<Self>
     where
@@ -322,7 +322,7 @@ pub trait I2cDevice {
 /// A physical I2C device. This structure can only be initialized on hosts
 /// where `/dev/i2c-XX` is available.
 #[derive(Debug)]
-pub struct PhysDevice {
+pub(crate) struct PhysDevice {
     file: File,
     adapter_no: u32,
 }
@@ -425,7 +425,7 @@ impl I2cDevice for PhysDevice {
 }
 
 #[derive(Debug)]
-pub struct I2cAdapter<D: I2cDevice> {
+pub(crate) struct I2cAdapter<D: I2cDevice> {
     device: D,
     adapter_no: u32,
     smbus: bool,
@@ -507,7 +507,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
 /// I2C map and helpers
 pub(crate) const MAX_I2C_VDEV: usize = 1 << 7;
 
-pub struct I2cMap<D: I2cDevice> {
+pub(crate) struct I2cMap<D: I2cDevice> {
     adapters: Vec<I2cAdapter<D>>,
     device_map: HashMap<u16, usize>,
 }
@@ -569,7 +569,7 @@ impl<D: I2cDevice> I2cMap<D> {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
     use vmm_sys_util::tempfile::TempFile;
 

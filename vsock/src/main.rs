@@ -48,33 +48,33 @@ impl TryFrom<VsockArgs> for VsockConfig {
 
 /// This is the public API through which an external program starts the
 /// vhost-user-vsock backend server.
-pub(crate) fn start_backend_server(vsock_config: VsockConfig) {
+pub(crate) fn start_backend_server(config: VsockConfig) {
     loop {
-        let vsock_backend = Arc::new(RwLock::new(
-            VhostUserVsockBackend::new(vsock_config.clone()).unwrap(),
+        let backend = Arc::new(RwLock::new(
+            VhostUserVsockBackend::new(config.clone()).unwrap(),
         ));
 
-        let listener = Listener::new(vsock_config.get_socket_path(), true).unwrap();
+        let listener = Listener::new(config.get_socket_path(), true).unwrap();
 
-        let mut vsock_daemon = VhostUserDaemon::new(
+        let mut daemon = VhostUserDaemon::new(
             String::from("vhost-user-vsock"),
-            vsock_backend.clone(),
+            backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )
         .unwrap();
 
-        let mut vring_workers = vsock_daemon.get_epoll_handlers();
+        let mut vring_workers = daemon.get_epoll_handlers();
 
-        for thread in vsock_backend.read().unwrap().threads.iter() {
+        for thread in backend.read().unwrap().threads.iter() {
             thread
                 .lock()
                 .unwrap()
                 .set_vring_worker(Some(vring_workers.remove(0)));
         }
 
-        vsock_daemon.start(listener).unwrap();
+        daemon.start(listener).unwrap();
 
-        match vsock_daemon.wait() {
+        match daemon.wait() {
             Ok(()) => {
                 info!("Stopping cleanly");
             }
@@ -87,15 +87,15 @@ pub(crate) fn start_backend_server(vsock_config: VsockConfig) {
         }
 
         // No matter the result, we need to shut down the worker thread.
-        vsock_backend.read().unwrap().exit_event.write(1).unwrap();
+        backend.read().unwrap().exit_event.write(1).unwrap();
     }
 }
 
 fn main() {
     env_logger::init();
 
-    let vsock_config = VsockConfig::try_from(VsockArgs::parse()).unwrap();
-    start_backend_server(vsock_config);
+    let config = VsockConfig::try_from(VsockArgs::parse()).unwrap();
+    start_backend_server(config);
 }
 
 #[cfg(test)]
@@ -114,15 +114,15 @@ mod tests {
 
     #[test]
     fn test_vsock_config_setup() {
-        let vsock_args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
+        let args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
 
-        let vsock_config = VsockConfig::try_from(vsock_args);
-        assert!(vsock_config.is_ok());
+        let config = VsockConfig::try_from(args);
+        assert!(config.is_ok());
 
-        let vsock_config = vsock_config.unwrap();
-        assert_eq!(vsock_config.get_guest_cid(), 3);
-        assert_eq!(vsock_config.get_socket_path(), "/tmp/vhost4.socket");
-        assert_eq!(vsock_config.get_uds_path(), "/tmp/vm4.vsock");
+        let config = config.unwrap();
+        assert_eq!(config.get_guest_cid(), 3);
+        assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
+        assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
     }
 
     #[test]
@@ -131,31 +131,26 @@ mod tests {
         const VHOST_SOCKET_PATH: &str = "test_vsock_server.socket";
         const VSOCK_SOCKET_PATH: &str = "test_vsock_server.vsock";
 
-        let vsock_config = VsockConfig::new(
+        let config = VsockConfig::new(
             CID,
             VHOST_SOCKET_PATH.to_string(),
             VSOCK_SOCKET_PATH.to_string(),
         );
 
-        let vsock_backend = Arc::new(RwLock::new(
-            VhostUserVsockBackend::new(vsock_config).unwrap(),
-        ));
+        let backend = Arc::new(RwLock::new(VhostUserVsockBackend::new(config).unwrap()));
 
-        let vsock_daemon = VhostUserDaemon::new(
+        let daemon = VhostUserDaemon::new(
             String::from("vhost-user-vsock"),
-            vsock_backend.clone(),
+            backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )
         .unwrap();
 
-        let vring_workers = vsock_daemon.get_epoll_handlers();
+        let vring_workers = daemon.get_epoll_handlers();
 
         // VhostUserVsockBackend support a single thread that handles the TX and RX queues
-        assert_eq!(vsock_backend.read().unwrap().threads.len(), 1);
+        assert_eq!(backend.read().unwrap().threads.len(), 1);
 
-        assert_eq!(
-            vring_workers.len(),
-            vsock_backend.read().unwrap().threads.len()
-        );
+        assert_eq!(vring_workers.len(), backend.read().unwrap().threads.len());
     }
 }

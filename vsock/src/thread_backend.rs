@@ -206,7 +206,7 @@ impl VsockThreadBackend {
         self.listener_map
             .insert(stream_fd, ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
 
-        let vsock_conn = VsockConnection::new_peer_init(
+        let conn = VsockConnection::new_peer_init(
             stream,
             pkt.dst_cid(),
             pkt.dst_port(),
@@ -217,7 +217,7 @@ impl VsockThreadBackend {
         );
 
         self.conn_map
-            .insert(ConnMapKey::new(pkt.dst_port(), pkt.src_port()), vsock_conn);
+            .insert(ConnMapKey::new(pkt.dst_port(), pkt.src_port()), conn);
         self.backend_rxq
             .push_back(ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
         self.stream_map

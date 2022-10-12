@@ -200,16 +200,16 @@ pub(crate) struct VhostUserVsockBackend {
 }
 
 impl VhostUserVsockBackend {
-    pub fn new(vsock_config: VsockConfig) -> Result<Self> {
+    pub fn new(config: VsockConfig) -> Result<Self> {
         let thread = Mutex::new(VhostUserVsockThread::new(
-            vsock_config.get_uds_path(),
-            vsock_config.get_guest_cid(),
+            config.get_uds_path(),
+            config.get_guest_cid(),
         )?);
         let queues_per_thread = vec![QUEUE_MASK];
 
         Ok(Self {
             config: VirtioVsockConfig {
-                guest_cid: From::from(vsock_config.get_guest_cid()),
+                guest_cid: From::from(config.get_guest_cid()),
             },
             threads: vec![thread],
             queues_per_thread,
@@ -328,22 +328,22 @@ mod tests {
         const VHOST_SOCKET_PATH: &str = "test_vsock_backend.socket";
         const VSOCK_SOCKET_PATH: &str = "test_vsock_backend.vsock";
 
-        let vsock_config = VsockConfig::new(
+        let config = VsockConfig::new(
             CID,
             VHOST_SOCKET_PATH.to_string(),
             VSOCK_SOCKET_PATH.to_string(),
         );
 
-        let vsock_backend = VhostUserVsockBackend::new(vsock_config);
+        let backend = VhostUserVsockBackend::new(config);
 
-        assert!(vsock_backend.is_ok());
-        let mut vsock_backend = vsock_backend.unwrap();
+        assert!(backend.is_ok());
+        let mut backend = backend.unwrap();
 
-        assert_eq!(vsock_backend.num_queues(), NUM_QUEUES);
-        assert_eq!(vsock_backend.max_queue_size(), QUEUE_SIZE);
-        assert_ne!(vsock_backend.features(), 0);
-        assert!(!vsock_backend.protocol_features().is_empty());
-        vsock_backend.set_event_idx(false);
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_ne!(backend.features(), 0);
+        assert!(!backend.protocol_features().is_empty());
+        backend.set_event_idx(false);
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
@@ -353,34 +353,34 @@ mod tests {
             VringRwLock::new(mem.clone(), 0x2000).unwrap(),
         ];
 
-        assert!(vsock_backend.update_memory(mem).is_ok());
+        assert!(backend.update_memory(mem).is_ok());
 
-        let queues_per_thread = vsock_backend.queues_per_thread();
+        let queues_per_thread = backend.queues_per_thread();
         assert_eq!(queues_per_thread.len(), 1);
         assert_eq!(queues_per_thread[0], 0b11);
 
-        let config = vsock_backend.get_config(0, 8);
+        let config = backend.get_config(0, 8);
         assert_eq!(config.len(), 8);
         let cid = u64::from_le_bytes(config.try_into().unwrap());
         assert_eq!(cid, CID);
 
-        let exit = vsock_backend.exit_event(0);
+        let exit = backend.exit_event(0);
         assert!(exit.is_some());
         exit.unwrap().write(1).unwrap();
 
-        let ret = vsock_backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
-        let ret = vsock_backend.handle_event(TX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(TX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
-        let ret = vsock_backend.handle_event(EVT_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(EVT_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
-        let ret = vsock_backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
@@ -395,22 +395,22 @@ mod tests {
         const VHOST_SOCKET_PATH: &str = "test_vsock_backend_failures.socket";
         const VSOCK_SOCKET_PATH: &str = "test_vsock_backend_failures.vsock";
 
-        let vsock_config = VsockConfig::new(
+        let config = VsockConfig::new(
             CID,
             "/sys/not_allowed.socket".to_string(),
             "/sys/not_allowed.vsock".to_string(),
         );
 
-        let vsock_backend = VhostUserVsockBackend::new(vsock_config);
-        assert!(vsock_backend.is_err());
+        let backend = VhostUserVsockBackend::new(config);
+        assert!(backend.is_err());
 
-        let vsock_config = VsockConfig::new(
+        let config = VsockConfig::new(
             CID,
             VHOST_SOCKET_PATH.to_string(),
             VSOCK_SOCKET_PATH.to_string(),
         );
 
-        let mut vsock_backend = VhostUserVsockBackend::new(vsock_config).unwrap();
+        let mut backend = VhostUserVsockBackend::new(config).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );
@@ -419,21 +419,21 @@ mod tests {
             VringRwLock::new(mem.clone(), 0x2000).unwrap(),
         ];
 
-        vsock_backend.update_memory(mem).unwrap();
+        backend.update_memory(mem).unwrap();
 
         // reading out of the config space, expecting empty config
-        let config = vsock_backend.get_config(2, 8);
+        let config = backend.get_config(2, 8);
         assert_eq!(config.len(), 0);
 
         assert_eq!(
-            vsock_backend
+            backend
                 .handle_event(RX_QUEUE_EVENT, EventSet::OUT, &vrings, 0)
                 .unwrap_err()
                 .to_string(),
             Error::HandleEventNotEpollIn.to_string()
         );
         assert_eq!(
-            vsock_backend
+            backend
                 .handle_event(BACKEND_EVENT + 1, EventSet::IN, &vrings, 0)
                 .unwrap_err()
                 .to_string(),

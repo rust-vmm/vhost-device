@@ -486,56 +486,56 @@ mod tests {
     fn test_vsock_conn_init() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut vsock_conn_local =
+        let mut conn_local =
             VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
 
-        assert!(!vsock_conn_local.connect);
-        assert_eq!(vsock_conn_local.peer_port, 5001);
-        assert_eq!(vsock_conn_local.rx_queue, RxQueue::new());
-        assert_eq!(vsock_conn_local.local_cid, VSOCK_HOST_CID);
-        assert_eq!(vsock_conn_local.local_port, 5000);
-        assert_eq!(vsock_conn_local.guest_cid, 3);
+        assert!(!conn_local.connect);
+        assert_eq!(conn_local.peer_port, 5001);
+        assert_eq!(conn_local.rx_queue, RxQueue::new());
+        assert_eq!(conn_local.local_cid, VSOCK_HOST_CID);
+        assert_eq!(conn_local.local_port, 5000);
+        assert_eq!(conn_local.guest_cid, 3);
 
         // set peer port
-        vsock_conn_local.set_peer_port(5002);
-        assert_eq!(vsock_conn_local.peer_port, 5002);
+        conn_local.set_peer_port(5002);
+        assert_eq!(conn_local.peer_port, 5002);
 
         // New connection initiated by the peer/guest
         let dummy_file = VsockDummySocket::new();
-        let mut vsock_conn_peer =
+        let mut conn_peer =
             VsockConnection::new_peer_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1, 65536);
 
-        assert!(!vsock_conn_peer.connect);
-        assert_eq!(vsock_conn_peer.peer_port, 5001);
-        assert_eq!(vsock_conn_peer.rx_queue.dequeue().unwrap(), RxOps::Response);
-        assert!(!vsock_conn_peer.rx_queue.pending_rx());
-        assert_eq!(vsock_conn_peer.local_cid, VSOCK_HOST_CID);
-        assert_eq!(vsock_conn_peer.local_port, 5000);
-        assert_eq!(vsock_conn_peer.guest_cid, 3);
-        assert_eq!(vsock_conn_peer.peer_buf_alloc, 65536);
+        assert!(!conn_peer.connect);
+        assert_eq!(conn_peer.peer_port, 5001);
+        assert_eq!(conn_peer.rx_queue.dequeue().unwrap(), RxOps::Response);
+        assert!(!conn_peer.rx_queue.pending_rx());
+        assert_eq!(conn_peer.local_cid, VSOCK_HOST_CID);
+        assert_eq!(conn_peer.local_port, 5000);
+        assert_eq!(conn_peer.guest_cid, 3);
+        assert_eq!(conn_peer.peer_buf_alloc, 65536);
     }
 
     #[test]
     fn test_vsock_conn_credit() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut vsock_conn_local =
+        let mut conn_local =
             VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
 
-        assert_eq!(vsock_conn_local.peer_avail_credit(), 0);
-        assert!(vsock_conn_local.need_credit_update_from_peer());
+        assert_eq!(conn_local.peer_avail_credit(), 0);
+        assert!(conn_local.need_credit_update_from_peer());
 
-        vsock_conn_local.peer_buf_alloc = 65536;
-        assert_eq!(vsock_conn_local.peer_avail_credit(), 65536);
-        assert!(!vsock_conn_local.need_credit_update_from_peer());
+        conn_local.peer_buf_alloc = 65536;
+        assert_eq!(conn_local.peer_avail_credit(), 65536);
+        assert!(!conn_local.need_credit_update_from_peer());
 
-        vsock_conn_local.rx_cnt = Wrapping(32768);
-        assert_eq!(vsock_conn_local.peer_avail_credit(), 32768);
-        assert!(!vsock_conn_local.need_credit_update_from_peer());
+        conn_local.rx_cnt = Wrapping(32768);
+        assert_eq!(conn_local.peer_avail_credit(), 32768);
+        assert!(!conn_local.need_credit_update_from_peer());
 
-        vsock_conn_local.rx_cnt = Wrapping(65536);
-        assert_eq!(vsock_conn_local.peer_avail_credit(), 0);
-        assert!(vsock_conn_local.need_credit_update_from_peer());
+        conn_local.rx_cnt = Wrapping(65536);
+        assert_eq!(conn_local.peer_avail_credit(), 0);
+        assert!(conn_local.need_credit_update_from_peer());
     }
 
     #[test]
@@ -545,26 +545,26 @@ mod tests {
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let vsock_conn_local =
+        let conn_local =
             VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 2, 10);
         let mem = mem.memory();
-        let mut vsock_pkt =
+        let mut pkt =
             VsockPacket::from_rx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
                 .unwrap();
 
         // initialize a vsock packet for the guest
-        vsock_conn_local.init_pkt(&mut vsock_pkt);
+        conn_local.init_pkt(&mut pkt);
 
-        assert_eq!(vsock_pkt.src_cid(), VSOCK_HOST_CID);
-        assert_eq!(vsock_pkt.dst_cid(), 3);
-        assert_eq!(vsock_pkt.src_port(), 5000);
-        assert_eq!(vsock_pkt.dst_port(), 5001);
-        assert_eq!(vsock_pkt.type_(), VSOCK_TYPE_STREAM);
-        assert_eq!(vsock_pkt.buf_alloc(), CONN_TX_BUF_SIZE);
-        assert_eq!(vsock_pkt.fwd_cnt(), 0);
+        assert_eq!(pkt.src_cid(), VSOCK_HOST_CID);
+        assert_eq!(pkt.dst_cid(), 3);
+        assert_eq!(pkt.src_port(), 5000);
+        assert_eq!(pkt.dst_port(), 5001);
+        assert_eq!(pkt.type_(), VSOCK_TYPE_STREAM);
+        assert_eq!(pkt.buf_alloc(), CONN_TX_BUF_SIZE);
+        assert_eq!(pkt.fwd_cnt(), 0);
     }
 
     #[test]
@@ -574,86 +574,86 @@ mod tests {
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut vsock_conn_local =
+        let mut conn_local =
             VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
         let mem = mem.memory();
-        let mut vsock_pkt =
+        let mut pkt =
             VsockPacket::from_rx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
                 .unwrap();
 
         // VSOCK_OP_REQUEST: new local conn request
-        vsock_conn_local.rx_queue.enqueue(RxOps::Request);
-        let vsock_op_req = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(vsock_op_req.is_ok());
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_REQUEST);
+        conn_local.rx_queue.enqueue(RxOps::Request);
+        let op_req = conn_local.recv_pkt(&mut pkt);
+        assert!(op_req.is_ok());
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(pkt.op(), VSOCK_OP_REQUEST);
 
         // VSOCK_OP_RST: reset if connection not established
-        vsock_conn_local.rx_queue.enqueue(RxOps::Rw);
-        let vsock_op_rst = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(vsock_op_rst.is_ok());
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_RST);
+        conn_local.rx_queue.enqueue(RxOps::Rw);
+        let op_rst = conn_local.recv_pkt(&mut pkt);
+        assert!(op_rst.is_ok());
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(pkt.op(), VSOCK_OP_RST);
 
         // VSOCK_OP_CREDIT_UPDATE: need credit update from peer/guest
-        vsock_conn_local.connect = true;
-        vsock_conn_local.rx_queue.enqueue(RxOps::Rw);
-        vsock_conn_local.fwd_cnt = Wrapping(1024);
-        let vsock_op_credit_update = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(vsock_op_credit_update.is_ok());
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_CREDIT_REQUEST);
-        assert_eq!(vsock_conn_local.last_fwd_cnt, Wrapping(1024));
+        conn_local.connect = true;
+        conn_local.rx_queue.enqueue(RxOps::Rw);
+        conn_local.fwd_cnt = Wrapping(1024);
+        let op_credit_update = conn_local.recv_pkt(&mut pkt);
+        assert!(op_credit_update.is_ok());
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(pkt.op(), VSOCK_OP_CREDIT_REQUEST);
+        assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
 
         // VSOCK_OP_SHUTDOWN: zero data read from stream/file
-        vsock_conn_local.peer_buf_alloc = 65536;
-        vsock_conn_local.rx_queue.enqueue(RxOps::Rw);
-        let vsock_op_zero_read_shutdown = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(vsock_op_zero_read_shutdown.is_ok());
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert_eq!(vsock_conn_local.rx_cnt, Wrapping(0));
-        assert_eq!(vsock_conn_local.last_fwd_cnt, Wrapping(1024));
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_SHUTDOWN);
+        conn_local.peer_buf_alloc = 65536;
+        conn_local.rx_queue.enqueue(RxOps::Rw);
+        let op_zero_read_shutdown = conn_local.recv_pkt(&mut pkt);
+        assert!(op_zero_read_shutdown.is_ok());
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(conn_local.rx_cnt, Wrapping(0));
+        assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
+        assert_eq!(pkt.op(), VSOCK_OP_SHUTDOWN);
         assert_eq!(
-            vsock_pkt.flags(),
+            pkt.flags(),
             VSOCK_FLAGS_SHUTDOWN_RCV | VSOCK_FLAGS_SHUTDOWN_SEND
         );
 
         // VSOCK_OP_RW: finite data read from stream/file
-        vsock_conn_local.stream.write_all(b"hello").unwrap();
-        vsock_conn_local.rx_queue.enqueue(RxOps::Rw);
-        let vsock_op_zero_read = vsock_conn_local.recv_pkt(&mut vsock_pkt);
+        conn_local.stream.write_all(b"hello").unwrap();
+        conn_local.rx_queue.enqueue(RxOps::Rw);
+        let op_zero_read = conn_local.recv_pkt(&mut pkt);
         // below error due to epoll add
-        assert!(vsock_op_zero_read.is_err());
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_RW);
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert_eq!(vsock_pkt.len(), 5);
+        assert!(op_zero_read.is_err());
+        assert_eq!(pkt.op(), VSOCK_OP_RW);
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(pkt.len(), 5);
         let buf = &mut [0u8; 5];
-        assert!(vsock_pkt.data_slice().unwrap().read_slice(buf, 0).is_ok());
+        assert!(pkt.data_slice().unwrap().read_slice(buf, 0).is_ok());
         assert_eq!(buf, b"hello");
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
-        vsock_conn_local.rx_queue.enqueue(RxOps::Response);
-        let vsock_op_response = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(vsock_op_response.is_ok());
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_RESPONSE);
-        assert!(vsock_conn_local.connect);
+        conn_local.rx_queue.enqueue(RxOps::Response);
+        let op_response = conn_local.recv_pkt(&mut pkt);
+        assert!(op_response.is_ok());
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(pkt.op(), VSOCK_OP_RESPONSE);
+        assert!(conn_local.connect);
 
         // VSOCK_OP_CREDIT_UPDATE: guest needs credit update
-        vsock_conn_local.rx_queue.enqueue(RxOps::CreditUpdate);
-        let vsock_op_credit_update = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(!vsock_conn_local.rx_queue.pending_rx());
-        assert!(vsock_op_credit_update.is_ok());
-        assert_eq!(vsock_pkt.op(), VSOCK_OP_CREDIT_UPDATE);
-        assert_eq!(vsock_conn_local.last_fwd_cnt, Wrapping(1024));
+        conn_local.rx_queue.enqueue(RxOps::CreditUpdate);
+        let op_credit_update = conn_local.recv_pkt(&mut pkt);
+        assert!(!conn_local.rx_queue.pending_rx());
+        assert!(op_credit_update.is_ok());
+        assert_eq!(pkt.op(), VSOCK_OP_CREDIT_UPDATE);
+        assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
 
         // non-existent request
-        let vsock_op_error = vsock_conn_local.recv_pkt(&mut vsock_pkt);
-        assert!(vsock_op_error.is_err());
+        let op_error = conn_local.recv_pkt(&mut pkt);
+        assert!(op_error.is_err());
     }
 
     #[test]
@@ -663,58 +663,55 @@ mod tests {
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut vsock_conn_local =
+        let mut conn_local =
             VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
         let mem = mem.memory();
-        let mut vsock_pkt =
+        let mut pkt =
             VsockPacket::from_tx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
                 .unwrap();
 
         // peer credit information
-        vsock_pkt.set_buf_alloc(65536).set_fwd_cnt(1024);
+        pkt.set_buf_alloc(65536).set_fwd_cnt(1024);
 
         // check if peer credit information is updated currently
-        let credit_check = vsock_conn_local.send_pkt(&vsock_pkt);
+        let credit_check = conn_local.send_pkt(&pkt);
         assert!(credit_check.is_ok());
-        assert_eq!(vsock_conn_local.peer_buf_alloc, 65536);
-        assert_eq!(vsock_conn_local.peer_fwd_cnt, Wrapping(1024));
+        assert_eq!(conn_local.peer_buf_alloc, 65536);
+        assert_eq!(conn_local.peer_fwd_cnt, Wrapping(1024));
 
         // VSOCK_OP_RESPONSE
-        vsock_pkt.set_op(VSOCK_OP_RESPONSE);
-        let peer_response = vsock_conn_local.send_pkt(&vsock_pkt);
+        pkt.set_op(VSOCK_OP_RESPONSE);
+        let peer_response = conn_local.send_pkt(&pkt);
         assert!(peer_response.is_ok());
-        assert!(vsock_conn_local.connect);
+        assert!(conn_local.connect);
         let mut resp_buf = vec![0; 8];
-        vsock_conn_local.stream.read_exact(&mut resp_buf).unwrap();
+        conn_local.stream.read_exact(&mut resp_buf).unwrap();
         assert_eq!(resp_buf, b"OK 5001\n");
 
         // VSOCK_OP_RW
-        vsock_pkt.set_op(VSOCK_OP_RW);
+        pkt.set_op(VSOCK_OP_RW);
         let buf = b"hello";
-        assert!(vsock_pkt.data_slice().unwrap().write_slice(buf, 0).is_ok());
-        let rw_response = vsock_conn_local.send_pkt(&vsock_pkt);
+        assert!(pkt.data_slice().unwrap().write_slice(buf, 0).is_ok());
+        let rw_response = conn_local.send_pkt(&pkt);
         assert!(rw_response.is_ok());
         let mut resp_buf = vec![0; 5];
-        vsock_conn_local.stream.read_exact(&mut resp_buf).unwrap();
+        conn_local.stream.read_exact(&mut resp_buf).unwrap();
         assert_eq!(resp_buf, b"hello");
 
         // VSOCK_OP_CREDIT_REQUEST
-        vsock_pkt.set_op(VSOCK_OP_CREDIT_REQUEST);
-        let credit_response = vsock_conn_local.send_pkt(&vsock_pkt);
+        pkt.set_op(VSOCK_OP_CREDIT_REQUEST);
+        let credit_response = conn_local.send_pkt(&pkt);
         assert!(credit_response.is_ok());
-        assert_eq!(
-            vsock_conn_local.rx_queue.peek().unwrap(),
-            RxOps::CreditUpdate
-        );
+        assert_eq!(conn_local.rx_queue.peek().unwrap(), RxOps::CreditUpdate);
 
         // VSOCK_OP_SHUTDOWN
-        vsock_pkt.set_op(VSOCK_OP_SHUTDOWN);
-        vsock_pkt.set_flags(VSOCK_FLAGS_SHUTDOWN_RCV | VSOCK_FLAGS_SHUTDOWN_SEND);
-        let shutdown_response = vsock_conn_local.send_pkt(&vsock_pkt);
+        pkt.set_op(VSOCK_OP_SHUTDOWN);
+        pkt.set_flags(VSOCK_FLAGS_SHUTDOWN_RCV | VSOCK_FLAGS_SHUTDOWN_SEND);
+        let shutdown_response = conn_local.send_pkt(&pkt);
         assert!(shutdown_response.is_ok());
-        assert!(vsock_conn_local.rx_queue.contains(RxOps::Reset.bitmask()));
+        assert!(conn_local.rx_queue.contains(RxOps::Reset.bitmask()));
     }
 }

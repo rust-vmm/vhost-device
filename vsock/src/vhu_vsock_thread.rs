@@ -236,7 +236,7 @@ impl VhostUserVsockThread {
                 // Create a new connection object an enqueue a connection request
                 // packet to be sent to the guest
                 let conn_map_key = ConnMapKey::new(local_port, peer_port);
-                let mut new_vsock_conn = VsockConnection::new_local_init(
+                let mut new_conn = VsockConnection::new_local_init(
                     unix_stream,
                     VSOCK_HOST_CID,
                     local_port,
@@ -244,13 +244,11 @@ impl VhostUserVsockThread {
                     peer_port,
                     self.get_epoll_fd(),
                 );
-                new_vsock_conn.rx_queue.enqueue(RxOps::Request);
-                new_vsock_conn.set_peer_port(peer_port);
+                new_conn.rx_queue.enqueue(RxOps::Request);
+                new_conn.set_peer_port(peer_port);
 
                 // Add connection object into the backend's maps
-                self.thread_backend
-                    .conn_map
-                    .insert(conn_map_key, new_vsock_conn);
+                self.thread_backend.conn_map.insert(conn_map_key, new_conn);
 
                 self.thread_backend
                     .backend_rxq
@@ -266,20 +264,19 @@ impl VhostUserVsockThread {
             } else {
                 // Previously connected connection
                 let key = self.thread_backend.listener_map.get(&fd).unwrap();
-                let vsock_conn = self.thread_backend.conn_map.get_mut(key).unwrap();
+                let conn = self.thread_backend.conn_map.get_mut(key).unwrap();
 
                 if evset == epoll::Events::EPOLLOUT {
                     // Flush any remaining data from the tx buffer
-                    match vsock_conn.tx_buf.flush_to(&mut vsock_conn.stream) {
+                    match conn.tx_buf.flush_to(&mut conn.stream) {
                         Ok(cnt) => {
                             if cnt > 0 {
-                                vsock_conn.fwd_cnt += Wrapping(cnt as u32);
-                                vsock_conn.rx_queue.enqueue(RxOps::CreditUpdate);
+                                conn.fwd_cnt += Wrapping(cnt as u32);
+                                conn.rx_queue.enqueue(RxOps::CreditUpdate);
                             }
-                            self.thread_backend.backend_rxq.push_back(ConnMapKey::new(
-                                vsock_conn.local_port,
-                                vsock_conn.peer_port,
-                            ));
+                            self.thread_backend
+                                .backend_rxq
+                                .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
                         }
                         Err(e) => {
                             dbg!("Error: {:?}", e);
@@ -293,10 +290,10 @@ impl VhostUserVsockThread {
                 Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd).unwrap();
 
                 // Enqueue a read request
-                vsock_conn.rx_queue.enqueue(RxOps::Rw);
+                conn.rx_queue.enqueue(RxOps::Rw);
                 self.thread_backend
                     .backend_rxq
-                    .push_back(ConnMapKey::new(vsock_conn.local_port, vsock_conn.peer_port));
+                    .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
             }
         }
     }

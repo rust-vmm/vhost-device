@@ -360,11 +360,8 @@ pub mod tests {
     use crate::vhu_vsock::{VSOCK_OP_RW, VSOCK_TYPE_STREAM};
 
     use super::*;
-    use virtio_queue::{
-        defs::{VIRTQ_DESC_F_NEXT, VIRTQ_DESC_F_WRITE},
-        mock::MockSplitQueue,
-        Descriptor,
-    };
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
     use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     pub struct HeadParams {
@@ -400,11 +397,11 @@ pub mod tests {
         let mut flags = 0;
 
         if write_only {
-            flags |= VIRTQ_DESC_F_WRITE;
+            flags |= VRING_DESC_F_WRITE;
         }
 
         let mut head_flags = if data_chain_len > 0 {
-            flags | VIRTQ_DESC_F_NEXT
+            flags | VRING_DESC_F_NEXT
         } else {
             flags
         };
@@ -412,9 +409,10 @@ pub mod tests {
         // vsock packet header
         // let header = vec![0 as u8; head_params.head_len];
         let header = head_params.construct_head();
-        let head_desc = Descriptor::new(next_addr, head_params.head_len as u32, head_flags, 1);
+        let head_desc =
+            Descriptor::new(next_addr, head_params.head_len as u32, head_flags as u16, 1);
         mem.write(&header, head_desc.addr()).unwrap();
-        virt_queue.desc_table().store(0, head_desc);
+        assert!(virt_queue.desc_table().store(0, head_desc).is_ok());
         next_addr += head_params.head_len as u64;
 
         // Put the descriptor index 0 in the first available ring position.
@@ -429,13 +427,13 @@ pub mod tests {
         for i in 0..(data_chain_len) {
             // last descr in chain
             if i == data_chain_len - 1 {
-                head_flags &= !VIRTQ_DESC_F_NEXT;
+                head_flags &= !VRING_DESC_F_NEXT;
             }
             // vsock data
             let data = vec![0_u8; head_data_len as usize];
-            let data_desc = Descriptor::new(next_addr, data.len() as u32, head_flags, i + 2);
+            let data_desc = Descriptor::new(next_addr, data.len() as u32, head_flags as u16, i + 2);
             mem.write(&data, data_desc.addr()).unwrap();
-            virt_queue.desc_table().store(i + 1, data_desc);
+            assert!(virt_queue.desc_table().store(i + 1, data_desc).is_ok());
             next_addr += head_data_len as u64;
         }
 
@@ -443,8 +441,9 @@ pub mod tests {
         (
             GuestMemoryAtomic::new(mem.clone()),
             virt_queue
-                .create_queue(GuestMemoryAtomic::<GuestMemoryMmap>::new(mem.clone()))
-                .iter()
+                .create_queue::<Queue>()
+                .unwrap()
+                .iter(GuestMemoryAtomic::new(mem.clone()).memory())
                 .unwrap()
                 .next()
                 .unwrap(),

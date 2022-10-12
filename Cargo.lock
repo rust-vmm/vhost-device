@@ -313,7 +313,7 @@ dependencies = [
  "libc",
  "libgpiod-sys",
  "thiserror",
- "vmm-sys-util 0.10.0",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -581,26 +581,14 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vhost"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b56bf8f178fc500fe14505fca8b00dec76fc38f2304f461c8d9d7547982311d"
-dependencies = [
- "bitflags",
- "libc",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
-]
-
-[[package]]
-name = "vhost"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79243657c76e5c90dcbf60187c842614f6dfc7123972c55bb3bcc446792aca93"
 dependencies = [
  "bitflags",
  "libc",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -613,12 +601,12 @@ dependencies = [
  "libgpiod",
  "log",
  "thiserror",
- "vhost 0.5.0",
- "vhost-user-backend 0.7.0",
+ "vhost",
+ "vhost-user-backend",
  "virtio-bindings",
- "virtio-queue 0.6.1",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -630,12 +618,12 @@ dependencies = [
  "libc",
  "log",
  "thiserror",
- "vhost 0.5.0",
- "vhost-user-backend 0.7.0",
+ "vhost",
+ "vhost-user-backend",
  "virtio-bindings",
- "virtio-queue 0.6.1",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -650,27 +638,12 @@ dependencies = [
  "rand",
  "tempfile",
  "thiserror",
- "vhost 0.5.0",
- "vhost-user-backend 0.7.0",
+ "vhost",
+ "vhost-user-backend",
  "virtio-bindings",
- "virtio-queue 0.6.1",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
-]
-
-[[package]]
-name = "vhost-user-backend"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8db00e93514caa8987bb8b536fe962c9b66b4068583abc4c531eb97988477cd"
-dependencies = [
- "libc",
- "log",
- "vhost 0.3.0",
- "virtio-bindings",
- "virtio-queue 0.1.0",
- "vm-memory 0.7.0",
- "vmm-sys-util 0.9.0",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -681,11 +654,11 @@ checksum = "6a0fc7d5f8e2943cd9f2ecd58be3f2078add863a49573d14dd9d64e1ab26544c"
 dependencies = [
  "libc",
  "log",
- "vhost 0.5.0",
+ "vhost",
  "virtio-bindings",
- "virtio-queue 0.6.1",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -698,12 +671,12 @@ dependencies = [
  "futures",
  "log",
  "thiserror",
- "vhost 0.3.0",
- "vhost-user-backend 0.1.0",
+ "vhost",
+ "vhost-user-backend",
  "virtio-bindings",
- "virtio-queue 0.1.0",
- "vm-memory 0.7.0",
- "vmm-sys-util 0.9.0",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -714,36 +687,14 @@ checksum = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 
 [[package]]
 name = "virtio-queue"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f90da9e627f6aaf667cc7b6548a28be332d3e1f058f4ceeb46ab6bcee5c4b74d"
-dependencies = [
- "log",
- "vm-memory 0.7.0",
- "vmm-sys-util 0.10.0",
-]
-
-[[package]]
-name = "virtio-queue"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "435dd49c7b38419729afd43675850c7b5dc4728f2fabd70c7a9079a331e4f8c6"
 dependencies = [
  "log",
  "virtio-bindings",
- "vm-memory 0.9.0",
- "vmm-sys-util 0.10.0",
-]
-
-[[package]]
-name = "vm-memory"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "339d4349c126fdcd87e034631d7274370cf19eb0e87b33166bcd956589fc72c5"
-dependencies = [
- "arc-swap",
- "libc",
- "winapi",
+ "vm-memory",
+ "vmm-sys-util",
 ]
 
 [[package]]
@@ -755,16 +706,6 @@ dependencies = [
  "arc-swap",
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "vmm-sys-util"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "733537bded03aaa93543f785ae997727b30d1d9f4a03b7861d23290474242e11"
-dependencies = [
- "bitflags",
- "libc",
 ]
 
 [[package]]

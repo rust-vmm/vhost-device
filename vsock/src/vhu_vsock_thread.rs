@@ -19,7 +19,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use virtio_queue::QueueOwnedT;
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
@@ -374,7 +375,11 @@ impl VhostUserVsockThread {
 
         let queue = vring_mut.get_queue_mut();
 
-        while let Some(mut avail_desc) = queue.iter().map_err(|_| Error::IterateQueue)?.next() {
+        while let Some(mut avail_desc) = queue
+            .iter(atomic_mem.memory())
+            .map_err(|_| Error::IterateQueue)?
+            .next()
+        {
             used_any = true;
             let atomic_mem = atomic_mem.clone();
 
@@ -385,7 +390,10 @@ impl VhostUserVsockThread {
                         if self.thread_backend.recv_pkt(&mut pkt).is_ok() {
                             pkt.hdr().len() + pkt.len() as usize
                         } else {
-                            queue.iter().unwrap().go_to_previous_position();
+                            queue
+                                .iter(atomic_mem.memory())
+                                .unwrap()
+                                .go_to_previous_position();
                             break;
                         }
                     }
@@ -471,7 +479,7 @@ impl VhostUserVsockThread {
         while let Some(mut avail_desc) = vring
             .get_mut()
             .get_queue_mut()
-            .iter()
+            .iter(atomic_mem.memory())
             .map_err(|_| Error::IterateQueue)?
             .next()
         {
@@ -491,7 +499,7 @@ impl VhostUserVsockThread {
                 vring
                     .get_mut()
                     .get_queue_mut()
-                    .iter()
+                    .iter(atomic_mem.memory())
                     .unwrap()
                     .go_to_previous_position();
                 break;

@@ -103,6 +103,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     impl VsockArgs {
         fn from_args(guest_cid: u64, socket: &str, uds_path: &str) -> Self {
@@ -115,6 +116,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_vsock_config_setup() {
         let args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
 
@@ -128,6 +130,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_vsock_server() {
         const CID: u64 = 3;
         const VHOST_SOCKET_PATH: &str = "test_vsock_server.socket";

@@ -583,6 +583,7 @@ impl Drop for VhostUserVsockThread {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -593,6 +594,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_vsock_thread() {
         let t = VhostUserVsockThread::new("test_vsock_thread.vsock".to_string(), 3);
         assert!(t.is_ok());
@@ -645,6 +647,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_vsock_thread_failures() {
         let t = VhostUserVsockThread::new("/sys/not_allowed.vsock".to_string(), 3);
         assert!(t.is_err());

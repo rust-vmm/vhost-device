@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::{io, result, sync::Mutex, u16, u32, u64, u8};
+use std::{
+    io::{self, Result as IoResult},
+    sync::Mutex,
+    u16, u32, u64, u8,
+};
 
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -40,7 +44,7 @@ pub(crate) const VSOCK_HOST_CID: u64 = 2;
 /// Connection oriented packet
 pub(crate) const VSOCK_TYPE_STREAM: u16 = 1;
 
-// Vsock packet operation ID
+/// Vsock packet operation ID
 
 /// Connection request
 pub(crate) const VSOCK_OP_REQUEST: u16 = 1;
@@ -57,7 +61,7 @@ pub(crate) const VSOCK_OP_CREDIT_UPDATE: u16 = 6;
 /// Flow control credit request
 pub(crate) const VSOCK_OP_CREDIT_REQUEST: u16 = 7;
 
-// Vsock packet flags
+/// Vsock packet flags
 
 /// VSOCK_OP_SHUTDOWN: Packet sender will receive no more data
 pub(crate) const VSOCK_FLAGS_SHUTDOWN_RCV: u32 = 1;
@@ -69,7 +73,7 @@ const QUEUE_MASK: u64 = 0b11;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-/// Below enum defines custom error types.
+/// Custom error types
 #[derive(Debug, ThisError)]
 pub(crate) enum Error {
     #[error("Failed to handle event other than EPOLLIN event")]
@@ -246,10 +250,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
         }
     }
 
-    fn update_memory(
-        &mut self,
-        atomic_mem: GuestMemoryAtomic<GuestMemoryMmap>,
-    ) -> result::Result<(), io::Error> {
+    fn update_memory(&mut self, atomic_mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
         for thread in self.threads.iter() {
             thread.lock().unwrap().mem = Some(atomic_mem.clone());
         }
@@ -262,7 +263,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         thread_id: usize,
-    ) -> result::Result<bool, io::Error> {
+    ) -> IoResult<bool> {
         let vring_rx = &vrings[0];
         let vring_tx = &vrings[1];
 

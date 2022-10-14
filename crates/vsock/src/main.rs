@@ -28,7 +28,7 @@ struct VsockArgs {
     #[clap(long, default_value_t = 3)]
     guest_cid: u64,
 
-    /// Unix socket to which a hypervisor conencts to and sets up the control path with the device.
+    /// Unix socket to which a hypervisor connects to and sets up the control path with the device.
     #[clap(long)]
     socket: String,
 

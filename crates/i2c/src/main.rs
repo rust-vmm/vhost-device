@@ -3,7 +3,7 @@
 // Copyright 2021 Linaro Ltd. All Rights Reserved.
 //          Viresh Kumar <viresh.kumar@linaro.org>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 mod i2c;
 mod vhu_i2c;

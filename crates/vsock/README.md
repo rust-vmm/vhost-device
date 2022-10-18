@@ -98,11 +98,7 @@ use my_crate;
 
 ## License
 
-**!!!NOTICE**: The BSD-3-Clause license is not included in this template.
-The license needs to be manually added because the text of the license file
-also includes the copyright. The copyright can be different for different
-crates. If the crate contains code from CrosVM, the crate must add the
-CrosVM copyright which can be found
-[here](https://chromium.googlesource.com/chromiumos/platform/crosvm/+/master/LICENSE).
-For crates developed from scratch, the copyright is different and depends on
-the contributors.
+This project is licensed under either of
+
+- [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0
+- [BSD-3-Clause License](https://opensource.org/licenses/BSD-3-Clause)

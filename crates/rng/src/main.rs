@@ -2,7 +2,7 @@
 // Copyright 2022 Linaro Ltd. All Rights Reserved.
 // Mathieu Poirier <mathieu.poirier@linaro.org>
 //
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 mod vhu_rng;
 
 use log::{info, warn};

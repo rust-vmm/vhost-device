@@ -321,11 +321,13 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::convert::TryInto;
     use vhost_user_backend::VringT;
     use vm_memory::GuestAddress;
 
     #[test]
+    #[serial]
     fn test_vsock_backend() {
         const CID: u64 = 3;
         const VHOST_SOCKET_PATH: &str = "test_vsock_backend.socket";
@@ -393,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_vsock_backend_failures() {
         const CID: u64 = 3;
         const VHOST_SOCKET_PATH: &str = "test_vsock_backend_failures.socket";

@@ -245,12 +245,14 @@ impl VsockThreadBackend {
 mod tests {
     use super::*;
     use crate::vhu_vsock::VSOCK_OP_RW;
+    use serial_test::serial;
     use std::os::unix::net::UnixListener;
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 
     const DATA_LEN: usize = 16;
 
     #[test]
+    #[serial]
     fn test_vsock_thread_backend() {
         const VSOCK_SOCKET_PATH: &str = "test_vsock_thread_backend.vsock";
         const VSOCK_PEER_PORT: u32 = 1234;

@@ -132,6 +132,7 @@ mod tests {
     fn test_txbuf_push() {
         let mut loc_tx_buf = LocalTxBuf::new();
         let mut buf = [0; CONN_TX_BUF_SIZE as usize];
+        // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
         // push data into empty tx buffer
@@ -152,6 +153,7 @@ mod tests {
 
         // only tail wraps at full
         let mut buf = vec![1; 4];
+        // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
         let mut cmp_data = vec![1; 4];
         cmp_data.append(&mut vec![0; (CONN_TX_BUF_SIZE - 4) as usize]);
@@ -170,6 +172,7 @@ mod tests {
 
         // data to be flushed
         let mut buf = vec![1; CONN_TX_BUF_SIZE as usize];
+        // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
         // target to which data is flushed
@@ -194,6 +197,7 @@ mod tests {
         // wrapping head flush
         let mut buf = vec![0; (CONN_TX_BUF_SIZE / 2) as usize];
         buf.append(&mut vec![1; (CONN_TX_BUF_SIZE / 2) as usize]);
+        // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
         loc_tx_buf.head = Wrapping(0);

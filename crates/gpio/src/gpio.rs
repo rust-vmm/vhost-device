@@ -87,6 +87,8 @@ pub(crate) struct VirtioGpioConfig {
     pub(crate) gpio_names_size: Le32,
 }
 
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioGpioConfig {}
 
 /// Trait that represents an GPIO Device.
@@ -123,7 +125,11 @@ pub(crate) struct PhysDevice {
     state: Vec<RwLock<PhysLineState>>,
 }
 
+// SAFETY: Safe as the structure can be sent to another thread.
 unsafe impl Send for PhysDevice {}
+
+// SAFETY: Safe as the structure can be shared with another thread as the state
+// is protected with a lock.
 unsafe impl Sync for PhysDevice {}
 
 impl GpioDevice for PhysDevice {

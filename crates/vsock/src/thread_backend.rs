@@ -222,8 +222,12 @@ impl VsockThreadBackend {
             .insert(ConnMapKey::new(pkt.dst_port(), pkt.src_port()), conn);
         self.backend_rxq
             .push_back(ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
-        self.stream_map
-            .insert(stream_fd, unsafe { UnixStream::from_raw_fd(stream_fd) });
+
+        self.stream_map.insert(
+            stream_fd,
+            // SAFETY: Safe as the file descriptor is guaranteed to be valid.
+            unsafe { UnixStream::from_raw_fd(stream_fd) },
+        );
         self.local_port_set.insert(pkt.dst_port());
 
         VhostUserVsockThread::epoll_register(
@@ -269,6 +273,7 @@ mod tests {
         let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
         let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
 
+        // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
         let mut packet = unsafe { VsockPacket::new(hdr_raw, Some(data_raw)).unwrap() };
 
         assert_eq!(

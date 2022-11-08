@@ -145,12 +145,12 @@ union I2cSmbusData {
 
 impl I2cSmbusData {
     fn read_byte(&self) -> u8 {
-        // Safe as we will only read the relevant bytes
+        // SAFETY: Safe as we will only read the relevant bytes.
         unsafe { self.byte }
     }
 
     fn read_word(&self) -> u16 {
-        // Safe as we will only read the relevant bytes
+        // SAFETY: Safe as we will only read the relevant bytes.
         unsafe { self.word }
     }
 }
@@ -342,7 +342,7 @@ impl I2cDevice for PhysDevice {
     fn funcs(&mut self) -> Result<u64> {
         let mut func: u64 = 0;
 
-        // Safe as the file is a valid I2C adapter, the kernel will only
+        // SAFETY: Safe as the file is a valid I2C adapter, the kernel will only
         // update the correct amount of memory in func.
         let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_FUNCS, &mut func) };
 
@@ -375,7 +375,7 @@ impl I2cDevice for PhysDevice {
             nmsgs: len as u32,
         };
 
-        // Safe as the file is a valid I2C adapter, the kernel will only
+        // SAFETY: Safe as the file is a valid I2C adapter, the kernel will only
         // update the correct amount of memory in data.
         let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_RDWR, &mut data) };
 
@@ -397,7 +397,7 @@ impl I2cDevice for PhysDevice {
             },
         };
 
-        // Safe as the file is a valid I2C adapter, the kernel will only
+        // SAFETY: Safe as the file is a valid I2C adapter, the kernel will only
         // update the correct amount of memory in data.
         let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SMBUS, &mut smbus_data) };
 
@@ -409,7 +409,7 @@ impl I2cDevice for PhysDevice {
     }
 
     fn slave(&self, addr: u64) -> Result<()> {
-        // Safe as the file is a valid I2C adapter.
+        // SAFETY: Safe as the file is a valid I2C adapter.
         let ret = unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, addr as c_ulong) };
 
         if ret == -1 {

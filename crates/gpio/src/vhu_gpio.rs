@@ -92,6 +92,8 @@ struct VirtioGpioRequest {
     gpio: Le16,
     value: Le32,
 }
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioGpioRequest {}
 
 /// Virtio GPIO IRQ Request / Response
@@ -99,6 +101,8 @@ unsafe impl ByteValued for VirtioGpioRequest {}
 struct VirtioGpioIrqRequest {
     gpio: Le16,
 }
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioGpioIrqRequest {}
 
 #[derive(Copy, Clone, Default)]
@@ -106,6 +110,8 @@ struct VirtioGpioIrqResponse {
     #[allow(dead_code)]
     status: u8,
 }
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioGpioIrqResponse {}
 
 /// Possible values of the interrupt status field
@@ -401,6 +407,8 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        // SAFETY: The layout of the structure is fixed and can be initialized by
+        // reading its content from byte array.
         unsafe {
             from_raw_parts(
                 self.controller
@@ -1127,6 +1135,8 @@ mod tests {
 
         assert_eq!(
             backend.get_config(0, size_of::<VirtioGpioConfig>() as u32),
+            // SAFETY: The layout of the structure is fixed and can be initialized by
+            // reading its content from byte array.
             unsafe {
                 from_raw_parts(
                     &config as *const _ as *const _,

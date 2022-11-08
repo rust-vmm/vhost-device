@@ -68,6 +68,7 @@ impl VhostUserVsockThread {
             .map_err(Error::UnixBind)?;
 
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
+        // SAFETY: Safe as the fd is guaranteed to be valid here.
         let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
 
         let host_raw_fd = host_sock.as_raw_fd();

@@ -196,6 +196,8 @@ struct VirtioVsockConfig {
     pub guest_cid: Le64,
 }
 
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioVsockConfig {}
 
 pub(crate) struct VhostUserVsockBackend {

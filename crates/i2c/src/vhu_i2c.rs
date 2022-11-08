@@ -84,6 +84,8 @@ struct VirtioI2cOutHdr {
     padding: Le16,
     flags: Le32,
 }
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioI2cOutHdr {}
 
 /// VirtioI2cOutHdr Flags
@@ -94,6 +96,8 @@ const VIRTIO_I2C_FLAGS_M_RD: u32 = 1 << 1;
 struct VirtioI2cInHdr {
     status: u8,
 }
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
 unsafe impl ByteValued for VirtioI2cInHdr {}
 
 pub(crate) struct VhostUserI2cBackend<D: I2cDevice> {

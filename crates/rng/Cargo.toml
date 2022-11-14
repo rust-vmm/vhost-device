@@ -10,21 +10,21 @@ license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 
 [dependencies]
-clap = { version = ">=3.0",  features = ["derive"] }
-env_logger = ">=0.9"
+clap = { version = "4.0",  features = ["derive"] }
+env_logger = "0.9"
 epoll = "4.3"
-libc = ">=0.2.95"
-log = ">=0.4.6"
-rand = ">=0.8.5"
-tempfile = "3.2.0"
+libc = "0.2"
+log = "0.4"
+rand = "0.8.5"
+tempfile = "3.2"
 thiserror = "1.0"
 vhost = { version = "0.5", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.7.0"
-virtio-bindings = ">=0.1"
+vhost-user-backend = "0.7"
+virtio-bindings = "0.1"
 virtio-queue = "0.6"
-vm-memory = ">=0.8"
-vmm-sys-util = "=0.10.0"
+vm-memory = "0.9"
+vmm-sys-util = "0.10"
 
 [dev-dependencies]
 virtio-queue = { version = "0.6", features = ["test-utils"] }
-vm-memory = { version = ">=0.8.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.9", features = ["backend-mmap", "backend-atomic"] }

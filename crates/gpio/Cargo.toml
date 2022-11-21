@@ -21,7 +21,7 @@ vhost = { version = "0.5", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.7"
 virtio-bindings = "0.1"
 virtio-queue = "0.6"
-vm-memory = "0.9"
+vm-memory = "0.10"
 vmm-sys-util = "0.10"
 
 [target.'cfg(target_env = "gnu")'.dependencies]
@@ -29,4 +29,4 @@ libgpiod = { git = "https://github.com/vireshk/libgpiod" }
 
 [dev-dependencies]
 virtio-queue = { version = "0.6", features = ["test-utils"] }
-vm-memory = { version = "0.9", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.10", features = ["backend-mmap", "backend-atomic"] }

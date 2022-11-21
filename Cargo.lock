@@ -297,7 +297,7 @@ dependencies = [
  "libc",
  "libgpiod-sys",
  "thiserror",
- "vmm-sys-util",
+ "vmm-sys-util 0.10.0",
 ]
 
 [[package]]
@@ -631,7 +631,7 @@ dependencies = [
  "bitflags",
  "libc",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.10.0",
 ]
 
 [[package]]
@@ -649,7 +649,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.11.0",
 ]
 
 [[package]]
@@ -666,7 +666,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.11.0",
 ]
 
 [[package]]
@@ -686,7 +686,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.11.0",
 ]
 
 [[package]]
@@ -701,7 +701,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.10.0",
 ]
 
 [[package]]
@@ -722,7 +722,7 @@ dependencies = [
  "virtio-queue",
  "virtio-vsock",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.11.0",
 ]
 
 [[package]]
@@ -740,7 +740,7 @@ dependencies = [
  "log",
  "virtio-bindings",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.10.0",
 ]
 
 [[package]]
@@ -769,6 +769,16 @@ name = "vmm-sys-util"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08604d7be03eb26e33b3cee3ed4aef2bf550b305d1cca60e84da5d28d3790b62"
+dependencies = [
+ "bitflags",
+ "libc",
+]
+
+[[package]]
+name = "vmm-sys-util"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc06a16ee8ebf0d9269aed304030b0d20a866b8b3dd3d4ce532596ac567a0d24"
 dependencies = [
  "bitflags",
  "libc",

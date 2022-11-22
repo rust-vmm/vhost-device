@@ -299,7 +299,7 @@ pub(crate) struct I2cReq {
 /// functionality without the need of a physical device.
 pub(crate) trait I2cDevice {
     // Open the device specified by the adapter number.
-    fn open(device_path: &str, adapter_no: u32) -> Result<Self>
+    fn open(adapter_no: u32) -> Result<Self>
     where
         Self: Sized;
 
@@ -327,8 +327,8 @@ pub(crate) struct PhysDevice {
     adapter_no: u32,
 }
 
-impl I2cDevice for PhysDevice {
-    fn open(device_path: &str, adapter_no: u32) -> Result<Self> {
+impl PhysDevice {
+    fn open_with(device_path: &str, adapter_no: u32) -> Result<Self> {
         Ok(PhysDevice {
             file: OpenOptions::new()
                 .read(true)
@@ -337,6 +337,14 @@ impl I2cDevice for PhysDevice {
                 .map_err(|_| Error::DeviceOpenFailed(adapter_no))?,
             adapter_no,
         })
+    }
+}
+
+impl I2cDevice for PhysDevice {
+    fn open(adapter_no: u32) -> Result<Self> {
+        let device_path = format!("/dev/i2c-{}", adapter_no);
+
+        Self::open_with(&device_path, adapter_no)
     }
 
     fn funcs(&mut self) -> Result<u64> {
@@ -519,13 +527,9 @@ impl<D: I2cDevice> I2cMap<D> {
     {
         let mut device_map = HashMap::new();
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
-        let prefix = "/dev/i2c-";
 
         for (i, device_cfg) in device_config.inner.iter().enumerate() {
-            let device = D::open(
-                &format!("{}{}", prefix, device_cfg.adapter_no),
-                device_cfg.adapter_no,
-            )?;
+            let device = D::open(device_cfg.adapter_no)?;
             let adapter = I2cAdapter::new(device)?;
 
             // Check that all addresses corresponding to the adapter are valid.
@@ -609,7 +613,7 @@ pub(crate) mod tests {
     }
 
     impl I2cDevice for DummyDevice {
-        fn open(_path: &str, adapter_no: u32) -> Result<Self>
+        fn open(adapter_no: u32) -> Result<Self>
         where
             Self: Sized,
         {
@@ -1055,12 +1059,17 @@ pub(crate) mod tests {
     fn test_phys_device_failure() {
         // Open failure
         assert_eq!(
-            PhysDevice::open("/dev/i2c-invalid-path", 0).unwrap_err(),
+            PhysDevice::open(555555).unwrap_err(),
+            Error::DeviceOpenFailed(555555)
+        );
+
+        assert_eq!(
+            PhysDevice::open_with("/dev/i2c-invalid-path", 0).unwrap_err(),
             Error::DeviceOpenFailed(0)
         );
 
         let file = TempFile::new().unwrap();
-        let mut dev = PhysDevice::open(file.as_path().to_str().unwrap(), 1).unwrap();
+        let mut dev = PhysDevice::open_with(file.as_path().to_str().unwrap(), 1).unwrap();
 
         // Match adapter number
         assert_eq!(dev.adapter_no(), 1);

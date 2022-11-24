@@ -40,17 +40,35 @@ the crate are split into various files as described below:
 
 Run the vhost-user-vsock device:
 ```
-vhost-user-vsock --guest-cid=4 --uds-path=/tmp/vm4.vsock --socket=/tmp/vhost4.socket
+vhost-user-vsock --guest-cid=<CID assigned to the guest> \
+  --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>
+  --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>
 ```
 
-Run qemu:
+Run VMM (e.g. QEMU):
 
 ```
-qemu-system-x86_64 -drive file=/path/to/disk.qcow2 -enable-kvm -m 512M \
-  -smp 2 -vga virtio -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
-  -device vhost-user-vsock-pci,chardev=char0 \
-  -object memory-backend-file,share=on,id=mem,size="512M",mem-path="/dev/hugepages" \
-  -numa node,memdev=mem -mem-prealloc
+qemu-system-x86_64 \
+  <normal QEMU options> \
+  -object memory-backend-file,share=on,id=mem0,size=<Guest RAM size>,mem-path=<Guest RAM file path> \ # size == -m size
+  -machine <machine options>,memory-backend=mem0 \
+  -chardev socket,id=char0,reconnect=0,path=<vhost-user socket path> \
+  -device vhost-user-vsock-pci,chardev=char0
+```
+
+## Working example
+
+```sh
+shell1$ vhost-user-vsock --guest-cid=4 --uds-path=/tmp/vm4.vsock --socket=/tmp/vhost4.socket
+```
+
+```sh
+shell2$ qemu-system-x86_64 \
+          -drive file=vm.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
+          -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages" \
+          -machine q35,accel=kvm,memory-backend=mem0 \
+          -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
+          -device vhost-user-vsock-pci,chardev=char0
 ```
 
 ### Guest listening
@@ -88,12 +106,6 @@ guest$ iperf3 --vsock -c 2
 host$ nc -l -U /tmp/vm4.vsock_1234
 
 guest$ nc --vsock 2 1234
-```
-
-```rust
-use my_crate;
-
-...
 ```
 
 ## License

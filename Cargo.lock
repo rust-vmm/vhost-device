@@ -297,6 +297,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "intmap"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee87fd093563344074bacf24faa0bb0227fb6969fb223e922db798516de924d6"
+
+[[package]]
 name = "io-lifetimes"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -333,18 +339,19 @@ checksum = "fc7fcc620a3bff7cdd7a365be3376c97191aeaccc2a603e600951e452615bf89"
 [[package]]
 name = "libgpiod"
 version = "0.1.0"
-source = "git+https://github.com/vireshk/libgpiod#52f16effabd5c6838d00f4d4ad054d5304e0d5d6"
+source = "git+https://github.com/vireshk/libgpiod?branch=vhost-gpio#d7b36c56170331699fd5e4e18918af81333aa64a"
 dependencies = [
+ "errno",
+ "intmap",
  "libc",
  "libgpiod-sys",
  "thiserror",
- "vmm-sys-util",
 ]
 
 [[package]]
 name = "libgpiod-sys"
 version = "0.1.0"
-source = "git+https://github.com/vireshk/libgpiod#52f16effabd5c6838d00f4d4ad054d5304e0d5d6"
+source = "git+https://github.com/vireshk/libgpiod?branch=vhost-gpio#d7b36c56170331699fd5e4e18918af81333aa64a"
 dependencies = [
  "cc",
 ]

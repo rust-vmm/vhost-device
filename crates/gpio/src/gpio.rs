@@ -9,10 +9,7 @@ use log::error;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use libgpiod::{
-    Chip, Direction, Edge, EdgeEventBuffer, Error as LibGpiodError, LineConfig, LineRequest,
-    RequestConfig,
-};
+use libgpiod::{chip, line, request, Error as LibGpiodError};
 use thiserror::Error as ThisError;
 use vm_memory::{ByteValued, Le16, Le32};
 
@@ -31,8 +28,6 @@ pub(crate) enum Error {
     GpioMessageInvalid(u16),
     #[error("Gpiod operation failed {0:?}")]
     GpiodFailed(LibGpiodError),
-    #[error("Gpio irq operation timed out")]
-    GpioIrqOpTimedOut,
     #[error("Gpio irq type invalid {0}")]
     GpioIrqTypeInvalid(u16),
     #[error("Gpio irq type not supported {0}")]
@@ -110,17 +105,17 @@ pub(crate) trait GpioDevice: Send + Sync + 'static {
     fn set_value(&self, gpio: u16, value: u32) -> Result<()>;
 
     fn set_irq_type(&self, gpio: u16, value: u16) -> Result<()>;
-    fn wait_for_interrupt(&self, gpio: u16) -> Result<()>;
+    fn wait_for_interrupt(&self, gpio: u16) -> Result<bool>;
 }
 
 pub(crate) struct PhysLineState {
     // See wait_for_interrupt() for explanation of Arc.
-    request: Option<Arc<LineRequest>>,
-    buffer: Option<EdgeEventBuffer>,
+    request: Option<Arc<request::Request>>,
+    buffer: Option<request::Buffer>,
 }
 
 pub(crate) struct PhysDevice {
-    chip: Chip,
+    chip: chip::Chip,
     ngpio: u16,
     state: Vec<RwLock<PhysLineState>>,
 }
@@ -138,8 +133,8 @@ impl GpioDevice for PhysDevice {
         Self: Sized,
     {
         let path = format!("/dev/gpiochip{}", device);
-        let chip = Chip::open(&path).map_err(Error::GpiodFailed)?;
-        let ngpio = chip.get_num_lines() as u16;
+        let chip = chip::Chip::open(&path).map_err(Error::GpiodFailed)?;
+        let ngpio = chip.info().map_err(Error::GpiodFailed)?.num_lines() as u16;
 
         // Can't set a vector to all None easily
         let mut state: Vec<RwLock<PhysLineState>> = Vec::new();
@@ -163,7 +158,7 @@ impl GpioDevice for PhysDevice {
             .line_info(gpio.into())
             .map_err(Error::GpiodFailed)?;
 
-        Ok(line_info.get_name().unwrap_or("").to_string())
+        Ok(line_info.name().unwrap_or("").to_string())
     }
 
     fn direction(&self, gpio: u16) -> Result<u8> {
@@ -172,17 +167,15 @@ impl GpioDevice for PhysDevice {
             .line_info(gpio.into())
             .map_err(Error::GpiodFailed)?;
 
-        Ok(
-            match line_info.get_direction().map_err(Error::GpiodFailed)? {
-                Direction::AsIs => VIRTIO_GPIO_DIRECTION_NONE,
-                Direction::Input => VIRTIO_GPIO_DIRECTION_IN,
-                Direction::Output => VIRTIO_GPIO_DIRECTION_OUT,
-            },
-        )
+        Ok(match line_info.direction().map_err(Error::GpiodFailed)? {
+            line::Direction::AsIs => VIRTIO_GPIO_DIRECTION_NONE,
+            line::Direction::Input => VIRTIO_GPIO_DIRECTION_IN,
+            line::Direction::Output => VIRTIO_GPIO_DIRECTION_OUT,
+        })
     }
 
     fn set_direction(&self, gpio: u16, dir: u8, value: u32) -> Result<()> {
-        let mut config = LineConfig::new().map_err(Error::GpiodFailed)?;
+        let mut lsettings = line::Settings::new().map_err(Error::GpiodFailed)?;
         let state = &mut self.state[gpio as usize].write().unwrap();
 
         match dir {
@@ -192,29 +185,41 @@ impl GpioDevice for PhysDevice {
             }
 
             VIRTIO_GPIO_DIRECTION_IN => {
-                config.set_direction_override(Direction::Input, gpio as u32);
+                lsettings
+                    .set_direction(line::Direction::Input)
+                    .map_err(Error::GpiodFailed)?;
             }
             VIRTIO_GPIO_DIRECTION_OUT => {
-                config.set_direction_default(Direction::Output);
-                config.set_output_value_override(gpio as u32, value);
+                let value = line::Value::new(value as i32).map_err(Error::GpiodFailed)?;
+                lsettings
+                    .set_direction(line::Direction::Output)
+                    .map_err(Error::GpiodFailed)?
+                    .set_output_value(value)
+                    .map_err(Error::GpiodFailed)?;
             }
 
             _ => return Err(Error::GpioDirectionInvalid(value)),
         };
 
+        let lconfig = line::Config::new().map_err(Error::GpiodFailed)?;
+        lconfig
+            .add_line_settings(&[gpio as u32], lsettings)
+            .map_err(Error::GpiodFailed)?;
+
         if let Some(request) = &state.request {
             request
-                .reconfigure_lines(&config)
+                .reconfigure_lines(&lconfig)
                 .map_err(Error::GpiodFailed)?;
         } else {
-            let rconfig = RequestConfig::new().map_err(Error::GpiodFailed)?;
+            let rconfig = request::Config::new().map_err(Error::GpiodFailed)?;
 
-            rconfig.set_consumer("vhu-gpio");
-            rconfig.set_offsets(&[gpio as u32]);
+            rconfig
+                .set_consumer("vhu-gpio")
+                .map_err(Error::GpiodFailed)?;
 
             state.request = Some(Arc::new(
                 self.chip
-                    .request_lines(&rconfig, &config)
+                    .request_lines(&rconfig, &lconfig)
                     .map_err(Error::GpiodFailed)?,
             ));
         }
@@ -226,7 +231,7 @@ impl GpioDevice for PhysDevice {
         let state = &self.state[gpio as usize].read().unwrap();
 
         if let Some(request) = &state.request {
-            Ok(request.get_value(gpio as u32).map_err(Error::GpiodFailed)? as u8)
+            Ok(request.value(gpio as u32).map_err(Error::GpiodFailed)? as u8)
         } else {
             Err(Error::GpioDirectionInvalid(
                 VIRTIO_GPIO_DIRECTION_NONE as u32,
@@ -240,8 +245,9 @@ impl GpioDevice for PhysDevice {
         // Direction change can follow value change, don't fail here for invalid
         // direction.
         if let Some(request) = &state.request {
+            let value = line::Value::new(value as i32).map_err(Error::GpiodFailed)?;
             request
-                .set_value(gpio as u32, value as i32)
+                .set_value(gpio as u32, value)
                 .map_err(Error::GpiodFailed)?;
         }
 
@@ -250,12 +256,11 @@ impl GpioDevice for PhysDevice {
 
     fn set_irq_type(&self, gpio: u16, value: u16) -> Result<()> {
         let state = &mut self.state[gpio as usize].write().unwrap();
-        let mut config = LineConfig::new().map_err(Error::GpiodFailed)?;
 
-        match value as u16 {
-            VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING => config.set_edge_detection_default(Edge::Rising),
-            VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING => config.set_edge_detection_default(Edge::Falling),
-            VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH => config.set_edge_detection_default(Edge::Both),
+        let edge = match value as u16 {
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING => line::Edge::Rising,
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING => line::Edge::Falling,
+            VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH => line::Edge::Both,
 
             // Drop the buffer.
             VIRTIO_GPIO_IRQ_TYPE_NONE => {
@@ -267,24 +272,35 @@ impl GpioDevice for PhysDevice {
             _ => return Err(Error::GpioIrqTypeNotSupported(value)),
         };
 
-        // Allocate the buffer and configure the line for interrupt.
         if state.request.is_none() {
-            Err(Error::GpioLineRequestNotConfigured)
-        } else {
-            // The GPIO Virtio specification allows a single interrupt event for each
-            // `wait_for_interrupt()` message. And for that we need a single `EdgeEventBuffer`.
-            state.buffer = Some(EdgeEventBuffer::new(1).map_err(Error::GpiodFailed)?);
-
-            state
-                .request
-                .as_ref()
-                .unwrap()
-                .reconfigure_lines(&config)
-                .map_err(Error::GpiodFailed)
+            return Err(Error::GpioLineRequestNotConfigured);
         }
+
+        let mut lsettings = line::Settings::new().map_err(Error::GpiodFailed)?;
+        lsettings
+            .set_edge_detection(Some(edge))
+            .map_err(Error::GpiodFailed)?;
+
+        let lconfig = line::Config::new().map_err(Error::GpiodFailed)?;
+        lconfig
+            .add_line_settings(&[gpio as u32], lsettings)
+            .map_err(Error::GpiodFailed)?;
+
+        // Allocate the buffer and configure the line for interrupt.
+        //
+        // The GPIO Virtio specification allows a single interrupt event for each
+        // `wait_for_interrupt()` message. And for that we need a single `request::Buffer`.
+        state.buffer = Some(request::Buffer::new(1).map_err(Error::GpiodFailed)?);
+
+        state
+            .request
+            .as_ref()
+            .unwrap()
+            .reconfigure_lines(&lconfig)
+            .map_err(Error::GpiodFailed)
     }
 
-    fn wait_for_interrupt(&self, gpio: u16) -> Result<()> {
+    fn wait_for_interrupt(&self, gpio: u16) -> Result<bool> {
         // While waiting here for the interrupt to occur, it is possible that we receive another
         // request from the guest to disable the interrupt instead, via a call to `set_irq_type()`.
         //
@@ -321,19 +337,21 @@ impl GpioDevice for PhysDevice {
         };
 
         // Wait for the interrupt for a second.
-        match request.wait_edge_event(Duration::new(1, 0)) {
-            Err(LibGpiodError::OperationTimedOut) => return Err(Error::GpioIrqOpTimedOut),
-            x => x.map_err(Error::GpiodFailed)?,
+        if !request
+            .wait_edge_event(Some(Duration::new(1, 0)))
+            .map_err(Error::GpiodFailed)?
+        {
+            return Ok(false);
         }
 
         // The interrupt has already occurred, we can lock now just fine.
-        let state = &self.state[gpio as usize].write().unwrap();
-        if let Some(buffer) = &state.buffer {
+        let state = &mut self.state[gpio as usize].write().unwrap();
+        if let Some(buffer) = &mut state.buffer {
             request
-                .read_edge_event(buffer, 1)
+                .read_edge_events(buffer)
                 .map_err(Error::GpiodFailed)?;
 
-            Ok(())
+            Ok(true)
         } else {
             Err(Error::GpioLineRequestNotConfigured)
         }
@@ -469,11 +487,12 @@ impl<D: GpioDevice> GpioController<D> {
 
     pub(crate) fn wait_for_interrupt(&self, gpio: u16) -> Result<()> {
         loop {
-            match self.device.wait_for_interrupt(gpio) {
-                Err(Error::GpioIrqOpTimedOut) => continue,
-                Ok(_) => return Ok(()),
-                x => x?,
+            if !self.device.wait_for_interrupt(gpio)? {
+                continue;
             }
+
+            // Event found
+            return Ok(());
         }
     }
 
@@ -522,7 +541,7 @@ pub(crate) mod tests {
         value_result: Result<u8>,
         set_value_result: Result<()>,
         set_irq_type_result: Result<()>,
-        pub(crate) wait_for_irq_result: Result<()>,
+        pub(crate) wait_for_irq_result: Result<bool>,
     }
 
     impl DummyDevice {
@@ -545,7 +564,7 @@ pub(crate) mod tests {
                 value_result: Ok(0),
                 set_value_result: Ok(()),
                 set_irq_type_result: Ok(()),
-                wait_for_irq_result: Ok(()),
+                wait_for_irq_result: Ok(true),
             }
         }
     }
@@ -630,12 +649,12 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        fn wait_for_interrupt(&self, _gpio: u16) -> Result<()> {
+        fn wait_for_interrupt(&self, _gpio: u16) -> Result<bool> {
             if self.wait_for_irq_result.is_err() {
                 return self.wait_for_irq_result;
             }
 
-            Ok(())
+            Ok(true)
         }
     }
 
@@ -779,10 +798,7 @@ pub(crate) mod tests {
                 .unwrap();
 
             // Verify interrupt type
-            assert_eq!(
-                controller.irq_type(gpio),
-                VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING,
-            );
+            assert_eq!(controller.irq_type(gpio), VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING);
 
             // Set irq type none
             controller
@@ -806,10 +822,7 @@ pub(crate) mod tests {
                 .unwrap();
 
             // Verify interrupt type
-            assert_eq!(
-                controller.irq_type(gpio),
-                VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING,
-            );
+            assert_eq!(controller.irq_type(gpio), VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING);
 
             // Set irq type none
             controller
@@ -833,10 +846,7 @@ pub(crate) mod tests {
                 .unwrap();
 
             // Verify interrupt type
-            assert_eq!(
-                controller.irq_type(gpio),
-                VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH,
-            );
+            assert_eq!(controller.irq_type(gpio), VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH);
         }
     }
 

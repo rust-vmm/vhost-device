@@ -165,7 +165,7 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
     pub(crate) fn new(controller: GpioController<D>) -> Result<Self> {
         // Can't set a vector to all None easily
         let mut handles: Vec<Option<JoinHandle<()>>> = Vec::new();
-        handles.resize_with(controller.get_num_gpios() as usize, || None);
+        handles.resize_with(controller.num_gpios() as usize, || None);
 
         Ok(VhostUserGpioBackend {
             controller: Arc::new(controller),
@@ -289,7 +289,7 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
 
         // Interrupt should be enabled before sending buffer and no other buffer
         // should have been received earlier for this GPIO pin.
-        if controller.get_irq_type(gpio) == VIRTIO_GPIO_IRQ_TYPE_NONE || handle.is_some() {
+        if controller.irq_type(gpio) == VIRTIO_GPIO_IRQ_TYPE_NONE || handle.is_some() {
             send_event_response(vring, desc_chain, addr, VIRTIO_GPIO_IRQ_STATUS_INVALID);
             return;
         }
@@ -412,7 +412,7 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         unsafe {
             from_raw_parts(
                 self.controller
-                    .get_config()
+                    .config()
                     .as_slice()
                     .as_ptr()
                     .offset(offset as isize) as *const _ as *const _,

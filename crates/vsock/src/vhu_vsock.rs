@@ -10,7 +10,7 @@ use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock};
 use virtio_bindings::bindings::{
-    virtio_net::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_net::VIRTIO_F_VERSION_1,
+    virtio_config::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_config::VIRTIO_F_VERSION_1,
     virtio_ring::VIRTIO_RING_F_EVENT_IDX,
 };
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le64};

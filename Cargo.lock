@@ -813,9 +813,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-vsock"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4d79c8b2052025a5afaba39ca09880f5ab4623fabfe0514e587d100579d504c"
+checksum = "ba7254bb0f6111fa84cb24bbf1dfb327ad02b1056ce8ed7f13962b8d0ca3aaa2"
 dependencies = [
  "virtio-bindings",
  "virtio-queue",

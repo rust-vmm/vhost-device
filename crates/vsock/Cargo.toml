@@ -21,7 +21,7 @@ vhost = { version = "0.6", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.8"
 virtio-bindings = "0.1"
 virtio-queue = "0.7"
-virtio-vsock = "0.2"
+virtio-vsock = "0.2.1"
 vm-memory = "0.10"
 vmm-sys-util = "0.11"
 

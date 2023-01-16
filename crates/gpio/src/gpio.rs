@@ -257,7 +257,7 @@ impl GpioDevice for PhysDevice {
     fn set_irq_type(&self, gpio: u16, value: u16) -> Result<()> {
         let state = &mut self.state[gpio as usize].write().unwrap();
 
-        let edge = match value as u16 {
+        let edge = match value {
             VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING => line::Edge::Rising,
             VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING => line::Edge::Falling,
             VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH => line::Edge::Both,
@@ -609,7 +609,7 @@ pub(crate) mod tests {
             }
 
             self.state.write().unwrap()[gpio as usize].dir = dir;
-            self.state.write().unwrap()[gpio as usize].val = match dir as u8 {
+            self.state.write().unwrap()[gpio as usize].val = match dir {
                 VIRTIO_GPIO_DIRECTION_NONE => None,
                 VIRTIO_GPIO_DIRECTION_IN => self.state.read().unwrap()[gpio as usize].val,
                 VIRTIO_GPIO_DIRECTION_OUT => Some(value as u16),

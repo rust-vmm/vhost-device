@@ -110,7 +110,7 @@ impl TryFrom<GpioArgs> for GpioConfiguration {
 
         let devices = DeviceConfig::try_from(args.device_list.as_str())?;
 
-        if devices.inner.len() != args.socket_count as usize {
+        if devices.inner.len() != args.socket_count {
             return Err(Error::DeviceCountMismatch(
                 args.socket_count,
                 devices.inner.len(),

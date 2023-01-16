@@ -593,7 +593,7 @@ impl<D: I2cDevice> I2cMap<D> {
         };
 
         // get the corresponding adapter based on the device config.
-        let adapter = &self.adapters[index as usize];
+        let adapter = &self.adapters[index];
 
         // Set device's address
         adapter.set_device_addr(device as usize)?;
@@ -795,7 +795,7 @@ pub(crate) mod tests {
             }
         }
 
-        i2c_map.transfer(&mut *reqs).unwrap();
+        i2c_map.transfer(&mut reqs).unwrap();
         verify_rdwr_data(&reqs);
     }
 

@@ -176,7 +176,7 @@ mod tests {
     fn verify_cmd_line_arguments() {
         // All parameters have default values, except for the socket path.  White spaces are
         // introduced on purpose to make sure Strings are trimmed properly.
-        let default_args: RngArgs = Parser::parse_from(&["", "-s  /some/socket_path  "]);
+        let default_args: RngArgs = Parser::parse_from(["", "-s  /some/socket_path  "]);
 
         // A valid configuration that should be equal to the above default configuration.
         let args = RngArgs {

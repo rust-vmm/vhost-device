@@ -502,7 +502,7 @@ mod tests {
                 _ => 0x100,
             };
 
-            let desc = Descriptor::new(offset, len[i], f as u16, (i + 1) as u16);
+            let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
             vq.desc_table().store(i as u16, desc).unwrap();
         }
 

@@ -169,7 +169,7 @@ impl<T: Read> VuRngBackend<T> {
 
             let len = desc_chain
                 .memory()
-                .read_from(descriptor.addr(), &mut *rng_source, to_read as usize)
+                .read_from(descriptor.addr(), &mut *rng_source, to_read)
                 .map_err(|_| VuRngError::UnexpectedRngSourceError)?;
 
             timer.quota_remaining -= len;

@@ -339,7 +339,7 @@ checksum = "201de327520df007757c1f0adce6e827fe8562fbc28bfd9c15571c66ca1f5f79"
 [[package]]
 name = "libgpiod"
 version = "0.1.0"
-source = "git+https://github.com/vireshk/libgpiod?branch=vhost-gpio#d7b36c56170331699fd5e4e18918af81333aa64a"
+source = "git+https://github.com/vireshk/libgpiod?branch=vhost-gpio#b412261453c3bcde60ac7597f19a042899acb68a"
 dependencies = [
  "errno",
  "intmap",
@@ -351,7 +351,7 @@ dependencies = [
 [[package]]
 name = "libgpiod-sys"
 version = "0.1.0"
-source = "git+https://github.com/vireshk/libgpiod?branch=vhost-gpio#d7b36c56170331699fd5e4e18918af81333aa64a"
+source = "git+https://github.com/vireshk/libgpiod?branch=vhost-gpio#b412261453c3bcde60ac7597f19a042899acb68a"
 dependencies = [
  "cc",
 ]

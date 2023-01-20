@@ -219,7 +219,7 @@ impl GpioDevice for PhysDevice {
 
             state.request = Some(Arc::new(
                 self.chip
-                    .request_lines(&rconfig, &lconfig)
+                    .request_lines(Some(&rconfig), &lconfig)
                     .map_err(Error::GpiodFailed)?,
             ));
         }
@@ -338,7 +338,7 @@ impl GpioDevice for PhysDevice {
 
         // Wait for the interrupt for a second.
         if !request
-            .wait_edge_event(Some(Duration::new(1, 0)))
+            .wait_edge_events(Some(Duration::new(1, 0)))
             .map_err(Error::GpiodFailed)?
         {
             return Ok(false);

@@ -25,7 +25,7 @@ vm-memory = "0.10"
 vmm-sys-util = "0.11"
 
 [target.'cfg(target_env = "gnu")'.dependencies]
-libgpiod = { git = "https://github.com/vireshk/libgpiod", branch = "vhost-gpio" }
+libgpiod = { git = "https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/", rev = "d8d3a84b2ddf" }
 
 [dev-dependencies]
 virtio-queue = { version = "0.7", features = ["test-utils"] }

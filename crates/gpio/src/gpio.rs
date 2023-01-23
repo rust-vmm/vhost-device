@@ -6,7 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use log::error;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use libgpiod::{chip, line, request, Error as LibGpiodError};
@@ -110,7 +110,7 @@ pub(crate) trait GpioDevice: Send + Sync + 'static {
 
 pub(crate) struct PhysLineState {
     // See wait_for_interrupt() for explanation of Arc.
-    request: Option<Arc<request::Request>>,
+    request: Option<Arc<Mutex<request::Request>>>,
     buffer: Option<request::Buffer>,
 }
 
@@ -201,27 +201,29 @@ impl GpioDevice for PhysDevice {
             _ => return Err(Error::GpioDirectionInvalid(value)),
         };
 
-        let lconfig = line::Config::new().map_err(Error::GpiodFailed)?;
+        let mut lconfig = line::Config::new().map_err(Error::GpiodFailed)?;
         lconfig
             .add_line_settings(&[gpio as u32], lsettings)
             .map_err(Error::GpiodFailed)?;
 
-        if let Some(request) = &state.request {
+        if let Some(request) = &mut state.request {
             request
+                .lock()
+                .unwrap()
                 .reconfigure_lines(&lconfig)
                 .map_err(Error::GpiodFailed)?;
         } else {
-            let rconfig = request::Config::new().map_err(Error::GpiodFailed)?;
+            let mut rconfig = request::Config::new().map_err(Error::GpiodFailed)?;
 
             rconfig
                 .set_consumer("vhu-gpio")
                 .map_err(Error::GpiodFailed)?;
 
-            state.request = Some(Arc::new(
+            state.request = Some(Arc::new(Mutex::new(
                 self.chip
                     .request_lines(Some(&rconfig), &lconfig)
                     .map_err(Error::GpiodFailed)?,
-            ));
+            )));
         }
 
         Ok(())
@@ -231,7 +233,11 @@ impl GpioDevice for PhysDevice {
         let state = &self.state[gpio as usize].read().unwrap();
 
         if let Some(request) = &state.request {
-            Ok(request.value(gpio as u32).map_err(Error::GpiodFailed)? as u8)
+            Ok(request
+                .lock()
+                .unwrap()
+                .value(gpio as u32)
+                .map_err(Error::GpiodFailed)? as u8)
         } else {
             Err(Error::GpioDirectionInvalid(
                 VIRTIO_GPIO_DIRECTION_NONE as u32,
@@ -247,6 +253,8 @@ impl GpioDevice for PhysDevice {
         if let Some(request) = &state.request {
             let value = line::Value::new(value as i32).map_err(Error::GpiodFailed)?;
             request
+                .lock()
+                .unwrap()
                 .set_value(gpio as u32, value)
                 .map_err(Error::GpiodFailed)?;
         }
@@ -281,7 +289,7 @@ impl GpioDevice for PhysDevice {
             .set_edge_detection(Some(edge))
             .map_err(Error::GpiodFailed)?;
 
-        let lconfig = line::Config::new().map_err(Error::GpiodFailed)?;
+        let mut lconfig = line::Config::new().map_err(Error::GpiodFailed)?;
         lconfig
             .add_line_settings(&[gpio as u32], lsettings)
             .map_err(Error::GpiodFailed)?;
@@ -296,8 +304,12 @@ impl GpioDevice for PhysDevice {
             .request
             .as_ref()
             .unwrap()
+            .lock()
+            .unwrap()
             .reconfigure_lines(&lconfig)
-            .map_err(Error::GpiodFailed)
+            .map_err(Error::GpiodFailed)?;
+
+        Ok(())
     }
 
     fn wait_for_interrupt(&self, gpio: u16) -> Result<bool> {
@@ -335,6 +347,8 @@ impl GpioDevice for PhysDevice {
                 None => return Err(Error::GpioIrqNotEnabled),
             }
         };
+
+        let request = request.lock().unwrap();
 
         // Wait for the interrupt for a second.
         if !request

@@ -43,3 +43,16 @@ devices](https://github.com/rust-vmm/vm-virtio/tree/main/crates/devices).
 This way a monolithic rust-vmm VMM implementation can reuse the core
 logic to service the virtio requests directly in the application.
 
+## Build dependency
+
+The GPIO crate needs a local installation of libgpiod library to be available,
+which can be done like:
+
+$ git clone --depth 1 --branch v2.0-rc1 https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/
+$ cd libgpiod
+$ ./autogen.sh && make
+
+Either you can do a 'make install' now on your system, or provide path to the
+locally build library like this while building vhost-device crates:
+
+$ RUSTFLAGS='-L /home/<username>/libgpiod/lib/.libs/'  cargo build --release

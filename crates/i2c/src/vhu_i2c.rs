@@ -104,7 +104,7 @@ pub(crate) struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
     pub exit_event: EventFd,
-    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    mem: Option<GuestMemoryLoadGuard<GuestMemoryMmap>>,
 }
 
 type I2cDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
@@ -261,7 +261,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
-            .iter(self.mem.as_ref().unwrap().memory())
+            .iter(self.mem.as_ref().unwrap().clone())
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 
@@ -307,7 +307,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
-        self.mem = Some(mem);
+        self.mem = Some(mem.memory());
         Ok(())
     }
 

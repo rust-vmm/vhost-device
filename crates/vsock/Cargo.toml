@@ -27,4 +27,4 @@ vmm-sys-util = "0.11"
 
 [dev-dependencies]
 virtio-queue = { version = "0.7", features = ["test-utils"] }
-serial_test = "0.9"
+serial_test = "1.0"

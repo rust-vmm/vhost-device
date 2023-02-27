@@ -908,9 +908,9 @@ checksum = "0b9084faf91b9aa9676ae2cac8f1432df2839d9566e6f19f29dbc13a8b831dff"
 
 [[package]]
 name = "virtio-queue"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19e927d93d54c365034fd7f31a5f458a1f540de4a37c52e892670dad9692173c"
+checksum = "3ba81e2bcc21c0d2fc5e6683e79367e26ad219197423a498df801d79d5ba77bd"
 dependencies = [
  "log",
  "virtio-bindings 0.1.0",

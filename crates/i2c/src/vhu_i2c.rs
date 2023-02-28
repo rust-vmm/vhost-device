@@ -779,6 +779,9 @@ mod tests {
         backend.update_memory(mem.clone()).unwrap();
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+
         assert_eq!(
             backend
                 .handle_event(0, EventSet::OUT, &[vring.clone()], 0)

@@ -632,6 +632,8 @@ mod tests {
         .is_ok());
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
 
         assert!(t.process_tx(&vring, false).is_ok());
         assert!(t.process_tx(&vring, true).is_ok());

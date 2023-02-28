@@ -359,6 +359,10 @@ mod tests {
             VringRwLock::new(mem.clone(), 0x1000).unwrap(),
             VringRwLock::new(mem.clone(), 0x2000).unwrap(),
         ];
+        vrings[0].set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vrings[0].set_queue_ready(true);
+        vrings[1].set_queue_info(0x1100, 0x1200, 0x1300).unwrap();
+        vrings[1].set_queue_ready(true);
 
         assert!(backend.update_memory(mem).is_ok());
 

@@ -486,6 +486,8 @@ mod tests {
 
         // Artificial Vring
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
 
         // Currently handles EventSet::IN only, otherwise an error is generated.
         assert_eq!(

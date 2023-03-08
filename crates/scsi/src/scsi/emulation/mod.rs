@@ -7,3 +7,5 @@ pub(crate) mod mode_page;
 mod response_data;
 pub(crate) mod target;
 
+#[cfg(test)]
+mod tests;

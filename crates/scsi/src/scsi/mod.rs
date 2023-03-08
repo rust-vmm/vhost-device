@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
+pub mod emulation;
 pub mod sense;
 
 use std::io::{self, Read, Write};

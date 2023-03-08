@@ -22,6 +22,7 @@ impl SenseTriple {
 
 const NO_SENSE: u8 = 0;
 const MEDIUM_ERROR: u8 = 0x3;
+const HARDWARE_ERROR: u8 = 0x4;
 const ILLEGAL_REQUEST: u8 = 0x5;
 
 pub const NO_ADDITIONAL_SENSE_INFORMATION: SenseTriple = SenseTriple(NO_SENSE, 0, 0);
@@ -33,3 +34,4 @@ pub const LOGICAL_UNIT_NOT_SUPPORTED: SenseTriple = SenseTriple(ILLEGAL_REQUEST,
 pub const SAVING_PARAMETERS_NOT_SUPPORTED: SenseTriple = SenseTriple(ILLEGAL_REQUEST, 0x39, 0x0);
 
 pub const UNRECOVERED_READ_ERROR: SenseTriple = SenseTriple(MEDIUM_ERROR, 0x11, 0x0);
+pub const TARGET_FAILURE: SenseTriple = SenseTriple(HARDWARE_ERROR, 0x44, 0x0);

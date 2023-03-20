@@ -355,10 +355,11 @@ checksum = "ee87fd093563344074bacf24faa0bb0227fb6969fb223e922db798516de924d6"
 
 [[package]]
 name = "io-lifetimes"
-version = "1.0.5"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1abeb7a0dd0f8181267ff8adc397075586500b81b28a73e8a0208b00fc170fb3"
+checksum = "0dd6da19f25979c7270e70fa95ab371ec3b701cd0eefc47667a09785b3c59155"
 dependencies = [
+ "hermit-abi 0.3.1",
  "libc",
  "windows-sys 0.45.0",
 ]

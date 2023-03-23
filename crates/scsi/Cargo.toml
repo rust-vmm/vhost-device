@@ -11,6 +11,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+
 [dependencies]
 clap = { version = "4.3",  features = ["derive"] }
 env_logger = "0.10"
@@ -18,11 +21,11 @@ epoll = "4.3"
 log = "0.4"
 num_enum = "0.5"
 thiserror = "1.0"
-vhost = { version = "0.7", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.9"
+vhost = { version = "0.8", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.10"
 virtio-bindings = "0.2.1"
-virtio-queue = "0.8"
-vm-memory = "0.11"
+virtio-queue = "0.9"
+vm-memory = "0.12"
 vmm-sys-util = "0.11"
 
 [dev-dependencies]

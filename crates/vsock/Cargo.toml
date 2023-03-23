@@ -9,6 +9,9 @@ keywords = ["vhost", "vsock"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2018"
 
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+
 [dependencies]
 byteorder = "1"
 clap = { version = "4.3",  features = ["derive"] }
@@ -17,17 +20,17 @@ epoll = "4.3.2"
 futures = { version = "0.3", features = ["thread-pool"] }
 log = "0.4"
 thiserror = "1.0"
-vhost = { version = "0.7", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.9"
+vhost = { version = "0.8", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.10"
 virtio-bindings = "0.2.1"
-virtio-queue = "0.8"
-virtio-vsock = "0.3.0"
-vm-memory = "0.11"
+virtio-queue = "0.9"
+virtio-vsock = "0.3.1"
+vm-memory = "0.12"
 vmm-sys-util = "0.11"
 config = "0.13"
 serde = "1"
 serde_yaml = "0.9"
 
 [dev-dependencies]
-virtio-queue = { version = "0.8", features = ["test-utils"] }
+virtio-queue = { version = "0.9", features = ["test-utils"] }
 serial_test = "2.0"

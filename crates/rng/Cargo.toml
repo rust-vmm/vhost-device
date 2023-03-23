@@ -9,6 +9,9 @@ keywords = ["rng", "vhost", "virt", "backend"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+
 [dependencies]
 clap = { version = "4.3",  features = ["derive"] }
 env_logger = "0.10"
@@ -18,13 +21,13 @@ log = "0.4"
 rand = "0.8.5"
 tempfile = "3.5"
 thiserror = "1.0"
-vhost = { version = "0.7", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.9"
+vhost = { version = "0.8", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.10"
 virtio-bindings = "0.2.1"
-virtio-queue = "0.8"
-vm-memory = "0.11"
+virtio-queue = "0.9"
+vm-memory = "0.12"
 vmm-sys-util = "0.11"
 
 [dev-dependencies]
-virtio-queue = { version = "0.8", features = ["test-utils"] }
-vm-memory = { version = "0.11", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { version = "0.9", features = ["test-utils"] }
+vm-memory = { version = "0.12", features = ["backend-mmap", "backend-atomic"] }

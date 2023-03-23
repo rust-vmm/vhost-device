@@ -62,3 +62,12 @@ In order to inform tools about the build location, you can now set:
 To prevent setting this in every terminal session, you can also configure
 cargo to
 [set it automatically](https://doc.rust-lang.org/cargo/reference/config.html#env).
+
+## Xen support
+
+Supporting Xen requires special handling while mapping the guest memory. The
+`vm-memory` crate implements xen memory mapping support via a separate feature
+`xen`, and this crate uses the same feature name to enable Xen support.
+
+It was decided by the `rust-vmm` maintainers to keep the interface simple and
+build the crate for either standard Unix memory mapping or Xen, and not both.

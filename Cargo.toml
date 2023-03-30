@@ -4,5 +4,6 @@ members = [
     "crates/gpio",
     "crates/i2c",
     "crates/rng",
+    "crates/sound",
     "crates/vsock",
 ]

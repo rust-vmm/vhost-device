@@ -2,10 +2,7 @@
 
 mod vhu_sound;
 
-use std::{
-    convert::TryFrom,
-    sync::{Arc, RwLock},
-};
+use std::{convert::TryFrom, sync::Arc};
 
 use clap::Parser;
 use log::{info, warn};
@@ -37,9 +34,7 @@ impl TryFrom<SoundArgs> for SoundConfig {
 /// vhost-user-sound backend server.
 pub(crate) fn start_backend_server(config: SoundConfig) {
     loop {
-        let backend = Arc::new(RwLock::new(
-            VhostUserSoundBackend::new(config.clone()).unwrap(),
-        ));
+        let backend = Arc::new(VhostUserSoundBackend::new(config.clone()).unwrap());
 
         let listener = Listener::new(config.get_socket_path(), true).unwrap();
 
@@ -65,7 +60,7 @@ pub(crate) fn start_backend_server(config: SoundConfig) {
         }
 
         // No matter the result, we need to shut down the worker thread.
-        backend.read().unwrap().exit_event.write(1).unwrap();
+        backend.exit_event.write(1).unwrap();
     }
 }
 

@@ -2,11 +2,12 @@
 
 use std::{
     io::{self, Result as IoResult},
+    sync::RwLock,
     u16, u32, u64, u8,
 };
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackendMut, VringRwLock};
+use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
     virtio_config::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_config::VIRTIO_F_VERSION_1,
     virtio_ring::VIRTIO_RING_F_EVENT_IDX, virtio_ring::VIRTIO_RING_F_INDIRECT_DESC,
@@ -88,33 +89,69 @@ struct VirtioSoundHeader {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioSoundHeader {}
 
+struct VhostUserSoundThread {
+    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    event_idx: bool,
+}
+
+impl VhostUserSoundThread {
+    pub fn new() -> Result<Self> {
+        Ok(VhostUserSoundThread {
+            event_idx: false,
+            mem: None,
+        })
+    }
+
+    fn set_event_idx(&mut self, enabled: bool) {
+        self.event_idx = enabled;
+    }
+
+    fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
+        self.mem = Some(mem);
+        Ok(())
+    }
+
+    fn handle_event(&self, device_event: u16, _vrings: &[VringRwLock]) -> IoResult<bool> {
+        match device_event {
+            CONTROL_Q => {}
+            EVENT_Q => {}
+            TX_Q => {}
+            RX_Q => {}
+            _ => {
+                return Err(Error::HandleUnknownEvent.into());
+            }
+        }
+
+        Ok(false)
+    }
+}
+
 pub(crate) struct VhostUserSoundBackend {
+    thread: RwLock<VhostUserSoundThread>,
     config: VirtioSoundConfig,
     queues_per_thread: Vec<u64>,
-    event_idx: bool,
     pub(crate) exit_event: EventFd,
-    mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
 impl VhostUserSoundBackend {
     pub fn new(_config: SoundConfig) -> Result<Self> {
         let queues_per_thread = vec![0b1111];
+        let thread = RwLock::new(VhostUserSoundThread::new()?);
 
         Ok(Self {
+            thread,
             config: VirtioSoundConfig {
                 jacks: 0.into(),
                 streams: 1.into(),
                 chmpas: 0.into(),
             },
             queues_per_thread,
-            event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
-            mem: None,
         })
     }
 }
 
-impl VhostUserBackendMut<VringRwLock, ()> for VhostUserSoundBackend {
+impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     fn num_queues(&self) -> usize {
         4
     }
@@ -135,37 +172,29 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserSoundBackend {
         VhostUserProtocolFeatures::CONFIG
     }
 
-    fn set_event_idx(&mut self, enabled: bool) {
-        self.event_idx = enabled;
+    fn set_event_idx(&self, enabled: bool) {
+        self.thread.write().unwrap().set_event_idx(enabled);
     }
 
-    fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
-        self.mem = Some(mem);
-        Ok(())
+    fn update_memory(&self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
+        self.thread.write().unwrap().update_memory(mem)
     }
 
     fn handle_event(
-        &mut self,
+        &self,
         device_event: u16,
         evset: EventSet,
-        _vrings: &[VringRwLock],
+        vrings: &[VringRwLock],
         _thread_id: usize,
     ) -> IoResult<bool> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        match device_event {
-            CONTROL_Q => {}
-            EVENT_Q => {}
-            TX_Q => {}
-            RX_Q => {}
-            _ => {
-                return Err(Error::HandleUnknownEvent.into());
-            }
-        }
-
-        Ok(false)
+        self.thread
+            .read()
+            .unwrap()
+            .handle_event(device_event, vrings)
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {

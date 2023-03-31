@@ -1,99 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::{
-    io::{self, Result as IoResult},
-    sync::RwLock,
-    u16, u32, u64, u8,
-};
-use thiserror::Error as ThisError;
+use crate::virtio_sound::*;
+use crate::{Error, Result, SoundConfig};
+
+use std::{io::Result as IoResult, sync::RwLock, u16, u32, u64, u8};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
     virtio_config::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_config::VIRTIO_F_VERSION_1,
     virtio_ring::VIRTIO_RING_F_EVENT_IDX, virtio_ring::VIRTIO_RING_F_INDIRECT_DESC,
 };
-use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le32};
+use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
 };
-
-const CONTROL_QUEUE_IDX: u16 = 0;
-const EVENT_QUEUE_IDX: u16 = 1;
-const TX_QUEUE_IDX: u16 = 2;
-const RX_QUEUE_IDX: u16 = 3;
-const NUM_QUEUES: u16 = 4;
-
-pub(crate) type Result<T> = std::result::Result<T, Error>;
-
-/// Custom error types
-#[derive(Debug, ThisError)]
-pub(crate) enum Error {
-    #[error("Failed to handle event other than EPOLLIN event")]
-    HandleEventNotEpollIn,
-    #[error("Failed to handle unknown event")]
-    HandleUnknownEvent,
-    #[error("Failed to create a new EventFd")]
-    EventFdCreate(std::io::Error),
-}
-
-impl std::convert::From<Error> for std::io::Error {
-    fn from(e: Error) -> Self {
-        std::io::Error::new(io::ErrorKind::Other, e)
-    }
-}
-
-#[derive(Debug, Clone)]
-/// This structure is the public API through which an external program
-/// is allowed to configure the backend.
-pub(crate) struct SoundConfig {
-    /// vhost-user Unix domain socket
-    socket: String,
-    multi_thread: bool,
-}
-
-impl SoundConfig {
-    /// Create a new instance of the SoundConfig struct, containing the
-    /// parameters to be fed into the sound-backend server.
-    pub fn new(socket: String, multi_thread: bool) -> Self {
-        Self {
-            socket,
-            multi_thread,
-        }
-    }
-
-    /// Return the path of the unix domain socket which is listening to
-    /// requests from the guest.
-    pub fn get_socket_path(&self) -> String {
-        String::from(&self.socket)
-    }
-}
-
-/// Virtio Sound Configuration
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
-#[repr(C)]
-struct VirtioSoundConfig {
-    /// total number of all available jacks
-    jacks: Le32,
-    /// total number of all available PCM streams
-    streams: Le32,
-    /// total number of all available channel maps
-    chmpas: Le32,
-}
-// SAFETY: The layout of the structure is fixed and can be initialized by
-// reading its content from byte array.
-unsafe impl ByteValued for VirtioSoundConfig {}
-
-/// Virtio Sound Request / Response common header
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
-#[repr(C)]
-struct VirtioSoundHeader {
-    /// request type / response status
-    code: Le32,
-}
-// SAFETY: The layout of the structure is fixed and can be initialized by
-// reading its content from byte array.
-unsafe impl ByteValued for VirtioSoundHeader {}
 
 struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
@@ -161,10 +82,10 @@ impl VhostUserSoundThread {
     }
 }
 
-pub(crate) struct VhostUserSoundBackend {
+pub struct VhostUserSoundBackend {
     threads: Vec<RwLock<VhostUserSoundThread>>,
     virtio_cfg: VirtioSoundConfig,
-    pub(crate) exit_event: EventFd,
+    exit_event: EventFd,
 }
 
 impl VhostUserSoundBackend {
@@ -196,6 +117,10 @@ impl VhostUserSoundBackend {
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
         })
+    }
+
+    pub fn send_exit_event(&self) {
+        self.exit_event.write(1).unwrap();
     }
 }
 

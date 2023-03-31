@@ -26,7 +26,7 @@ impl TryFrom<SoundArgs> for SoundConfig {
     fn try_from(cmd_args: SoundArgs) -> Result<Self> {
         let socket = cmd_args.socket.trim().to_string();
 
-        Ok(SoundConfig::new(socket))
+        Ok(SoundConfig::new(socket, false))
     }
 }
 

@@ -18,10 +18,11 @@ use vmm_sys_util::{
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
-const CONTROL_Q: u16 = 0;
-const EVENT_Q: u16 = 1;
-const TX_Q: u16 = 2;
-const RX_Q: u16 = 3;
+const CONTROL_QUEUE_IDX: u16 = 0;
+const EVENT_QUEUE_IDX: u16 = 1;
+const TX_QUEUE_IDX: u16 = 2;
+const RX_QUEUE_IDX: u16 = 3;
+const NUM_QUEUES: u16 = 4;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -46,14 +47,19 @@ impl std::convert::From<Error> for std::io::Error {
 /// This structure is the public API through which an external program
 /// is allowed to configure the backend.
 pub(crate) struct SoundConfig {
+    /// vhost-user Unix domain socket
     socket: String,
+    multi_thread: bool,
 }
 
 impl SoundConfig {
     /// Create a new instance of the SoundConfig struct, containing the
     /// parameters to be fed into the sound-backend server.
-    pub fn new(socket: String) -> Self {
-        Self { socket }
+    pub fn new(socket: String, multi_thread: bool) -> Self {
+        Self {
+            socket,
+            multi_thread,
+        }
     }
 
     /// Return the path of the unix domain socket which is listening to
@@ -92,14 +98,28 @@ unsafe impl ByteValued for VirtioSoundHeader {}
 struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     event_idx: bool,
+    queue_indexes: Vec<u16>,
 }
 
 impl VhostUserSoundThread {
-    pub fn new() -> Result<Self> {
+    pub fn new(mut queue_indexes: Vec<u16>) -> Result<Self> {
+        queue_indexes.sort();
+
         Ok(VhostUserSoundThread {
             event_idx: false,
             mem: None,
+            queue_indexes,
         })
+    }
+
+    fn queues_per_thread(&self) -> u64 {
+        let mut queues_per_thread = 0u64;
+
+        for idx in self.queue_indexes.iter() {
+            queues_per_thread |= 1u64 << idx
+        }
+
+        queues_per_thread
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
@@ -111,41 +131,69 @@ impl VhostUserSoundThread {
         Ok(())
     }
 
-    fn handle_event(&self, device_event: u16, _vrings: &[VringRwLock]) -> IoResult<bool> {
-        match device_event {
-            CONTROL_Q => {}
-            EVENT_Q => {}
-            TX_Q => {}
-            RX_Q => {}
-            _ => {
-                return Err(Error::HandleUnknownEvent.into());
-            }
-        }
+    fn handle_event(&self, device_event: u16, vrings: &[VringRwLock]) -> IoResult<bool> {
+        let vring = &vrings[device_event as usize];
+        let queue_idx = self.queue_indexes[device_event as usize];
 
+        match queue_idx {
+            CONTROL_QUEUE_IDX => self.process_control(vring),
+            EVENT_QUEUE_IDX => self.process_event(vring),
+            TX_QUEUE_IDX => self.process_tx(vring),
+            RX_QUEUE_IDX => self.process_rx(vring),
+            _ => Err(Error::HandleUnknownEvent.into()),
+        }
+    }
+
+    fn process_control(&self, _vring: &VringRwLock) -> IoResult<bool> {
+        Ok(false)
+    }
+
+    fn process_event(&self, _vring: &VringRwLock) -> IoResult<bool> {
+        Ok(false)
+    }
+
+    fn process_tx(&self, _vring: &VringRwLock) -> IoResult<bool> {
+        Ok(false)
+    }
+
+    fn process_rx(&self, _vring: &VringRwLock) -> IoResult<bool> {
         Ok(false)
     }
 }
 
 pub(crate) struct VhostUserSoundBackend {
-    thread: RwLock<VhostUserSoundThread>,
-    config: VirtioSoundConfig,
-    queues_per_thread: Vec<u64>,
+    threads: Vec<RwLock<VhostUserSoundThread>>,
+    virtio_cfg: VirtioSoundConfig,
     pub(crate) exit_event: EventFd,
 }
 
 impl VhostUserSoundBackend {
-    pub fn new(_config: SoundConfig) -> Result<Self> {
-        let queues_per_thread = vec![0b1111];
-        let thread = RwLock::new(VhostUserSoundThread::new()?);
+    pub fn new(config: SoundConfig) -> Result<Self> {
+        let threads = if config.multi_thread {
+            vec![
+                RwLock::new(VhostUserSoundThread::new(vec![
+                    CONTROL_QUEUE_IDX,
+                    EVENT_QUEUE_IDX,
+                ])?),
+                RwLock::new(VhostUserSoundThread::new(vec![TX_QUEUE_IDX])?),
+                RwLock::new(VhostUserSoundThread::new(vec![RX_QUEUE_IDX])?),
+            ]
+        } else {
+            vec![RwLock::new(VhostUserSoundThread::new(vec![
+                CONTROL_QUEUE_IDX,
+                EVENT_QUEUE_IDX,
+                TX_QUEUE_IDX,
+                RX_QUEUE_IDX,
+            ])?)]
+        };
 
         Ok(Self {
-            thread,
-            config: VirtioSoundConfig {
+            threads,
+            virtio_cfg: VirtioSoundConfig {
                 jacks: 0.into(),
                 streams: 1.into(),
                 chmpas: 0.into(),
             },
-            queues_per_thread,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
         })
     }
@@ -153,7 +201,7 @@ impl VhostUserSoundBackend {
 
 impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     fn num_queues(&self) -> usize {
-        4
+        NUM_QUEUES as usize
     }
 
     fn max_queue_size(&self) -> usize {
@@ -173,11 +221,17 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn set_event_idx(&self, enabled: bool) {
-        self.thread.write().unwrap().set_event_idx(enabled);
+        for thread in self.threads.iter() {
+            thread.write().unwrap().set_event_idx(enabled);
+        }
     }
 
     fn update_memory(&self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
-        self.thread.write().unwrap().update_memory(mem)
+        for thread in self.threads.iter() {
+            thread.write().unwrap().update_memory(mem.clone())?;
+        }
+
+        Ok(())
     }
 
     fn handle_event(
@@ -185,13 +239,13 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
         device_event: u16,
         evset: EventSet,
         vrings: &[VringRwLock],
-        _thread_id: usize,
+        thread_id: usize,
     ) -> IoResult<bool> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        self.thread
+        self.threads[thread_id]
             .read()
             .unwrap()
             .handle_event(device_event, vrings)
@@ -201,7 +255,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
         let offset = offset as usize;
         let size = size as usize;
 
-        let buf = self.config.as_slice();
+        let buf = self.virtio_cfg.as_slice();
 
         if offset + size > buf.len() {
             return Vec::new();
@@ -211,7 +265,13 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn queues_per_thread(&self) -> Vec<u64> {
-        self.queues_per_thread.clone()
+        let mut vec = Vec::with_capacity(self.threads.len());
+
+        for thread in self.threads.iter() {
+            vec.push(thread.read().unwrap().queues_per_thread())
+        }
+
+        vec
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {

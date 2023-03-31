@@ -89,29 +89,17 @@ struct VirtioSoundHeader {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioSoundHeader {}
 
-trait VhostUserSoundThread {
-    fn queue_mask(&self) -> u64;
-    fn set_event_idx(&mut self, enabled: bool);
-    fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()>;
-    fn handle_event(&self, device_event: u16, vrings: &[VringRwLock]) -> IoResult<bool>;
-}
-struct VhostUserSoundSingleThread {
+struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     event_idx: bool,
 }
 
-impl VhostUserSoundSingleThread {
+impl VhostUserSoundThread {
     pub fn new() -> Result<Self> {
-        Ok(VhostUserSoundSingleThread {
+        Ok(VhostUserSoundThread {
             event_idx: false,
             mem: None,
         })
-    }
-}
-
-impl VhostUserSoundThread for VhostUserSoundSingleThread {
-    fn queue_mask(&self) -> u64 {
-        0xffff_ffff
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
@@ -139,7 +127,7 @@ impl VhostUserSoundThread for VhostUserSoundSingleThread {
 }
 
 pub(crate) struct VhostUserSoundBackend {
-    thread: RwLock<Box<dyn VhostUserSoundThread + Sync + Send>>,
+    thread: RwLock<VhostUserSoundThread>,
     config: VirtioSoundConfig,
     queues_per_thread: Vec<u64>,
     pub(crate) exit_event: EventFd,
@@ -148,10 +136,10 @@ pub(crate) struct VhostUserSoundBackend {
 impl VhostUserSoundBackend {
     pub fn new(_config: SoundConfig) -> Result<Self> {
         let queues_per_thread = vec![0b1111];
-        let thread = Box::new(VhostUserSoundSingleThread::new()?);
+        let thread = RwLock::new(VhostUserSoundThread::new()?);
 
         Ok(Self {
-            thread: RwLock::new(thread),
+            thread,
             config: VirtioSoundConfig {
                 jacks: 0.into(),
                 streams: 1.into(),

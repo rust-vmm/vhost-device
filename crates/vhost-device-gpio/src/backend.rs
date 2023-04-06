@@ -43,6 +43,8 @@ pub(crate) enum Error {
     CouldNotCreateBackend(crate::vhu_gpio::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Unimplemented")]
+    DeviceUnimplemented,
 }
 
 #[derive(Parser, Debug)]
@@ -56,16 +58,40 @@ struct GpioArgs {
     #[clap(short = 'c', long, default_value_t = 1)]
     socket_count: usize,
 
-    /// List of GPIO devices, one for each guest, in the format <N1>[:<N2>]. The first entry is for
-    /// Guest that connects to socket 0, next one for socket 1, and so on. Each device number here
-    /// will be used to access the corresponding /dev/gpiochipX. Example, "-c 4 -l 3:4:6:1"
+    /// List of GPIO devices, one for each guest, in the format
+    /// <N1>[:<N2>]. The first entry is for Guest that connects to
+    /// socket 0, next one for socket 1, and so on. Each device number
+    /// here will be used to access the corresponding /dev/gpiochipX.
+    /// or simulate a GPIO device with N pins. Example, "-c 4 -l
+    /// 3:s4:6:s1"
     #[clap(short = 'l', long)]
     device_list: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum GpioDeviceType {
+    PhysicalDevice { id: u32 },
+    SimulatedDevice { num_gpios: u32 },
+}
+
+impl GpioDeviceType {
+    fn new(cfg: &str) -> Result<Self> {
+        match cfg.strip_prefix('s') {
+            Some(num) => {
+                let num_gpios = num.parse::<u32>().map_err(Error::ParseFailure)?;
+                Ok(GpioDeviceType::SimulatedDevice { num_gpios })
+            }
+            _ => {
+                let id = cfg.parse::<u32>().map_err(Error::ParseFailure)?;
+                Ok(GpioDeviceType::PhysicalDevice { id })
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) struct DeviceConfig {
-    inner: Vec<u32>,
+    inner: Vec<GpioDeviceType>,
 }
 
 impl DeviceConfig {
@@ -73,13 +99,15 @@ impl DeviceConfig {
         Self { inner: Vec::new() }
     }
 
-    fn contains_device(&self, number: u32) -> bool {
-        self.inner.iter().any(|elem| *elem == number)
+    fn contains_device(&self, device: GpioDeviceType) -> bool {
+        self.inner.contains(&device)
     }
 
-    fn push(&mut self, device: u32) -> Result<()> {
-        if self.contains_device(device) {
-            return Err(Error::DeviceDuplicate(device));
+    fn push(&mut self, device: GpioDeviceType) -> Result<()> {
+        if let GpioDeviceType::PhysicalDevice { id } = device {
+            if self.contains_device(device) {
+                return Err(Error::DeviceDuplicate(id));
+            }
         }
 
         self.inner.push(device);
@@ -95,8 +123,7 @@ impl TryFrom<&str> for DeviceConfig {
         let mut devices = DeviceConfig::new();
 
         for info in list.iter() {
-            let number = info.parse::<u32>().map_err(Error::ParseFailure)?;
-            devices.push(number)?;
+            devices.push(GpioDeviceType::new(info)?)?;
         }
         Ok(devices)
     }
@@ -140,7 +167,7 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
 
     for i in 0..config.socket_count {
         let socket = config.socket_path.to_owned() + &i.to_string();
-        let device_num = config.devices.inner[i];
+        let cfg = config.devices.inner[i];
 
         let handle: JoinHandle<Result<()>> = spawn(move || loop {
             // A separate thread is spawned for each socket and can connect to a separate guest.
@@ -151,9 +178,17 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
             // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
             // trouble to other threads/guests or the main() function and should be safe for the
             // daemon.
-            let device = D::open(device_num).map_err(Error::CouldNotOpenDevice)?;
-            let controller =
-                GpioController::<D>::new(device).map_err(Error::CouldNotCreateGpioController)?;
+            let controller = match cfg {
+                GpioDeviceType::PhysicalDevice { id } => match D::open(id) {
+                    Ok(device) => match GpioController::<D>::new(device) {
+                        Ok(controller) => controller,
+                        Err(error) => return Err(Error::CouldNotCreateGpioController(error)),
+                    },
+                    Err(error) => return Err(Error::CouldNotOpenDevice(error)),
+                },
+                _ => return Err(Error::DeviceUnimplemented),
+            };
+
             let backend = Arc::new(RwLock::new(
                 VhostUserGpioBackend::new(controller).map_err(Error::CouldNotCreateBackend)?,
             ));
@@ -214,7 +249,12 @@ mod tests {
 
     impl DeviceConfig {
         pub fn new_with(devices: Vec<u32>) -> Self {
-            DeviceConfig { inner: devices }
+            DeviceConfig {
+                inner: devices
+                    .into_iter()
+                    .map(|id| GpioDeviceType::PhysicalDevice { id })
+                    .collect(),
+            }
         }
     }
 
@@ -230,10 +270,19 @@ mod tests {
     fn test_gpio_device_config() {
         let mut config = DeviceConfig::new();
 
-        config.push(5).unwrap();
-        config.push(6).unwrap();
+        config
+            .push(GpioDeviceType::PhysicalDevice { id: 5 })
+            .unwrap();
+        config
+            .push(GpioDeviceType::PhysicalDevice { id: 6 })
+            .unwrap();
 
-        assert_matches!(config.push(5).unwrap_err(), Error::DeviceDuplicate(5));
+        assert_matches!(
+            config
+                .push(GpioDeviceType::PhysicalDevice { id: 5 })
+                .unwrap_err(),
+            Error::DeviceDuplicate(5)
+        );
     }
 
     #[test]

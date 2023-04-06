@@ -9,8 +9,12 @@
 mod backend;
 #[cfg(target_env = "gnu")]
 mod gpio;
+#[cfg(test)]
+mod mock_gpio;
 #[cfg(target_env = "gnu")]
 mod vhu_gpio;
+#[cfg(target_env = "gnu")]
+mod virtio_gpio;
 
 #[cfg(target_env = "gnu")]
 fn main() {

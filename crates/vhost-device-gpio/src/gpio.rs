@@ -13,7 +13,9 @@ use libgpiod::{chip, line, request, Error as LibGpiodError};
 use thiserror::Error as ThisError;
 use vm_memory::{ByteValued, Le16, Le32};
 
-type Result<T> = std::result::Result<T, Error>;
+use crate::virtio_gpio::*;
+
+pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 /// Errors related to low level gpio helpers
@@ -46,32 +48,6 @@ pub(crate) enum Error {
     #[error("Gpio test Operation failed {0}")]
     GpioOperationFailed(&'static str),
 }
-
-/// Virtio specification definitions
-/// Virtio GPIO request types
-pub(crate) const VIRTIO_GPIO_MSG_GET_LINE_NAMES: u16 = 0x0001;
-pub(crate) const VIRTIO_GPIO_MSG_GET_DIRECTION: u16 = 0x0002;
-pub(crate) const VIRTIO_GPIO_MSG_SET_DIRECTION: u16 = 0x0003;
-pub(crate) const VIRTIO_GPIO_MSG_GET_VALUE: u16 = 0x0004;
-pub(crate) const VIRTIO_GPIO_MSG_SET_VALUE: u16 = 0x0005;
-pub(crate) const VIRTIO_GPIO_MSG_IRQ_TYPE: u16 = 0x0006;
-
-/// Direction types
-pub(crate) const VIRTIO_GPIO_DIRECTION_NONE: u8 = 0x00;
-pub(crate) const VIRTIO_GPIO_DIRECTION_OUT: u8 = 0x01;
-pub(crate) const VIRTIO_GPIO_DIRECTION_IN: u8 = 0x02;
-
-/// Virtio GPIO IRQ types
-pub(crate) const VIRTIO_GPIO_IRQ_TYPE_NONE: u16 = 0x00;
-pub(crate) const VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING: u16 = 0x01;
-pub(crate) const VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING: u16 = 0x02;
-pub(crate) const VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH: u16 =
-    VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING | VIRTIO_GPIO_IRQ_TYPE_EDGE_FALLING;
-pub(crate) const VIRTIO_GPIO_IRQ_TYPE_LEVEL_HIGH: u16 = 0x04;
-pub(crate) const VIRTIO_GPIO_IRQ_TYPE_LEVEL_LOW: u16 = 0x08;
-const VIRTIO_GPIO_IRQ_TYPE_ALL: u16 = VIRTIO_GPIO_IRQ_TYPE_EDGE_BOTH
-    | VIRTIO_GPIO_IRQ_TYPE_LEVEL_HIGH
-    | VIRTIO_GPIO_IRQ_TYPE_LEVEL_LOW;
 
 /// Virtio GPIO Configuration
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -384,10 +360,10 @@ impl GpioDevice for PhysDevice {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct GpioState {
-    dir: u8,
-    val: Option<u16>,
-    irq_type: u16,
+pub(crate) struct GpioState {
+    pub dir: u8,
+    pub val: Option<u16>,
+    pub irq_type: u16,
 }
 
 #[derive(Debug)]
@@ -553,135 +529,7 @@ pub(crate) mod tests {
 
     use super::Error;
     use super::*;
-
-    #[derive(Debug)]
-    pub(crate) struct DummyDevice {
-        ngpio: u16,
-        pub(crate) gpio_names: Vec<String>,
-        state: RwLock<Vec<GpioState>>,
-        num_gpios_result: Result<u16>,
-        gpio_name_result: Result<String>,
-        direction_result: Result<u8>,
-        set_direction_result: Result<()>,
-        value_result: Result<u8>,
-        set_value_result: Result<()>,
-        set_irq_type_result: Result<()>,
-        pub(crate) wait_for_irq_result: Result<bool>,
-    }
-
-    impl DummyDevice {
-        pub(crate) fn new(ngpio: u16) -> Self {
-            Self {
-                ngpio,
-                gpio_names: vec!['\0'.to_string(); ngpio.into()],
-                state: RwLock::new(vec![
-                    GpioState {
-                        dir: VIRTIO_GPIO_DIRECTION_NONE,
-                        val: None,
-                        irq_type: VIRTIO_GPIO_IRQ_TYPE_NONE,
-                    };
-                    ngpio.into()
-                ]),
-                num_gpios_result: Ok(0),
-                gpio_name_result: Ok("".to_string()),
-                direction_result: Ok(0),
-                set_direction_result: Ok(()),
-                value_result: Ok(0),
-                set_value_result: Ok(()),
-                set_irq_type_result: Ok(()),
-                wait_for_irq_result: Ok(true),
-            }
-        }
-    }
-
-    impl GpioDevice for DummyDevice {
-        fn open(_device: u32) -> Result<Self>
-        where
-            Self: Sized,
-        {
-            Ok(DummyDevice::new(8))
-        }
-
-        fn num_gpios(&self) -> Result<u16> {
-            if self.num_gpios_result.is_err() {
-                return self.num_gpios_result;
-            }
-
-            Ok(self.ngpio)
-        }
-
-        fn gpio_name(&self, gpio: u16) -> Result<String> {
-            assert!((gpio as usize) < self.gpio_names.len());
-
-            if self.gpio_name_result.is_err() {
-                return self.gpio_name_result.clone();
-            }
-
-            Ok(self.gpio_names[gpio as usize].clone())
-        }
-
-        fn direction(&self, gpio: u16) -> Result<u8> {
-            if self.direction_result.is_err() {
-                return self.direction_result;
-            }
-
-            Ok(self.state.read().unwrap()[gpio as usize].dir)
-        }
-
-        fn set_direction(&self, gpio: u16, dir: u8, value: u32) -> Result<()> {
-            if self.set_direction_result.is_err() {
-                return self.set_direction_result;
-            }
-
-            self.state.write().unwrap()[gpio as usize].dir = dir;
-            self.state.write().unwrap()[gpio as usize].val = match dir {
-                VIRTIO_GPIO_DIRECTION_NONE => None,
-                VIRTIO_GPIO_DIRECTION_IN => self.state.read().unwrap()[gpio as usize].val,
-                VIRTIO_GPIO_DIRECTION_OUT => Some(value as u16),
-
-                _ => return Err(Error::GpioDirectionInvalid(dir as u32)),
-            };
-
-            Ok(())
-        }
-
-        fn value(&self, gpio: u16) -> Result<u8> {
-            if self.value_result.is_err() {
-                return self.value_result;
-            }
-
-            if let Some(val) = self.state.read().unwrap()[gpio as usize].val {
-                Ok(val as u8)
-            } else {
-                Err(Error::GpioCurrentValueInvalid)
-            }
-        }
-
-        fn set_value(&self, gpio: u16, value: u32) -> Result<()> {
-            if self.set_value_result.is_err() {
-                return self.set_value_result;
-            }
-
-            self.state.write().unwrap()[gpio as usize].val = Some(value as u16);
-            Ok(())
-        }
-
-        fn set_irq_type(&self, _gpio: u16, _value: u16) -> Result<()> {
-            if self.set_irq_type_result.is_err() {
-                return self.set_irq_type_result;
-            }
-
-            Ok(())
-        }
-
-        fn wait_for_interrupt(&self, _gpio: u16) -> Result<bool> {
-            if self.wait_for_irq_result.is_err() {
-                return self.wait_for_irq_result;
-            }
-
-            Ok(true)
-        }
-    }
+    use crate::mock_gpio::MockGpioDevice;
 
     #[test]
     fn test_verify_gpio_controller() {
@@ -700,7 +548,7 @@ pub(crate) mod tests {
         // Controller adds '\0' for each line.
         let names_size = size_of_val(&gpio_names) + gpio_names.len();
 
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
         device.gpio_names.clear();
         device.gpio_names.append(&mut gpio_names.clone());
         let controller = GpioController::new(device).unwrap();
@@ -754,7 +602,7 @@ pub(crate) mod tests {
     #[test]
     fn test_verify_gpio_operation() {
         const NGPIO: u16 = 256;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
 
         for gpio in 0..NGPIO {
@@ -880,19 +728,19 @@ pub(crate) mod tests {
         const NGPIO: u16 = 256;
         // Get num lines failure
         let error = Error::GpioOperationFailed("get-num-lines");
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
         device.num_gpios_result = Err(error);
         assert_eq!(GpioController::new(device).unwrap_err(), error);
 
         // Get line name failure
         let error = Error::GpioOperationFailed("get-line-name");
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
         device.gpio_name_result = Err(error);
         assert_eq!(GpioController::new(device).unwrap_err(), error);
 
         // Get direction failure
         let error = Error::GpioOperationFailed("get-direction");
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
         device.direction_result = Err(error);
         assert_eq!(GpioController::new(device).unwrap_err(), error);
     }
@@ -900,7 +748,7 @@ pub(crate) mod tests {
     #[test]
     fn test_gpio_set_direction_failure() {
         const NGPIO: u16 = 256;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
 
         for gpio in 0..NGPIO {
@@ -930,7 +778,7 @@ pub(crate) mod tests {
     #[test]
     fn test_gpio_set_value_failure() {
         const NGPIO: u16 = 256;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
 
         for gpio in 0..NGPIO {
@@ -948,7 +796,7 @@ pub(crate) mod tests {
     #[test]
     fn test_gpio_set_irq_type_failure() {
         const NGPIO: u16 = 256;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
 
         for gpio in 0..NGPIO {
@@ -1002,7 +850,7 @@ pub(crate) mod tests {
     fn test_gpio_wait_for_interrupt_failure() {
         const NGPIO: u16 = 256;
         let err = Error::GpioIrqTypeInvalid(0);
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
 
         device.wait_for_irq_result = Err(err);
 
@@ -1016,7 +864,7 @@ pub(crate) mod tests {
     #[test]
     fn test_gpio_operation_failure() {
         const NGPIO: u16 = 256;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
 
         for gpio in 0..NGPIO {

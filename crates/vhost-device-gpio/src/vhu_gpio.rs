@@ -30,7 +30,8 @@ use vm_memory::{
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-use crate::gpio::{GpioController, GpioDevice, VIRTIO_GPIO_IRQ_TYPE_NONE};
+use crate::gpio::{GpioController, GpioDevice};
+use crate::virtio_gpio::VIRTIO_GPIO_IRQ_TYPE_NONE;
 
 /// Possible values of the status field
 const VIRTIO_GPIO_STATUS_OK: u8 = 0x0;
@@ -505,9 +506,10 @@ mod tests {
 
     use super::Error;
     use super::*;
-    use crate::gpio::tests::DummyDevice;
     use crate::gpio::Error as GpioError;
     use crate::gpio::*;
+    use crate::mock_gpio::MockGpioDevice;
+    use crate::virtio_gpio::*;
 
     // Prepares a single chain of descriptors for request queue
     fn prepare_desc_chain<R: ByteValued>(
@@ -629,7 +631,7 @@ mod tests {
     }
 
     // Validate descriptor chains after processing them, checks pass/failure of
-    // operation and the value of the buffers updated by the `DummyDevice`.
+    // operation and the value of the buffers updated by the `MockGpioDevice`.
     fn validate_desc_chains(
         desc_chains: Vec<GpioDescriptorChain>,
         status: u8,
@@ -656,7 +658,7 @@ mod tests {
     fn test_gpio_process_requests_success() {
         const NGPIO: u16 = 256;
         const GPIO: u16 = 5;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
         let backend = VhostUserGpioBackend::new(controller).unwrap();
         let mem = GuestMemoryAtomic::new(
@@ -707,7 +709,7 @@ mod tests {
     fn test_gpio_process_requests_failure() {
         const NGPIO: u16 = 256;
         const GPIO: u16 = 5;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
         let backend = VhostUserGpioBackend::new(controller).unwrap();
         let mem = GuestMemoryAtomic::new(
@@ -808,7 +810,7 @@ mod tests {
     fn test_gpio_process_events_success() {
         const NGPIO: u16 = 256;
         const GPIO: u16 = 5;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
         let mut backend = VhostUserGpioBackend::new(controller).unwrap();
         let mem = GuestMemoryAtomic::new(
@@ -862,7 +864,7 @@ mod tests {
     fn test_gpio_process_events_multi_success() {
         const NGPIO: u16 = 256;
         const GPIO: u16 = 5;
-        let device = DummyDevice::new(NGPIO);
+        let device = MockGpioDevice::new(NGPIO);
         let controller = GpioController::new(device).unwrap();
         let mut backend = VhostUserGpioBackend::new(controller).unwrap();
         let mem = GuestMemoryAtomic::new(
@@ -951,7 +953,7 @@ mod tests {
     fn test_gpio_process_events_failure() {
         const NGPIO: u16 = 256;
         let err = GpioError::GpioIrqTypeInvalid(0);
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
 
         // This will make process-request fail later with
         // VIRTIO_GPIO_IRQ_STATUS_INVALID error.
@@ -1104,7 +1106,7 @@ mod tests {
         // Controller adds '\0' for each line.
         let names_size = std::mem::size_of_val(&gpio_names) + gpio_names.len();
 
-        let mut device = DummyDevice::new(NGPIO);
+        let mut device = MockGpioDevice::new(NGPIO);
         device.gpio_names.clear();
         device.gpio_names.append(&mut gpio_names);
         let controller = GpioController::new(device).unwrap();

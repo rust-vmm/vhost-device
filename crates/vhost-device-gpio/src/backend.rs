@@ -210,7 +210,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::gpio::tests::DummyDevice;
+    use crate::mock_gpio::MockGpioDevice;
 
     impl DeviceConfig {
         pub fn new_with(devices: Vec<u32>) -> Self {
@@ -294,7 +294,7 @@ mod tests {
         let cmd_args = get_cmd_args(socket_name, "1:4:3:5", 4);
 
         assert_matches!(
-            start_backend::<DummyDevice>(cmd_args).unwrap_err(),
+            start_backend::<MockGpioDevice>(cmd_args).unwrap_err(),
             Error::FailedJoiningThreads
         );
     }

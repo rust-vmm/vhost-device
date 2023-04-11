@@ -8,10 +8,7 @@ mod vhu_vsock;
 mod vhu_vsock_thread;
 mod vsock_conn;
 
-use std::{
-    convert::TryFrom,
-    sync::{Arc, RwLock},
-};
+use std::{convert::TryFrom, sync::Arc};
 
 use clap::Parser;
 use log::{info, warn};
@@ -52,9 +49,7 @@ impl TryFrom<VsockArgs> for VsockConfig {
 /// vhost-user-vsock backend server.
 pub(crate) fn start_backend_server(config: VsockConfig) {
     loop {
-        let backend = Arc::new(RwLock::new(
-            VhostUserVsockBackend::new(config.clone()).unwrap(),
-        ));
+        let backend = Arc::new(VhostUserVsockBackend::new(config.clone()).unwrap());
 
         let listener = Listener::new(config.get_socket_path(), true).unwrap();
 
@@ -67,7 +62,7 @@ pub(crate) fn start_backend_server(config: VsockConfig) {
 
         let mut vring_workers = daemon.get_epoll_handlers();
 
-        for thread in backend.read().unwrap().threads.iter() {
+        for thread in backend.threads.iter() {
             thread
                 .lock()
                 .unwrap()
@@ -89,7 +84,7 @@ pub(crate) fn start_backend_server(config: VsockConfig) {
         }
 
         // No matter the result, we need to shut down the worker thread.
-        backend.read().unwrap().exit_event.write(1).unwrap();
+        backend.exit_event.write(1).unwrap();
     }
 }
 
@@ -142,7 +137,7 @@ mod tests {
             VSOCK_SOCKET_PATH.to_string(),
         );
 
-        let backend = Arc::new(RwLock::new(VhostUserVsockBackend::new(config).unwrap()));
+        let backend = Arc::new(VhostUserVsockBackend::new(config).unwrap());
 
         let daemon = VhostUserDaemon::new(
             String::from("vhost-user-vsock"),
@@ -154,8 +149,8 @@ mod tests {
         let vring_workers = daemon.get_epoll_handlers();
 
         // VhostUserVsockBackend support a single thread that handles the TX and RX queues
-        assert_eq!(backend.read().unwrap().threads.len(), 1);
+        assert_eq!(backend.threads.len(), 1);
 
-        assert_eq!(vring_workers.len(), backend.read().unwrap().threads.len());
+        assert_eq!(vring_workers.len(), backend.threads.len());
     }
 }

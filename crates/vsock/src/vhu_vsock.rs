@@ -8,7 +8,7 @@ use std::{
 
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackendMut, VringRwLock};
+use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
     virtio_config::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_config::VIRTIO_F_VERSION_1,
     virtio_ring::VIRTIO_RING_F_EVENT_IDX,
@@ -226,7 +226,7 @@ impl VhostUserVsockBackend {
     }
 }
 
-impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
+impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -246,13 +246,13 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
         VhostUserProtocolFeatures::CONFIG
     }
 
-    fn set_event_idx(&mut self, enabled: bool) {
+    fn set_event_idx(&self, enabled: bool) {
         for thread in self.threads.iter() {
             thread.lock().unwrap().event_idx = enabled;
         }
     }
 
-    fn update_memory(&mut self, atomic_mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
+    fn update_memory(&self, atomic_mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
         for thread in self.threads.iter() {
             thread.lock().unwrap().mem = Some(atomic_mem.clone());
         }
@@ -260,7 +260,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserVsockBackend {
     }
 
     fn handle_event(
-        &mut self,
+        &self,
         device_event: u16,
         evset: EventSet,
         vrings: &[VringRwLock],
@@ -344,7 +344,7 @@ mod tests {
         let backend = VhostUserVsockBackend::new(config);
 
         assert!(backend.is_ok());
-        let mut backend = backend.unwrap();
+        let backend = backend.unwrap();
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);
         assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
@@ -422,7 +422,7 @@ mod tests {
             VSOCK_SOCKET_PATH.to_string(),
         );
 
-        let mut backend = VhostUserVsockBackend::new(config).unwrap();
+        let backend = VhostUserVsockBackend::new(config).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );

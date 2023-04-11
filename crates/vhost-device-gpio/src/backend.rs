@@ -20,6 +20,9 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 use crate::gpio::{GpioController, GpioDevice, PhysDevice};
 use crate::vhu_gpio::VhostUserGpioBackend;
 
+#[cfg(any(test, feature = "mock_gpio"))]
+use crate::mock_gpio::MockGpioDevice;
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, ThisError)]
@@ -43,12 +46,15 @@ pub(crate) enum Error {
     CouldNotCreateBackend(crate::vhu_gpio::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
-    #[error("Unimplemented")]
-    DeviceUnimplemented,
 }
 
+const GPIO_AFTER_HELP: &str = "Each device number here will be used to \
+access the corresponding /dev/gpiochipX or simulate a GPIO device \
+with N pins (when feature enabled). \
+Example, \"-c 4 -l 3:s4:6:s1\"\n";
+
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version, about, long_about = None, after_help = GPIO_AFTER_HELP)]
 struct GpioArgs {
     /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
     #[clap(short, long)]
@@ -59,24 +65,26 @@ struct GpioArgs {
     socket_count: usize,
 
     /// List of GPIO devices, one for each guest, in the format
-    /// <N1>[:<N2>]. The first entry is for Guest that connects to
-    /// socket 0, next one for socket 1, and so on. Each device number
-    /// here will be used to access the corresponding /dev/gpiochipX.
-    /// or simulate a GPIO device with N pins. Example, "-c 4 -l
-    /// 3:s4:6:s1"
+    /// [s]<N1>[:[s]<N2>].
     #[clap(short = 'l', long)]
     device_list: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum GpioDeviceType {
-    PhysicalDevice { id: u32 },
-    SimulatedDevice { num_gpios: u32 },
+    PhysicalDevice {
+        id: u32,
+    },
+    #[cfg(any(test, feature = "mock_gpio"))]
+    SimulatedDevice {
+        num_gpios: u32,
+    },
 }
 
 impl GpioDeviceType {
     fn new(cfg: &str) -> Result<Self> {
         match cfg.strip_prefix('s') {
+            #[cfg(any(test, feature = "mock_gpio"))]
             Some(num) => {
                 let num_gpios = num.parse::<u32>().map_err(Error::ParseFailure)?;
                 Ok(GpioDeviceType::SimulatedDevice { num_gpios })
@@ -104,10 +112,14 @@ impl DeviceConfig {
     }
 
     fn push(&mut self, device: GpioDeviceType) -> Result<()> {
-        if let GpioDeviceType::PhysicalDevice { id } = device {
-            if self.contains_device(device) {
-                return Err(Error::DeviceDuplicate(id));
+        match device {
+            GpioDeviceType::PhysicalDevice { id } => {
+                if self.contains_device(GpioDeviceType::PhysicalDevice { id }) {
+                    return Err(Error::DeviceDuplicate(id));
+                }
             }
+            #[cfg(any(test, feature = "mock_gpio"))]
+            GpioDeviceType::SimulatedDevice { num_gpios: _ } => {}
         }
 
         self.inner.push(device);
@@ -161,8 +173,37 @@ impl TryFrom<GpioArgs> for GpioConfiguration {
     }
 }
 
-fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Result<()> {
-    let config = GpioConfiguration::try_from(args).unwrap();
+fn start_device_backend<D: GpioDevice>(device: D, socket: String) {
+    let controller = GpioController::<D>::new(device).unwrap();
+    let backend = Arc::new(RwLock::new(VhostUserGpioBackend::new(controller).unwrap()));
+    let listener = Listener::new(socket, true).unwrap();
+
+    let mut daemon = VhostUserDaemon::new(
+        String::from("vhost-device-gpio-backend"),
+        backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .unwrap();
+
+    daemon.start(listener).unwrap();
+
+    match daemon.wait() {
+        Ok(()) => {
+            info!("Stopping cleanly.");
+        }
+        Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
+            info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
+        }
+        Err(e) => {
+            warn!("Error running daemon: {:?}", e);
+        }
+    }
+    // No matter the result, we need to shut down the worker thread.
+    backend.read().unwrap().exit_event.write(1).unwrap();
+}
+
+fn start_backend(args: GpioArgs) -> Result<()> {
+    let config = GpioConfiguration::try_from(args)?;
     let mut handles = Vec::new();
 
     for i in 0..config.socket_count {
@@ -178,47 +219,17 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
             // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
             // trouble to other threads/guests or the main() function and should be safe for the
             // daemon.
-            let controller = match cfg {
-                GpioDeviceType::PhysicalDevice { id } => match D::open(id) {
-                    Ok(device) => match GpioController::<D>::new(device) {
-                        Ok(controller) => controller,
-                        Err(error) => return Err(Error::CouldNotCreateGpioController(error)),
-                    },
-                    Err(error) => return Err(Error::CouldNotOpenDevice(error)),
-                },
-                _ => return Err(Error::DeviceUnimplemented),
+            match cfg {
+                GpioDeviceType::PhysicalDevice { id } => {
+                    let controller = PhysDevice::open(id).unwrap();
+                    start_device_backend(controller, socket.clone());
+                }
+                #[cfg(any(test, feature = "mock_gpio"))]
+                GpioDeviceType::SimulatedDevice { num_gpios } => {
+                    let controller = MockGpioDevice::open(num_gpios).unwrap();
+                    start_device_backend(controller, socket.clone());
+                }
             };
-
-            let backend = Arc::new(RwLock::new(
-                VhostUserGpioBackend::new(controller).map_err(Error::CouldNotCreateBackend)?,
-            ));
-            let listener = Listener::new(socket.clone(), true).unwrap();
-
-            let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-device-gpio-backend"),
-                backend.clone(),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .map_err(Error::CouldNotCreateDaemon)?;
-
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            backend.read().unwrap().exit_event.write(1).unwrap();
         });
 
         handles.push(handle);
@@ -234,8 +245,8 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
 pub(crate) fn gpio_init() {
     env_logger::init();
 
-    if let Err(e) = start_backend::<PhysDevice>(GpioArgs::parse()) {
-        error!("{e}");
+    if let Err(e) = start_backend(GpioArgs::parse()) {
+        error!("Fatal error starting backend: {e}");
         exit(1);
     }
 }
@@ -245,7 +256,6 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::mock_gpio::MockGpioDevice;
 
     impl DeviceConfig {
         pub fn new_with(devices: Vec<u32>) -> Self {
@@ -316,6 +326,10 @@ mod tests {
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::DeviceCountMismatch(5, 4)
         );
+
+        // Parse mixed device and simulated
+        let cmd_args = get_cmd_args(socket_name, "1:s4", 2);
+        assert_matches!(GpioConfiguration::try_from(cmd_args), Ok(_));
     }
 
     #[test]
@@ -337,13 +351,12 @@ mod tests {
     }
 
     #[test]
-    fn test_gpio_fail_listener() {
-        // This will fail the listeners and thread will panic.
+    fn test_gpio_fail_listener_mock() {
         let socket_name = "~/path/not/present/gpio";
-        let cmd_args = get_cmd_args(socket_name, "1:4:3:5", 4);
+        let cmd_args = get_cmd_args(socket_name, "s1:s4:s3:s5", 4);
 
         assert_matches!(
-            start_backend::<MockGpioDevice>(cmd_args).unwrap_err(),
+            start_backend(cmd_args).unwrap_err(),
             Error::FailedJoiningThreads
         );
     }

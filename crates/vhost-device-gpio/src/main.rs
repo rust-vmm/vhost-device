@@ -9,7 +9,7 @@
 mod backend;
 #[cfg(target_env = "gnu")]
 mod gpio;
-#[cfg(test)]
+#[cfg(all(target_env = "gnu", any(test, feature = "mock_gpio")))]
 mod mock_gpio;
 #[cfg(target_env = "gnu")]
 mod vhu_gpio;

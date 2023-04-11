@@ -13,6 +13,7 @@ edition = "2021"
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+mock_gpio = []
 
 [dependencies]
 clap = { version = "4.4",  features = ["derive"] }

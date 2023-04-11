@@ -51,11 +51,11 @@ impl MockGpioDevice {
 }
 
 impl GpioDevice for MockGpioDevice {
-    fn open(_device: u32) -> Result<Self>
+    fn open(ngpios: u32) -> Result<Self>
     where
         Self: Sized,
     {
-        Ok(MockGpioDevice::new(8))
+        Ok(MockGpioDevice::new(ngpios.try_into().unwrap()))
     }
 
     fn num_gpios(&self) -> Result<u16> {

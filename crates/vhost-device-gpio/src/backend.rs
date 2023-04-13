@@ -12,6 +12,7 @@ use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
 
 use clap::Parser;
+use env_logger::Env;
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
@@ -243,7 +244,8 @@ fn start_backend(args: GpioArgs) -> Result<()> {
 }
 
 pub(crate) fn gpio_init() {
-    env_logger::init();
+    let env = Env::default().filter_or("RUST_LOG", "info");
+    env_logger::init_from_env(env);
 
     if let Err(e) = start_backend(GpioArgs::parse()) {
         error!("Fatal error starting backend: {e}");

@@ -424,7 +424,7 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {

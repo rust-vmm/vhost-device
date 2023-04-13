@@ -5,6 +5,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use log::info;
 use std::sync::RwLock;
 
 use crate::gpio::{Error, GpioDevice, GpioState, Result};
@@ -90,6 +91,11 @@ impl GpioDevice for MockGpioDevice {
     }
 
     fn set_direction(&self, gpio: u16, dir: u8, value: u32) -> Result<()> {
+        info!(
+            "gpio {} set direction to {}",
+            self.gpio_names[gpio as usize], dir
+        );
+
         if self.set_direction_result.is_err() {
             return self.set_direction_result;
         }
@@ -119,6 +125,11 @@ impl GpioDevice for MockGpioDevice {
     }
 
     fn set_value(&self, gpio: u16, value: u32) -> Result<()> {
+        info!(
+            "gpio {} set value to {}",
+            self.gpio_names[gpio as usize], value
+        );
+
         if self.set_value_result.is_err() {
             return self.set_value_result;
         }
@@ -127,7 +138,12 @@ impl GpioDevice for MockGpioDevice {
         Ok(())
     }
 
-    fn set_irq_type(&self, _gpio: u16, _value: u16) -> Result<()> {
+    fn set_irq_type(&self, gpio: u16, value: u16) -> Result<()> {
+        info!(
+            "gpio {} set irq type to {}",
+            self.gpio_name(gpio).unwrap(),
+            value
+        );
         if self.set_irq_type_result.is_err() {
             return self.set_irq_type_result;
         }

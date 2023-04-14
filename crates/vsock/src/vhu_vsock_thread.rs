@@ -24,10 +24,7 @@ use vmm_sys_util::epoll::EventSet;
 use crate::{
     rxops::*,
     thread_backend::*,
-    vhu_vsock::{
-        ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, CONN_TX_BUF_SIZE,
-        VSOCK_HOST_CID,
-    },
+    vhu_vsock::{ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, VSOCK_HOST_CID},
     vsock_conn::*,
 };
 
@@ -56,11 +53,13 @@ pub(crate) struct VhostUserVsockThread {
     pool: ThreadPool,
     /// host side port on which application listens.
     local_port: Wrapping<u32>,
+    /// The tx buffer size
+    tx_buffer_size: u32,
 }
 
 impl VhostUserVsockThread {
     /// Create a new instance of VhostUserVsockThread.
-    pub fn new(uds_path: String, guest_cid: u64) -> Result<Self> {
+    pub fn new(uds_path: String, guest_cid: u64, tx_buffer_size: u32) -> Result<Self> {
         // TODO: better error handling, maybe add a param to force the unlink
         let _ = std::fs::remove_file(uds_path.clone());
         let host_sock = UnixListener::bind(&uds_path)
@@ -81,13 +80,14 @@ impl VhostUserVsockThread {
             host_listener: host_sock,
             vring_worker: None,
             epoll_file,
-            thread_backend: VsockThreadBackend::new(uds_path, epoll_fd),
+            thread_backend: VsockThreadBackend::new(uds_path, epoll_fd, tx_buffer_size),
             guest_cid,
             pool: ThreadPoolBuilder::new()
                 .pool_size(1)
                 .create()
                 .map_err(Error::CreateThreadPool)?,
             local_port: Wrapping(0),
+            tx_buffer_size,
         };
 
         VhostUserVsockThread::epoll_register(epoll_fd, host_raw_fd, epoll::Events::EPOLLIN)?;
@@ -246,6 +246,7 @@ impl VhostUserVsockThread {
                     self.guest_cid,
                     peer_port,
                     self.get_epoll_fd(),
+                    self.tx_buffer_size,
                 );
                 new_conn.rx_queue.enqueue(RxOps::Request);
                 new_conn.set_peer_port(peer_port);
@@ -404,7 +405,7 @@ impl VhostUserVsockThread {
             let used_len = match VsockPacket::from_rx_virtq_chain(
                 mem.deref(),
                 &mut avail_desc,
-                CONN_TX_BUF_SIZE,
+                self.tx_buffer_size,
             ) {
                 Ok(mut pkt) => {
                     if self.thread_backend.recv_pkt(&mut pkt).is_ok() {
@@ -502,7 +503,7 @@ impl VhostUserVsockThread {
             let pkt = match VsockPacket::from_tx_virtq_chain(
                 mem.deref(),
                 &mut avail_desc,
-                CONN_TX_BUF_SIZE,
+                self.tx_buffer_size,
             ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
@@ -588,6 +589,8 @@ mod tests {
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
 
+    const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+
     impl VhostUserVsockThread {
         fn get_epoll_file(&self) -> &File {
             &self.epoll_file
@@ -597,7 +600,8 @@ mod tests {
     #[test]
     #[serial]
     fn test_vsock_thread() {
-        let t = VhostUserVsockThread::new("test_vsock_thread.vsock".to_string(), 3);
+        let t =
+            VhostUserVsockThread::new("test_vsock_thread.vsock".to_string(), 3, CONN_TX_BUF_SIZE);
         assert!(t.is_ok());
 
         let mut t = t.unwrap();
@@ -652,11 +656,16 @@ mod tests {
     #[test]
     #[serial]
     fn test_vsock_thread_failures() {
-        let t = VhostUserVsockThread::new("/sys/not_allowed.vsock".to_string(), 3);
+        let t =
+            VhostUserVsockThread::new("/sys/not_allowed.vsock".to_string(), 3, CONN_TX_BUF_SIZE);
         assert!(t.is_err());
 
-        let mut t =
-            VhostUserVsockThread::new("test_vsock_thread_failures.vsock".to_string(), 3).unwrap();
+        let mut t = VhostUserVsockThread::new(
+            "test_vsock_thread_failures.vsock".to_string(),
+            3,
+            CONN_TX_BUF_SIZE,
+        )
+        .unwrap();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());

@@ -15,7 +15,7 @@ use crate::{
     rxqueue::*,
     txbuf::*,
     vhu_vsock::{
-        Error, Result, CONN_TX_BUF_SIZE, VSOCK_FLAGS_SHUTDOWN_RCV, VSOCK_FLAGS_SHUTDOWN_SEND,
+        Error, Result, VSOCK_FLAGS_SHUTDOWN_RCV, VSOCK_FLAGS_SHUTDOWN_SEND,
         VSOCK_OP_CREDIT_REQUEST, VSOCK_OP_CREDIT_UPDATE, VSOCK_OP_REQUEST, VSOCK_OP_RESPONSE,
         VSOCK_OP_RST, VSOCK_OP_RW, VSOCK_OP_SHUTDOWN, VSOCK_TYPE_STREAM,
     },
@@ -64,6 +64,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
         guest_cid: u64,
         guest_port: u32,
         epoll_fd: RawFd,
+        tx_buffer_size: u32,
     ) -> Self {
         Self {
             stream,
@@ -79,12 +80,13 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             peer_fwd_cnt: Wrapping(0),
             rx_cnt: Wrapping(0),
             epoll_fd,
-            tx_buf: LocalTxBuf::new(),
+            tx_buf: LocalTxBuf::new(tx_buffer_size),
         }
     }
 
     /// Create a new vsock connection object for connections initiated by
     /// an application running in the guest.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_peer_init(
         stream: S,
         local_cid: u64,
@@ -93,6 +95,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
         guest_port: u32,
         epoll_fd: RawFd,
         peer_buf_alloc: u32,
+        tx_buffer_size: u32,
     ) -> Self {
         let mut rx_queue = RxQueue::new();
         rx_queue.enqueue(RxOps::Response);
@@ -110,7 +113,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             peer_fwd_cnt: Wrapping(0),
             rx_cnt: Wrapping(0),
             epoll_fd,
-            tx_buf: LocalTxBuf::new(),
+            tx_buf: LocalTxBuf::new(tx_buffer_size),
         }
     }
 
@@ -329,7 +332,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             .set_src_port(self.local_port)
             .set_dst_port(self.peer_port)
             .set_type(VSOCK_TYPE_STREAM)
-            .set_buf_alloc(CONN_TX_BUF_SIZE)
+            .set_buf_alloc(self.tx_buf.get_buf_size())
             .set_fwd_cnt(self.fwd_cnt.0)
     }
 
@@ -361,6 +364,8 @@ mod tests {
         Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard,
         GuestMemoryMmap,
     };
+
+    const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
     struct HeadParams {
         head_len: usize,
@@ -490,8 +495,15 @@ mod tests {
     fn test_vsock_conn_init() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut conn_local =
-            VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
+        let mut conn_local = VsockConnection::new_local_init(
+            dummy_file,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
 
         assert!(!conn_local.connect);
         assert_eq!(conn_local.peer_port, 5001);
@@ -506,8 +518,16 @@ mod tests {
 
         // New connection initiated by the peer/guest
         let dummy_file = VsockDummySocket::new();
-        let mut conn_peer =
-            VsockConnection::new_peer_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1, 65536);
+        let mut conn_peer = VsockConnection::new_peer_init(
+            dummy_file,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            65536,
+            CONN_TX_BUF_SIZE,
+        );
 
         assert!(!conn_peer.connect);
         assert_eq!(conn_peer.peer_port, 5001);
@@ -524,8 +544,15 @@ mod tests {
     fn test_vsock_conn_credit() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut conn_local =
-            VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
+        let mut conn_local = VsockConnection::new_local_init(
+            dummy_file,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
 
         assert_eq!(conn_local.peer_avail_credit(), 0);
         assert!(conn_local.need_credit_update_from_peer());
@@ -551,8 +578,15 @@ mod tests {
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let conn_local =
-            VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
+        let conn_local = VsockConnection::new_local_init(
+            dummy_file,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 2, 10);
@@ -581,8 +615,15 @@ mod tests {
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut conn_local =
-            VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
+        let mut conn_local = VsockConnection::new_local_init(
+            dummy_file,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
@@ -671,8 +712,15 @@ mod tests {
 
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
-        let mut conn_local =
-            VsockConnection::new_local_init(dummy_file, VSOCK_HOST_CID, 5000, 3, 5001, -1);
+        let mut conn_local = VsockConnection::new_local_init(
+            dummy_file,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
 
         // write only descriptor chain
         let (mem, mut descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);

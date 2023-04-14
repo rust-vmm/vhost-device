@@ -37,11 +37,12 @@ pub(crate) struct VsockThreadBackend {
     epoll_fd: i32,
     /// Set of allocated local ports.
     pub local_port_set: HashSet<u32>,
+    tx_buffer_size: u32,
 }
 
 impl VsockThreadBackend {
     /// New instance of VsockThreadBackend.
-    pub fn new(host_socket_path: String, epoll_fd: i32) -> Self {
+    pub fn new(host_socket_path: String, epoll_fd: i32, tx_buffer_size: u32) -> Self {
         Self {
             listener_map: HashMap::new(),
             conn_map: HashMap::new(),
@@ -52,6 +53,7 @@ impl VsockThreadBackend {
             host_socket_path,
             epoll_fd,
             local_port_set: HashSet::new(),
+            tx_buffer_size,
         }
     }
 
@@ -216,6 +218,7 @@ impl VsockThreadBackend {
             pkt.src_port(),
             self.epoll_fd,
             pkt.buf_alloc(),
+            self.tx_buffer_size,
         );
 
         self.conn_map
@@ -254,6 +257,7 @@ mod tests {
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 
     const DATA_LEN: usize = 16;
+    const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
     #[test]
     #[serial]
@@ -266,7 +270,8 @@ mod tests {
         let _listener = UnixListener::bind(VSOCK_PEER_PATH).unwrap();
 
         let epoll_fd = epoll::create(false).unwrap();
-        let mut vtp = VsockThreadBackend::new(VSOCK_SOCKET_PATH.to_string(), epoll_fd);
+        let mut vtp =
+            VsockThreadBackend::new(VSOCK_SOCKET_PATH.to_string(), epoll_fd, CONN_TX_BUF_SIZE);
 
         assert!(!vtp.pending_rx());
 

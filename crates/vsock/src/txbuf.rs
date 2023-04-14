@@ -4,7 +4,7 @@ use std::{io::Write, num::Wrapping};
 
 use vm_memory::{bitmap::BitmapSlice, VolatileSlice};
 
-use crate::vhu_vsock::{Error, Result, CONN_TX_BUF_SIZE};
+use crate::vhu_vsock::{Error, Result};
 
 #[derive(Debug)]
 pub(crate) struct LocalTxBuf {
@@ -18,12 +18,17 @@ pub(crate) struct LocalTxBuf {
 
 impl LocalTxBuf {
     /// Create a new instance of LocalTxBuf.
-    pub fn new() -> Self {
+    pub fn new(buf_size: u32) -> Self {
         Self {
-            buf: vec![0; CONN_TX_BUF_SIZE as usize],
+            buf: vec![0; buf_size as usize],
             head: Wrapping(0),
             tail: Wrapping(0),
         }
+    }
+
+    /// Get the buffer size
+    pub fn get_buf_size(&self) -> u32 {
+        self.buf.len() as u32
     }
 
     /// Check if the buf is empty.
@@ -34,16 +39,16 @@ impl LocalTxBuf {
     /// Add new data to the tx buffer, push all or none.
     /// Returns LocalTxBufFull error if space not sufficient.
     pub fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {
-        if CONN_TX_BUF_SIZE as usize - self.len() < data_buf.len() {
+        if self.get_buf_size() as usize - self.len() < data_buf.len() {
             // Tx buffer is full
             return Err(Error::LocalTxBufFull);
         }
 
         // Get index into buffer at which data can be inserted
-        let tail_idx = self.tail.0 as usize % CONN_TX_BUF_SIZE as usize;
+        let tail_idx = self.tail.0 as usize % self.get_buf_size() as usize;
 
         // Check if we can fit the data buffer between head and end of buffer
-        let len = std::cmp::min(CONN_TX_BUF_SIZE as usize - tail_idx, data_buf.len());
+        let len = std::cmp::min(self.get_buf_size() as usize - tail_idx, data_buf.len());
         let txbuf = &mut self.buf[tail_idx..tail_idx + len];
         data_buf.copy_to(txbuf);
 
@@ -67,10 +72,10 @@ impl LocalTxBuf {
         }
 
         // Get index into buffer from which data can be read
-        let head_idx = self.head.0 as usize % CONN_TX_BUF_SIZE as usize;
+        let head_idx = self.head.0 as usize % self.get_buf_size() as usize;
 
         // First write from head to end of buffer
-        let len = std::cmp::min(CONN_TX_BUF_SIZE as usize - head_idx, self.len());
+        let len = std::cmp::min(self.get_buf_size() as usize - head_idx, self.len());
         let written = stream
             .write(&self.buf[head_idx..(head_idx + len)])
             .map_err(Error::LocalTxBufFlush)?;
@@ -97,9 +102,11 @@ impl LocalTxBuf {
 mod tests {
     use super::*;
 
+    const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+
     #[test]
     fn test_txbuf_len() {
-        let mut loc_tx_buf = LocalTxBuf::new();
+        let mut loc_tx_buf = LocalTxBuf::new(CONN_TX_BUF_SIZE);
 
         // Zero length tx buf
         assert_eq!(loc_tx_buf.len(), 0);
@@ -118,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_txbuf_is_empty() {
-        let mut loc_tx_buf = LocalTxBuf::new();
+        let mut loc_tx_buf = LocalTxBuf::new(CONN_TX_BUF_SIZE);
 
         // empty tx buffer
         assert!(loc_tx_buf.is_empty());
@@ -130,7 +137,7 @@ mod tests {
 
     #[test]
     fn test_txbuf_push() {
-        let mut loc_tx_buf = LocalTxBuf::new();
+        let mut loc_tx_buf = LocalTxBuf::new(CONN_TX_BUF_SIZE);
         let mut buf = [0; CONN_TX_BUF_SIZE as usize];
         // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
@@ -168,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_txbuf_flush_to() {
-        let mut loc_tx_buf = LocalTxBuf::new();
+        let mut loc_tx_buf = LocalTxBuf::new(CONN_TX_BUF_SIZE);
 
         // data to be flushed
         let mut buf = vec![1; CONN_TX_BUF_SIZE as usize];

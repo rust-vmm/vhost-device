@@ -35,6 +35,10 @@ struct VsockArgs {
     /// Unix socket to which a host-side application connects to.
     #[clap(long)]
     uds_path: String,
+
+    /// The size of the buffer used for the TX virtqueue
+    #[clap(long, default_value_t = 64 * 1024)]
+    tx_buffer_size: u32,
 }
 
 impl TryFrom<VsockArgs> for VsockConfig {
@@ -44,7 +48,12 @@ impl TryFrom<VsockArgs> for VsockConfig {
         let socket = cmd_args.socket.trim().to_string();
         let uds_path = cmd_args.uds_path.trim().to_string();
 
-        Ok(VsockConfig::new(cmd_args.guest_cid, socket, uds_path))
+        Ok(VsockConfig::new(
+            cmd_args.guest_cid,
+            socket,
+            uds_path,
+            cmd_args.tx_buffer_size,
+        ))
     }
 }
 
@@ -106,11 +115,12 @@ mod tests {
     use serial_test::serial;
 
     impl VsockArgs {
-        fn from_args(guest_cid: u64, socket: &str, uds_path: &str) -> Self {
+        fn from_args(guest_cid: u64, socket: &str, uds_path: &str, tx_buffer_size: u32) -> Self {
             VsockArgs {
                 guest_cid,
                 socket: socket.to_string(),
                 uds_path: uds_path.to_string(),
+                tx_buffer_size,
             }
         }
     }
@@ -118,7 +128,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_vsock_config_setup() {
-        let args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock");
+        let args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock", 64 * 1024);
 
         let config = VsockConfig::try_from(args);
         assert!(config.is_ok());
@@ -127,6 +137,7 @@ mod tests {
         assert_eq!(config.get_guest_cid(), 3);
         assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
         assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
+        assert_eq!(config.get_tx_buffer_size(), 64 * 1024);
     }
 
     #[test]
@@ -135,11 +146,13 @@ mod tests {
         const CID: u64 = 3;
         const VHOST_SOCKET_PATH: &str = "test_vsock_server.socket";
         const VSOCK_SOCKET_PATH: &str = "test_vsock_server.vsock";
+        const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
         let config = VsockConfig::new(
             CID,
             VHOST_SOCKET_PATH.to_string(),
             VSOCK_SOCKET_PATH.to_string(),
+            CONN_TX_BUF_SIZE,
         );
 
         let backend = Arc::new(RwLock::new(VhostUserVsockBackend::new(config).unwrap()));

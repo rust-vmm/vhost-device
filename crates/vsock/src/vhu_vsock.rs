@@ -34,10 +34,6 @@ const EVT_QUEUE_EVENT: u16 = 2;
 /// Notification coming from the backend.
 pub(crate) const BACKEND_EVENT: u16 = 3;
 
-/// Vsock connection TX buffer capacity
-/// TODO: Make this value configurable
-pub(crate) const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
-
 /// CID of the host
 pub(crate) const VSOCK_HOST_CID: u64 = 2;
 
@@ -141,16 +137,18 @@ pub(crate) struct VsockConfig {
     guest_cid: u64,
     socket: String,
     uds_path: String,
+    tx_buffer_size: u32,
 }
 
 impl VsockConfig {
     /// Create a new instance of the VsockConfig struct, containing the
     /// parameters to be fed into the vsock-backend server.
-    pub fn new(guest_cid: u64, socket: String, uds_path: String) -> Self {
+    pub fn new(guest_cid: u64, socket: String, uds_path: String, tx_buffer_size: u32) -> Self {
         Self {
             guest_cid,
             socket,
             uds_path,
+            tx_buffer_size,
         }
     }
 
@@ -169,6 +167,10 @@ impl VsockConfig {
     /// requests from the guest.
     pub fn get_socket_path(&self) -> String {
         String::from(&self.socket)
+    }
+
+    pub fn get_tx_buffer_size(&self) -> u32 {
+        self.tx_buffer_size
     }
 }
 
@@ -212,6 +214,7 @@ impl VhostUserVsockBackend {
         let thread = Mutex::new(VhostUserVsockThread::new(
             config.get_uds_path(),
             config.get_guest_cid(),
+            config.get_tx_buffer_size(),
         )?);
         let queues_per_thread = vec![QUEUE_MASK];
 
@@ -328,6 +331,8 @@ mod tests {
     use vhost_user_backend::VringT;
     use vm_memory::GuestAddress;
 
+    const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+
     #[test]
     #[serial]
     fn test_vsock_backend() {
@@ -339,6 +344,7 @@ mod tests {
             CID,
             VHOST_SOCKET_PATH.to_string(),
             VSOCK_SOCKET_PATH.to_string(),
+            CONN_TX_BUF_SIZE,
         );
 
         let backend = VhostUserVsockBackend::new(config);
@@ -411,6 +417,7 @@ mod tests {
             CID,
             "/sys/not_allowed.socket".to_string(),
             "/sys/not_allowed.vsock".to_string(),
+            CONN_TX_BUF_SIZE,
         );
 
         let backend = VhostUserVsockBackend::new(config);
@@ -420,6 +427,7 @@ mod tests {
             CID,
             VHOST_SOCKET_PATH.to_string(),
             VSOCK_SOCKET_PATH.to_string(),
+            CONN_TX_BUF_SIZE,
         );
 
         let backend = VhostUserVsockBackend::new(config).unwrap();

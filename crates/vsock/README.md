@@ -43,6 +43,7 @@ Run the vhost-user-vsock device:
 vhost-user-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>
   --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>
+  [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
 ```
 
 Run VMM (e.g. QEMU):
@@ -60,6 +61,10 @@ qemu-system-x86_64 \
 
 ```sh
 shell1$ vhost-user-vsock --guest-cid=4 --uds-path=/tmp/vm4.vsock --socket=/tmp/vhost4.socket
+```
+or if you want to configure the TX buffer size
+```sh
+shell1$ vhost-user-vsock --guest-cid=4 --uds-path=/tmp/vm4.vsock --socket=/tmp/vhost4.socket --tx-buffer-size=65536
 ```
 
 ```sh

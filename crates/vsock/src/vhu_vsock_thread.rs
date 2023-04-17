@@ -10,7 +10,7 @@ use std::{
         net::{UnixListener, UnixStream},
         prelude::{AsRawFd, FromRawFd, RawFd},
     },
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use futures::executor::{ThreadPool, ThreadPoolBuilder};
@@ -28,7 +28,7 @@ use crate::{
     vsock_conn::*,
 };
 
-type ArcVhostBknd = Arc<RwLock<VhostUserVsockBackend>>;
+type ArcVhostBknd = Arc<VhostUserVsockBackend>;
 
 pub(crate) struct VhostUserVsockThread {
     /// Guest memory map.

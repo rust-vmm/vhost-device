@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::convert::TryFrom;
+use core::slice;
+use std::convert::{TryFrom, TryInto};
 use std::io::{self, ErrorKind};
+use std::mem;
 
 use log::{debug, error, info, warn};
 use vhost::vhost_user::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
+use virtio_bindings::virtio_scsi::{virtio_scsi_config, virtio_scsi_event};
 use virtio_bindings::{
     virtio_config::VIRTIO_F_VERSION_1,
     virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
@@ -19,6 +22,7 @@ use vmm_sys_util::{
 };
 
 use crate::scsi::Target;
+use crate::virtio::CDB_SIZE;
 use crate::{
     scsi::{self, CmdError, TaskAttr},
     virtio::{self, Request, RequestParseError, Response, ResponseCode, VirtioScsiLun, SENSE_SIZE},
@@ -211,7 +215,7 @@ impl VhostUserBackendMut<VringRwLock> for VhostUserScsiBackend {
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ
+        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
@@ -267,9 +271,38 @@ impl VhostUserBackendMut<VringRwLock> for VhostUserScsiBackend {
         Ok(false)
     }
 
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        // QEMU handles config space itself
-        panic!("Access to configuration space is not supported.");
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        let config = virtio_scsi_config {
+            num_queues: 1,
+            seg_max: 128 - 2,
+            max_sectors: 0xFFFF,
+            cmd_per_lun: 128,
+            event_info_size: mem::size_of::<virtio_scsi_event>()
+                .try_into()
+                .expect("event info size should fit 32bit"),
+            sense_size: SENSE_SIZE.try_into().expect("SENSE_SIZE should fit 32bit"),
+            cdb_size: CDB_SIZE.try_into().expect("CDB_SIZE should fit 32bit"),
+            max_channel: 0,
+            max_target: 255,
+            max_lun: u32::from(!u16::from(VirtioScsiLun::ADDRESS_METHOD_PATTERN) << 8 | 0xff),
+        };
+
+        // SAFETY:
+        // Pointer is aligned (points to start of struct), valid and we only
+        // access up to the size of the struct.
+        let config_slice = unsafe {
+            slice::from_raw_parts(
+                &config as *const virtio_scsi_config as *const u8,
+                mem::size_of::<virtio_scsi_config>(),
+            )
+        };
+
+        config_slice
+            .iter()
+            .skip(offset as usize)
+            .take(size as usize)
+            .cloned()
+            .collect()
     }
 
     fn set_config(&mut self, _offset: u32, _buf: &[u8]) -> std::result::Result<(), std::io::Error> {
@@ -294,7 +327,8 @@ mod tests {
     use virtio_bindings::{
         virtio_ring::VRING_DESC_F_WRITE,
         virtio_scsi::{
-            virtio_scsi_cmd_req, VIRTIO_SCSI_S_BAD_TARGET, VIRTIO_SCSI_S_FAILURE, VIRTIO_SCSI_S_OK,
+            virtio_scsi_cmd_req, virtio_scsi_config, VIRTIO_SCSI_S_BAD_TARGET,
+            VIRTIO_SCSI_S_FAILURE, VIRTIO_SCSI_S_OK,
         },
     };
     use virtio_queue::{mock::MockSplitQueue, Descriptor};
@@ -564,5 +598,24 @@ mod tests {
             0,
             "expect no command to make it to the target"
         );
+    }
+
+    #[test]
+    fn test_reading_config() {
+        let backend = VhostUserScsiBackend::new();
+
+        // 0 len slice
+        assert_eq!(vec![0_u8; 0], backend.get_config(0, 0));
+        // overly long slice
+        assert_eq!(
+            std::mem::size_of::<virtio_scsi_config>(),
+            backend.get_config(0, 2000).len()
+        );
+        // subslice
+        assert_eq!(1, backend.get_config(4, 1).len());
+        // overly long subslice
+        assert_eq!(28, backend.get_config(8, 10000).len());
+        // offset after end
+        assert_eq!(0, backend.get_config(100000, 10).len());
     }
 }

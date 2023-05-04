@@ -44,6 +44,17 @@ vhost-user-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>
   --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>
   [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
+  --config=<path to the local yaml configuration file>
+```
+
+Configuration Example
+
+```yaml
+vms:
+    - guest_cid: 3
+      socket: /tmp/vhost3.socket
+      uds_path: /tmp/vm3.sock
+      tx_buffer_size: 65536
 ```
 
 Run VMM (e.g. QEMU):

@@ -10,47 +10,79 @@ mod vsock_conn;
 
 use std::{convert::TryFrom, sync::Arc};
 
-use clap::Parser;
+use crate::vhu_vsock::{Error, Result, VhostUserVsockBackend, VsockConfig};
+use clap::{Args, Parser};
 use log::{info, warn};
+use serde::Deserialize;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::vhu_vsock::{Error, Result, VhostUserVsockBackend, VsockConfig};
-
-#[derive(Parser, Debug)]
-#[clap(version, about, long_about = None)]
-struct VsockArgs {
+#[derive(Args, Debug, Deserialize)]
+struct VsockParam {
     /// Context identifier of the guest which uniquely identifies the device for its lifetime.
-    #[clap(long, default_value_t = 3)]
+    #[arg(long, default_value_t = 3, conflicts_with = "config")]
     guest_cid: u64,
 
     /// Unix socket to which a hypervisor connects to and sets up the control path with the device.
-    #[clap(long)]
+    #[arg(long, conflicts_with = "config")]
     socket: String,
 
     /// Unix socket to which a host-side application connects to.
-    #[clap(long)]
+    #[arg(long, conflicts_with = "config")]
     uds_path: String,
 
     /// The size of the buffer used for the TX virtqueue
-    #[clap(long, default_value_t = 64 * 1024)]
+    #[clap(long, default_value_t = 64 * 1024, conflicts_with = "config")]
     tx_buffer_size: u32,
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct VsockArgs {
+    #[command(flatten)]
+    param: Option<VsockParam>,
+
+    /// Load from a given configuration file
+    #[arg(long)]
+    config: Option<String>,
+}
+
+impl VsockArgs {
+    pub fn parse_config(&self) -> Option<VsockConfig> {
+        if let Some(c) = &self.config {
+            let b = config::Config::builder()
+                .add_source(config::File::new(c.as_str(), config::FileFormat::Yaml))
+                .build();
+            if let Ok(s) = b {
+                let mut v = s.get::<Vec<VsockParam>>("vms").unwrap();
+                if v.len() == 1 {
+                    return v.pop().map(|vm| {
+                        VsockConfig::new(vm.guest_cid, vm.socket, vm.uds_path, vm.tx_buffer_size)
+                    });
+                }
+            }
+        }
+        None
+    }
 }
 
 impl TryFrom<VsockArgs> for VsockConfig {
     type Error = Error;
 
     fn try_from(cmd_args: VsockArgs) -> Result<Self> {
-        let socket = cmd_args.socket.trim().to_string();
-        let uds_path = cmd_args.uds_path.trim().to_string();
-
-        Ok(VsockConfig::new(
-            cmd_args.guest_cid,
-            socket,
-            uds_path,
-            cmd_args.tx_buffer_size,
-        ))
+        // we try to use the configuration first, if failed,  then fall back to the manual settings.
+        match cmd_args.parse_config() {
+            Some(c) => Ok(c),
+            _ => cmd_args.param.map_or(Err(Error::ConfigParse), |p| {
+                Ok(Self::new(
+                    p.guest_cid,
+                    p.socket.trim().to_string(),
+                    p.uds_path.trim().to_string(),
+                    p.tx_buffer_size,
+                ))
+            }),
+        }
     }
 }
 
@@ -108,14 +140,25 @@ fn main() {
 mod tests {
     use super::*;
     use serial_test::serial;
+    use std::fs::File;
+    use std::io::Write;
 
     impl VsockArgs {
         fn from_args(guest_cid: u64, socket: &str, uds_path: &str, tx_buffer_size: u32) -> Self {
             VsockArgs {
-                guest_cid,
-                socket: socket.to_string(),
-                uds_path: uds_path.to_string(),
-                tx_buffer_size,
+                param: Some(VsockParam {
+                    guest_cid,
+                    socket: socket.to_string(),
+                    uds_path: uds_path.to_string(),
+                    tx_buffer_size,
+                }),
+                config: None,
+            }
+        }
+        fn from_file(config: &str) -> Self {
+            VsockArgs {
+                param: None,
+                config: Some(config.to_string()),
             }
         }
     }
@@ -133,6 +176,26 @@ mod tests {
         assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
         assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
         assert_eq!(config.get_tx_buffer_size(), 64 * 1024);
+    }
+
+    #[test]
+    #[serial]
+    fn test_vsock_config_setup_from_file() {
+        let mut yaml = File::create("./config.yaml").unwrap();
+        yaml.write_all(
+            b"vms:
+    - guest_cid: 4
+      socket: /tmp/vhost4.socket
+      uds_path: /tmp/vm4.vsock
+      tx_buffer_size: 65536",
+        )
+        .unwrap();
+        let args = VsockArgs::from_file("./config.yaml");
+        let config = VsockConfig::try_from(args).unwrap();
+        assert_eq!(config.get_guest_cid(), 4);
+        assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
+        assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
+        std::fs::remove_file("./config.yaml").unwrap();
     }
 
     #[test]

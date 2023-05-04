@@ -24,6 +24,9 @@ virtio-queue = "0.7"
 virtio-vsock = "0.2.1"
 vm-memory = "0.10"
 vmm-sys-util = "0.11"
+config = "0.13"
+serde = "1"
+serde_yaml = "0.9"
 
 [dev-dependencies]
 virtio-queue = { version = "0.7", features = ["test-utils"] }

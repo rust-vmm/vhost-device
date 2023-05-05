@@ -70,7 +70,13 @@ fn create_backend(args: &ScsiArgs) -> Result<VhostUserScsiBackend> {
     }
 
     for image in &args.images {
-        let mut dev = BlockDevice::new(FileBackend::new(File::open(image).expect("Opening image")));
+        let mut dev = BlockDevice::new(FileBackend::new(
+            File::options()
+                .read(true)
+                .write(true)
+                .open(image)
+                .expect("Opening image"),
+        ));
         dev.set_write_protected(args.read_only);
         dev.set_solid_state(if args.solid_state {
             MediumRotationRate::NonRotating

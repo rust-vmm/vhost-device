@@ -183,6 +183,11 @@ pub(crate) enum LunSpecificCommand {
         lba: u32,
         transfer_length: u16,
     },
+    WriteSame16 {
+        lba: u64,
+        number_of_logical_blocks: u32,
+        anchor: bool,
+    },
     ReadCapacity10,
     ReadCapacity16,
     ReportSupportedOperationCodes {
@@ -212,6 +217,7 @@ pub(crate) enum CommandType {
     RequestSense,
     TestUnitReady,
     Write10,
+    WriteSame16,
 }
 
 pub(crate) const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
@@ -222,6 +228,7 @@ pub(crate) const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
     (CommandType::ReadCapacity10, (0x25, None)),
     (CommandType::Read10, (0x28, None)),
     (CommandType::Write10, (0x2a, None)),
+    (CommandType::WriteSame16, (0x93, None)),
     (CommandType::ReadCapacity16, (0x9e, Some(0x10))),
     (CommandType::ReportLuns, (0xa0, None)),
     (
@@ -397,6 +404,24 @@ impl CommandType {
                 0b1111_1111,
                 0b0000_0100,
             ],
+            Self::WriteSame16 => &[
+                0x93,
+                0b1111_1001,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b0011_1111,
+                0b0000_0100,
+            ],
             Self::Inquiry => &[
                 0x12,
                 0b0000_0001,
@@ -553,6 +578,24 @@ impl Cdb {
                     }),
                     allocation_length: None,
                     naca: (cdb[9] & 0b0000_0100) != 0,
+                })
+            }
+            CommandType::WriteSame16 => {
+                if cdb[1] & 0b1110_0001 != 0 {
+                    warn!("Unsupported field in WriteSame16");
+                    // We neither support protections nor logical block provisioning
+                    return Err(ParseError::InvalidField);
+                }
+                Ok(Self {
+                    command: Command::LunSpecificCommand(LunSpecificCommand::WriteSame16 {
+                        lba: u64::from_be_bytes(cdb[2..10].try_into().expect("lba should fit u64")),
+                        number_of_logical_blocks: u32::from_be_bytes(
+                            cdb[10..14].try_into().expect("block count should fit u32"),
+                        ),
+                        anchor: (cdb[1] & 0b0001_0000) != 0,
+                    }),
+                    allocation_length: None,
+                    naca: (cdb[15] & 0b0000_0100) != 0,
                 })
             }
             CommandType::ReadCapacity10 => Ok(Self {

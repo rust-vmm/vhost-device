@@ -328,6 +328,52 @@ fn test_write_10() {
 }
 
 #[test]
+fn test_write_same_16() {
+    let mut target = EmulatedTarget::new();
+    let mut backend = TestBackend::new();
+    let dev = BlockDevice::new(backend.clone());
+    target.add_lun(Box::new(dev));
+
+    // TODO: this test relies on the default logical block size of 512. We should
+    // make that explicit.
+
+    backend
+        .write_exact_at(&[0xff; 512 * 6], BlockOffset::from(5) * block_size_512())
+        .expect("Write should succeed");
+
+    let data_out = [0_u8; 512];
+
+    do_command_in(
+        &mut target,
+        &[
+            0x93, // WRITE SAME (16)
+            0,    // flags
+            0, 0, 0, 0, 0, 0, 0, 5, // LBA: 5
+            0, 0, 0, 5, // tnumber of blocks: 5
+            0, // reserved, group #
+            0, // control
+        ],
+        &data_out,
+        &[],
+    );
+
+    let mut buf = [0_u8; 512 * 5];
+    backend
+        .read_exact_at(&mut buf, BlockOffset::from(5) * block_size_512())
+        .expect("Reading should work");
+    assert_eq!([0_u8; 512 * 5], buf, "5 sectors should have been zero'd");
+
+    let mut buf = [0_u8; 512];
+    backend
+        .read_exact_at(&mut buf, BlockOffset::from(10) * block_size_512())
+        .expect("Reading should work");
+    assert_eq!(
+        [0xff_u8; 512], buf,
+        "sector after write should be left untouched"
+    );
+}
+
+#[test]
 fn test_read_capacity_10() {
     let mut target = EmulatedTarget::new();
     let dev = BlockDevice::new(test_image());

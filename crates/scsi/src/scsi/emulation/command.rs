@@ -174,6 +174,15 @@ pub(crate) enum LunSpecificCommand {
         lba: u32,
         transfer_length: u16,
     },
+    Write10 {
+        /// Disable page out (i.e. hint that this page won't be accessed again
+        /// soon, so we shouldn't bother caching it)
+        dpo: bool,
+        /// Force unit access (i.e. bypass cache)
+        fua: bool,
+        lba: u32,
+        transfer_length: u16,
+    },
     ReadCapacity10,
     ReadCapacity16,
     ReportSupportedOperationCodes {
@@ -202,6 +211,7 @@ pub(crate) enum CommandType {
     ReportSupportedOperationCodes,
     RequestSense,
     TestUnitReady,
+    Write10,
 }
 
 pub(crate) const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
@@ -211,6 +221,7 @@ pub(crate) const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
     (CommandType::ModeSense6, (0x1a, None)),
     (CommandType::ReadCapacity10, (0x25, None)),
     (CommandType::Read10, (0x28, None)),
+    (CommandType::Write10, (0x2a, None)),
     (CommandType::ReadCapacity16, (0x9e, Some(0x10))),
     (CommandType::ReportLuns, (0xa0, None)),
     (
@@ -374,6 +385,18 @@ impl CommandType {
                 0b1111_1111,
                 0b0000_0100,
             ],
+            Self::Write10 => &[
+                0x2A,
+                0b1111_1100,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b0011_1111,
+                0b1111_1111,
+                0b1111_1111,
+                0b0000_0100,
+            ],
             Self::Inquiry => &[
                 0x12,
                 0b0000_0001,
@@ -505,6 +528,24 @@ impl Cdb {
                 }
                 Ok(Self {
                     command: Command::LunSpecificCommand(LunSpecificCommand::Read10 {
+                        dpo: cdb[1] & 0b0001_0000 != 0,
+                        fua: cdb[1] & 0b0000_1000 != 0,
+                        lba: u32::from_be_bytes(cdb[2..6].try_into().unwrap()),
+                        transfer_length: u16::from_be_bytes(cdb[7..9].try_into().unwrap()),
+                    }),
+                    allocation_length: None,
+                    naca: (cdb[9] & 0b0000_0100) != 0,
+                })
+            }
+            CommandType::Write10 => {
+                if cdb[1] & 0b1110_0000 != 0 {
+                    // Feature (protection) that we don't
+                    // support; the standard says to respond with INVALID
+                    // FIELD IN CDB for these if unsupported
+                    return Err(ParseError::InvalidField);
+                }
+                Ok(Self {
+                    command: Command::LunSpecificCommand(LunSpecificCommand::Write10 {
                         dpo: cdb[1] & 0b0001_0000 != 0,
                         fua: cdb[1] & 0b0000_1000 != 0,
                         lba: u32::from_be_bytes(cdb[2..6].try_into().unwrap()),

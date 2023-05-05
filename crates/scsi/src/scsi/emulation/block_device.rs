@@ -98,6 +98,7 @@ impl Mul<BlockSize> for BlockOffset {
 
 pub(crate) trait BlockDeviceBackend: Send + Sync {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: ByteOffset) -> io::Result<()>;
+    fn write_exact_at(&mut self, buf: &[u8], offset: ByteOffset) -> io::Result<()>;
     fn size_in_blocks(&mut self) -> io::Result<BlockOffset>;
     fn block_size(&self) -> BlockSize;
     fn sync(&mut self) -> io::Result<()>;
@@ -120,6 +121,10 @@ impl FileBackend {
 impl BlockDeviceBackend for FileBackend {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: ByteOffset) -> io::Result<()> {
         self.file.read_exact_at(buf, u64::from(offset))
+    }
+
+    fn write_exact_at(&mut self, buf: &[u8], offset: ByteOffset) -> io::Result<()> {
+        self.file.write_all_at(buf, u64::from(offset))
     }
 
     fn size_in_blocks(&mut self) -> io::Result<BlockOffset> {
@@ -168,6 +173,25 @@ impl<T: BlockDeviceBackend> BlockDevice<T> {
         Ok(ret)
     }
 
+    fn write_blocks(
+        &mut self,
+        lba: BlockOffset,
+        blocks: BlockOffset,
+        reader: &mut dyn Read,
+    ) -> io::Result<()> {
+        // TODO: Avoid the copies here.
+        let mut buf = vec![
+            0;
+            usize::try_from(u64::from(blocks * self.backend.block_size()))
+                .expect("block length in bytes should fit usize")
+        ];
+        reader.read_exact(&mut buf)?;
+        self.backend
+            .write_exact_at(&buf, lba * self.backend.block_size())?;
+
+        Ok(())
+    }
+
     pub fn set_write_protected(&mut self, wp: bool) {
         self.write_protected = wp;
     }
@@ -181,7 +205,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
     fn execute_command(
         &mut self,
         data_in: &mut SilentlyTruncate<&mut dyn Write>,
-        _data_out: &mut dyn Read,
+        data_out: &mut dyn Read,
         req: LunRequest,
         command: LunSpecificCommand,
     ) -> Result<CmdOutput, CmdError> {
@@ -412,6 +436,52 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                     Err(e) => {
                         error!("Error reading image: {}", e);
                         Ok(CmdOutput::check_condition(sense::UNRECOVERED_READ_ERROR))
+                    }
+                }
+            }
+            LunSpecificCommand::Write10 {
+                dpo,
+                fua,
+                lba,
+                transfer_length,
+            } => {
+                if dpo {
+                    // DPO is just a hint that the guest probably won't access
+                    // this any time soon, so we can ignore it
+                    debug!("Silently ignoring DPO flag");
+                }
+
+                let size = match self.backend.size_in_blocks() {
+                    Ok(size) => size,
+                    Err(e) => {
+                        error!("Error getting image size for read: {}", e);
+                        return Ok(CmdOutput::check_condition(sense::TARGET_FAILURE));
+                    }
+                };
+
+                let lba = BlockOffset(lba.into());
+                let transfer_length = BlockOffset(transfer_length.into());
+
+                if lba + transfer_length > size {
+                    return Ok(CmdOutput::check_condition(
+                        sense::LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE,
+                    ));
+                }
+
+                let write_result = self.write_blocks(lba, transfer_length, data_out);
+
+                if fua {
+                    if let Err(e) = self.backend.sync() {
+                        error!("Error syncing file: {}", e);
+                        return Ok(CmdOutput::check_condition(sense::TARGET_FAILURE));
+                    }
+                }
+
+                match write_result {
+                    Ok(()) => Ok(CmdOutput::ok()),
+                    Err(e) => {
+                        error!("Error writing to block device: {}", e);
+                        Ok(CmdOutput::check_condition(sense::TARGET_FAILURE))
                     }
                 }
             }

@@ -6,18 +6,69 @@ mod bad_lun;
 mod generic;
 mod report_supported_operation_codes;
 
-use std::{fs::File, io::Write};
+use std::{
+    fs::File,
+    io::Write,
+    sync::{Arc, Mutex},
+};
 
 use tempfile::tempfile;
 
 use super::{
-    block_device::{BlockDevice, FileBackend},
+    block_device::{
+        BlockDevice, BlockDeviceBackend, BlockOffset, BlockSize, ByteOffset, FileBackend,
+    },
     target::EmulatedTarget,
 };
 use crate::scsi::{
     sense::{self, SenseTriple},
     CmdOutput, Request, Target, TaskAttr,
 };
+
+#[derive(Clone)]
+struct TestBackend {
+    data: Arc<Mutex<[u8; 512 * 16]>>,
+}
+
+impl TestBackend {
+    fn new() -> Self {
+        TestBackend {
+            data: Arc::new(Mutex::new([0; 512 * 16])),
+        }
+    }
+}
+
+impl BlockDeviceBackend for TestBackend {
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: ByteOffset) -> std::io::Result<()> {
+        let data = self.data.lock().unwrap();
+
+        let offset = usize::try_from(u64::from(offset)).expect("offset should fit usize");
+        buf.copy_from_slice(&data[offset..(offset + buf.len())]);
+        Ok(())
+    }
+
+    fn write_exact_at(&mut self, buf: &[u8], offset: ByteOffset) -> std::io::Result<()> {
+        let mut data = self.data.lock().unwrap();
+
+        let offset = usize::try_from(u64::from(offset)).expect("offset should fit usize");
+        data[offset..(offset + buf.len())].copy_from_slice(buf);
+        Ok(())
+    }
+
+    fn size_in_blocks(&mut self) -> std::io::Result<BlockOffset> {
+        Ok(ByteOffset::from(
+            u64::try_from(self.data.lock().unwrap().len()).expect("size_in_blocks should fit u64"),
+        ) / self.block_size())
+    }
+
+    fn block_size(&self) -> BlockSize {
+        BlockSize::try_from(512).expect("512 should be a valid BlockSize")
+    }
+
+    fn sync(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 fn null_image() -> FileBackend {
     FileBackend::new(File::open("/dev/null").unwrap())
@@ -101,6 +152,10 @@ fn do_command_in(
 
 fn do_command_fail(target: &mut EmulatedTarget, cdb: &[u8], expected_error: SenseTriple) {
     do_command_fail_lun(target, 0, cdb, expected_error);
+}
+
+fn block_size_512() -> BlockSize {
+    BlockSize::try_from(512).expect("512 should be a valid block_size")
 }
 
 #[test]
@@ -235,6 +290,41 @@ fn test_read_10_cross_out() {
         ],
         sense::LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE,
     );
+}
+
+#[test]
+fn test_write_10() {
+    let mut target = EmulatedTarget::new();
+    let mut backend = TestBackend::new();
+    let dev = BlockDevice::new(backend.clone());
+    target.add_lun(Box::new(dev));
+
+    // TODO: this test relies on the default logical block size of 512. We should
+    // make that explicit.
+
+    {
+        let data_out = [b'w'; 512];
+
+        do_command_in(
+            &mut target,
+            &[
+                0x2a, // WRITE (10)
+                0,    // flags
+                0, 0, 0, 5, // LBA: 5
+                0, // reserved, group #
+                0, 1, // transfer length: 1
+                0, // control
+            ],
+            &data_out,
+            &[],
+        );
+
+        let mut buf = [0_u8; 512];
+        backend
+            .read_exact_at(&mut buf, BlockOffset::from(5) * block_size_512())
+            .expect("Reading should work");
+        assert_eq!(data_out, buf);
+    }
 }
 
 #[test]

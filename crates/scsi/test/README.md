@@ -26,3 +26,8 @@ image, launch the daemon, launch QEMU, waits until it is up and triggers the
 test execution.
 
 Results will be downloaded into a timestamped folder under `results/`.
+
+# Other test tools
+
+Some quick and dirty fuzzing code is available at
+https://github.com/Ablu/vhost-device/tree/scsi-fuzzing.

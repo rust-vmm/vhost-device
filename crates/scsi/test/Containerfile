@@ -1,0 +1,11 @@
+FROM fedora:39
+RUN dnf install --quiet --assumeyes \
+  /usr/bin/qemu-system-x86_64 \
+  /usr/bin/qemu-img \
+  /usr/bin/virt-sysprep \
+  /usr/bin/ssh-keygen \
+  /usr/bin/ssh \
+  /usr/sbin/libvirtd \
+  wget \
+  && dnf clean all
+VOLUME /tests/

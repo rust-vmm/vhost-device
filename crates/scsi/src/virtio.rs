@@ -311,3 +311,60 @@ where
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use virtio_bindings::virtio_scsi::{virtio_scsi_cmd_req, virtio_scsi_cmd_resp};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use vm_memory::{ByteValued, GuestAddress, GuestMemoryMmap};
+
+    use super::*;
+
+    #[derive(Debug, Default, Clone, Copy)]
+    #[repr(transparent)]
+    pub(crate) struct VirtioScsiCmdReq(pub virtio_scsi_cmd_req);
+    /// SAFETY: struct is a transparent wrapper around the request
+    /// which can be read from a byte array
+    unsafe impl ByteValued for VirtioScsiCmdReq {}
+
+    #[derive(Debug, Default, Clone, Copy)]
+    #[repr(transparent)]
+    pub(crate) struct VirtioScsiCmdResp(pub virtio_scsi_cmd_resp);
+    /// SAFETY: struct is a transparent wrapper around the response
+    /// which can be read from a byte array
+    unsafe impl ByteValued for VirtioScsiCmdResp {}
+
+    pub(crate) fn report_luns_command() -> VirtioScsiCmdReq {
+        VirtioScsiCmdReq(virtio_scsi_cmd_req {
+            lun: REPORT_LUNS,
+            tag: 0,
+            task_attr: 0,
+            prio: 0,
+            crn: 0,
+            cdb: [0; CDB_SIZE],
+        })
+    }
+
+    #[test]
+    fn test_parse_request() {
+        let mem: GuestMemoryMmap =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap();
+
+        // The `build_desc_chain` function will populate the `NEXT` related flags and field.
+        let v = vec![
+            // A device-writable request header descriptor.
+            Descriptor::new(0x10_0000, 0x100, 0, 0),
+        ];
+
+        let req = report_luns_command();
+        mem.write_obj(req, GuestAddress(0x10_0000))
+            .expect("writing to succeed");
+
+        let queue = MockSplitQueue::new(&mem, 16);
+        let chain = queue.build_desc_chain(&v).unwrap();
+
+        let mut chain = DescriptorChainReader::new(chain.clone());
+        let req = Request::parse(&mut chain).expect("request failed to parse");
+        assert_eq!(req.lun, VirtioScsiLun::ReportLuns);
+    }
+}

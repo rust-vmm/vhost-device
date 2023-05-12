@@ -281,3 +281,288 @@ impl VhostUserBackendMut<VringRwLock> for VhostUserScsiBackend {
         Some(self.exit_event.try_clone().expect("Cloning exit eventfd"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        convert::TryInto,
+        io::{self, Read, Write},
+        sync::{Arc, Mutex},
+    };
+
+    use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
+    use virtio_bindings::{
+        virtio_ring::VRING_DESC_F_WRITE,
+        virtio_scsi::{
+            virtio_scsi_cmd_req, VIRTIO_SCSI_S_BAD_TARGET, VIRTIO_SCSI_S_FAILURE, VIRTIO_SCSI_S_OK,
+        },
+    };
+    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use vm_memory::{
+        Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+        GuestMemoryMmap,
+    };
+
+    use super::VhostUserScsiBackend;
+    use crate::{
+        scsi::{CmdOutput, Target, TaskAttr},
+        virtio::{
+            tests::{VirtioScsiCmdReq, VirtioScsiCmdResp},
+            VirtioScsiLun, CDB_SIZE,
+        },
+    };
+
+    #[allow(dead_code)]
+    struct RecordedCommand {
+        lun: u16,
+        id: u64,
+        cdb: [u8; CDB_SIZE],
+        task_attr: TaskAttr,
+        crn: u8,
+        prio: u8,
+    }
+
+    struct FakeTargetCommandCollector {
+        received_commands: Vec<RecordedCommand>,
+    }
+
+    impl FakeTargetCommandCollector {
+        fn new() -> Arc<Mutex<Self>> {
+            Arc::new(Mutex::new(Self {
+                received_commands: vec![],
+            }))
+        }
+    }
+
+    type FakeResponse = Result<crate::scsi::CmdOutput, crate::scsi::CmdError>;
+
+    struct FakeTarget<Cb> {
+        collector: Arc<Mutex<FakeTargetCommandCollector>>,
+        callback: Cb,
+    }
+
+    impl<Cb> FakeTarget<Cb> {
+        fn new(collector: Arc<Mutex<FakeTargetCommandCollector>>, callback: Cb) -> Self
+        where
+            Cb: FnMut(u16, crate::scsi::Request) -> FakeResponse + Sync + Send,
+        {
+            Self {
+                collector,
+                callback,
+            }
+        }
+    }
+
+    impl<Cb> Target for FakeTarget<Cb>
+    where
+        Cb: FnMut(u16, crate::scsi::Request) -> FakeResponse + Sync + Send,
+    {
+        fn execute_command(
+            &mut self,
+            lun: u16,
+            _data_out: &mut dyn Read,
+            _data_in: &mut dyn Write,
+            req: crate::scsi::Request,
+        ) -> Result<crate::scsi::CmdOutput, crate::scsi::CmdError> {
+            let mut collector = self.collector.lock().unwrap();
+            collector.received_commands.push(RecordedCommand {
+                lun,
+                id: req.id,
+                cdb: req.cdb.try_into().unwrap(),
+                task_attr: req.task_attr,
+                crn: req.crn,
+                prio: req.prio,
+            });
+            (self.callback)(lun, req)
+        }
+    }
+
+    fn setup(
+        req: impl ByteValued,
+    ) -> (
+        VhostUserScsiBackend,
+        VringRwLock,
+        GuestMemoryAtomic<GuestMemoryMmap>,
+    ) {
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap(),
+        );
+        // The `build_desc_chain` function will populate the `NEXT` related flags and field.
+        let v = vec![
+            Descriptor::new(0x10_0000, 0x100, 0, 0), // request
+            Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0), // response
+        ];
+
+        mem.memory()
+            .write_obj(req, GuestAddress(0x10_0000))
+            .expect("writing to succeed");
+
+        let mem_handle = mem.memory();
+
+        let queue = MockSplitQueue::new(&*mem_handle, 16);
+        // queue.set_avail_idx(1);
+
+        queue.build_desc_chain(&v).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.memory()
+            .write_obj(0u16, queue.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.memory()
+            .write_obj(1u16, queue.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        let vring = VringRwLock::new(mem.clone(), 16).unwrap();
+
+        // vring.set_queue_info(0x10_0000, 0x10_0000, 0x300).unwrap();
+        vring.set_queue_size(16);
+        vring
+            .set_queue_info(
+                queue.desc_table_addr().0,
+                queue.avail_addr().0,
+                queue.used_addr().0,
+            )
+            .unwrap();
+        vring.set_queue_ready(true);
+
+        let mut backend = VhostUserScsiBackend::new();
+        backend.update_memory(mem.clone()).unwrap();
+
+        (backend, vring, mem)
+    }
+
+    fn get_response(mem: &GuestMemoryAtomic<GuestMemoryMmap>) -> VirtioScsiCmdResp {
+        mem.memory()
+            .read_obj::<VirtioScsiCmdResp>(GuestAddress(0x20_0000))
+            .expect("Unable to read response from memory")
+    }
+
+    fn create_lun_specifier(target: u8, lun: u16) -> [u8; 8] {
+        let lun = lun.to_le_bytes();
+
+        [
+            0x1,
+            target,
+            lun[0] | VirtioScsiLun::FLAT_SPACE_ADDRESSING_METHOD,
+            lun[1],
+            0x0,
+            0x0,
+            0x0,
+            0x0,
+        ]
+    }
+
+    #[test]
+    fn backend_test() {
+        let collector = FakeTargetCommandCollector::new();
+        let fake_target = Box::new(FakeTarget::new(collector.clone(), |_, _| {
+            Ok(CmdOutput::ok())
+        }));
+
+        let req = VirtioScsiCmdReq(virtio_scsi_cmd_req {
+            lun: create_lun_specifier(0, 0),
+            tag: 0,
+            task_attr: 0,
+            prio: 0,
+            crn: 0,
+            cdb: [0; CDB_SIZE],
+        });
+
+        let (mut backend, vring, mem) = setup(req);
+        backend.add_target(fake_target);
+        backend.process_request_queue(&vring).unwrap();
+
+        let res = get_response(&mem);
+        assert_eq!(res.0.response, VIRTIO_SCSI_S_OK as u8);
+
+        let collector = collector.lock().unwrap();
+        assert_eq!(
+            collector.received_commands.len(),
+            1,
+            "expect one command to be passed to Target"
+        );
+    }
+
+    #[test]
+    fn backend_error_reporting_test() {
+        let collector = FakeTargetCommandCollector::new();
+        let fake_target = Box::new(FakeTarget::new(collector.clone(), |_, _| {
+            Err(crate::scsi::CmdError::DataIn(io::Error::new(
+                io::ErrorKind::Other,
+                "internal error",
+            )))
+        }));
+
+        let req = VirtioScsiCmdReq(virtio_scsi_cmd_req {
+            lun: create_lun_specifier(0, 0),
+            tag: 0,
+            task_attr: 0,
+            prio: 0,
+            crn: 0,
+            cdb: [0; CDB_SIZE],
+        });
+
+        let (mut backend, vring, mem) = setup(req);
+        backend.add_target(fake_target);
+        backend.process_request_queue(&vring).unwrap();
+
+        let res = get_response(&mem);
+        assert_eq!(res.0.response, VIRTIO_SCSI_S_FAILURE as u8);
+
+        let collector = collector.lock().unwrap();
+        assert_eq!(
+            collector.received_commands.len(),
+            1,
+            "expect one command to be passed to Target"
+        );
+    }
+
+    #[test]
+    fn test_command_to_unknown_lun() {
+        let collector = FakeTargetCommandCollector::new();
+
+        let req = VirtioScsiCmdReq(virtio_scsi_cmd_req {
+            lun: create_lun_specifier(0, 0),
+            tag: 0,
+            task_attr: 0,
+            prio: 0,
+            crn: 0,
+            cdb: [0; CDB_SIZE],
+        });
+
+        let (mut backend, vring, mem) = setup(req);
+        backend.process_request_queue(&vring).unwrap();
+
+        let res = get_response(&mem);
+        assert_eq!(res.0.response, VIRTIO_SCSI_S_BAD_TARGET as u8);
+
+        let collector = collector.lock().unwrap();
+        assert_eq!(
+            collector.received_commands.len(),
+            0,
+            "expect no command to make it to the target"
+        );
+    }
+
+    #[test]
+    fn test_broken_read_descriptor() {
+        let collector = FakeTargetCommandCollector::new();
+
+        let broken_req = [0u8; 1]; // single byte request
+
+        let (mut backend, vring, mem) = setup(broken_req);
+        backend.process_request_queue(&vring).unwrap();
+
+        let res = get_response(&mem);
+        assert_eq!(res.0.response, VIRTIO_SCSI_S_FAILURE as u8);
+
+        let collector = collector.lock().unwrap();
+        assert_eq!(
+            collector.received_commands.len(),
+            0,
+            "expect no command to make it to the target"
+        );
+    }
+}

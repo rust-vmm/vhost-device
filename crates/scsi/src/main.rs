@@ -126,3 +126,37 @@ fn main() -> Result<()> {
     let backend = create_backend(&args)?;
     start_backend(backend, args)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_backend() {
+        let sock = tempfile::NamedTempFile::new().unwrap();
+        let args = ScsiArgs {
+            images: vec!["/dev/null".into()],
+            read_only: true,
+            socket_path: sock.path().into(),
+            solid_state: false,
+        };
+        create_backend(&args).unwrap();
+    }
+
+    #[test]
+    fn test_fail_listener() {
+        let socket_name = "~/path/not/present/scsi";
+        let args = ScsiArgs {
+            images: vec!["/dev/null".into()],
+            read_only: true,
+            socket_path: socket_name.into(),
+            solid_state: false,
+        };
+        let backend = create_backend(&args).unwrap();
+        let err = start_backend(backend, args).unwrap_err();
+        if let Error::FailedCreatingListener(_) = err {
+        } else {
+            panic!("expected failure when creating listener");
+        }
+    }
+}

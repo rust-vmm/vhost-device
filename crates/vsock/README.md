@@ -33,7 +33,7 @@ the crate are split into various files as described below:
 - [vsock_conn.rs](src/vsock_conn.rs)
   - Module introduces a **VsockConnection** structure that represents a single vsock connection
   between the guest and the host. It also processes packets according to their type.
-- [vhu_vsock.rs](src/lib.rs)
+- [vhu_vsock.rs](src/vhu_vsock.rs)
   - exposes the main vhost user vsock backend interface.
 
 ## Usage

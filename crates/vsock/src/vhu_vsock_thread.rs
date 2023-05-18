@@ -181,10 +181,9 @@ impl VhostUserVsockThread {
     fn handle_event(&mut self, fd: RawFd, evset: epoll::Events) {
         if fd == self.host_sock {
             // This is a new connection initiated by an application running on the host
-            self.host_listener
-                .accept()
-                .map_err(Error::UnixAccept)
-                .and_then(|(stream, _)| {
+            let conn = self.host_listener.accept().map_err(Error::UnixAccept);
+            if self.mem.is_some() {
+                conn.and_then(|(stream, _)| {
                     stream
                         .set_nonblocking(true)
                         .map(|_| stream)
@@ -194,6 +193,13 @@ impl VhostUserVsockThread {
                 .unwrap_or_else(|err| {
                     warn!("Unable to accept new local connection: {:?}", err);
                 });
+            } else {
+                // If we aren't ready to process requests, accept and immediately close
+                // the connection.
+                conn.map(drop).unwrap_or_else(|err| {
+                    warn!("Error closing an incoming connection: {:?}", err);
+                });
+            }
         } else {
             // Check if the stream represented by fd has already established a
             // connection with the application running in the guest

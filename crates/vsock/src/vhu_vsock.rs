@@ -6,6 +6,7 @@ use std::{
     u16, u32, u64, u8,
 };
 
+use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackend, VringRwLock};
@@ -289,7 +290,14 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
             EVT_QUEUE_EVENT => {}
             BACKEND_EVENT => {
                 thread.process_backend_evt(evset);
-                thread.process_tx(vring_tx, evt_idx)?;
+                if let Err(e) = thread.process_tx(vring_tx, evt_idx) {
+                    match e {
+                        Error::NoMemoryConfigured => {
+                            warn!("Received a backend event before vring initialization")
+                        }
+                        _ => return Err(e.into()),
+                    }
+                }
             }
             _ => {
                 return Err(Error::HandleUnknownEvent.into());

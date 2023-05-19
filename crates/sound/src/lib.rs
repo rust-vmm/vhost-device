@@ -53,11 +53,11 @@ pub struct SoundConfig {
 impl SoundConfig {
     /// Create a new instance of the SoundConfig struct, containing the
     /// parameters to be fed into the sound-backend server.
-    pub fn new(socket: String, multi_thread: bool) -> Self {
+    pub fn new(socket: String, multi_thread: bool, audio_backend_name: String) -> Self {
         Self {
             socket,
             multi_thread,
-            audio_backend_name: "null".to_string(),
+            audio_backend_name,
         }
     }
 

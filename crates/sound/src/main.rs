@@ -12,6 +12,9 @@ struct SoundArgs {
     /// vhost-user Unix domain socket path.
     #[clap(long)]
     socket: String,
+    /// audio backend to be used (supported: null)
+    #[clap(long)]
+    backend: String,
 }
 
 impl TryFrom<SoundArgs> for SoundConfig {
@@ -19,8 +22,9 @@ impl TryFrom<SoundArgs> for SoundConfig {
 
     fn try_from(cmd_args: SoundArgs) -> Result<Self> {
         let socket = cmd_args.socket.trim().to_string();
+        let backend = cmd_args.backend.trim().to_string();
 
-        Ok(SoundConfig::new(socket, false))
+        Ok(SoundConfig::new(socket, false, backend))
     }
 }
 
@@ -43,6 +47,7 @@ mod tests {
         fn from_args(socket: &str) -> Self {
             SoundArgs {
                 socket: socket.to_string(),
+                backend: "null".to_string(),
             }
         }
     }

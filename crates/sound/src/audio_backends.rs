@@ -13,7 +13,7 @@ pub trait AudioBackend {
     fn read(&self, req: &mut SoundRequest) -> Result<()>;
 }
 
-pub fn allocate_audio_backend(name: String) -> Result<Box<dyn AudioBackend + Send + Sync>> {
+pub fn alloc_audio_backend(name: String) -> Result<Box<dyn AudioBackend + Send + Sync>> {
     match name.as_str() {
         #[cfg(feature = "null-backend")]
         "null" => Ok(Box::new(NullBackend::new())),

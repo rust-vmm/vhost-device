@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use crate::audio_backends::{allocate_audio_backend, AudioBackend};
+use crate::audio_backends::{alloc_audio_backend, AudioBackend};
 use crate::virtio_sound::*;
 use crate::{Error, Result, SoundConfig};
 
@@ -111,7 +111,7 @@ impl VhostUserSoundBackend {
             ])?)]
         };
 
-        let audio_backend = allocate_audio_backend(config.audio_backend_name)?;
+        let audio_backend = alloc_audio_backend(config.audio_backend_name)?;
 
         Ok(Self {
             threads,

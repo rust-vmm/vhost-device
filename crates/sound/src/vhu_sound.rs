@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use crate::audio_backends::{allocate_audio_backend, AudioBackend};
 use crate::virtio_sound::*;
 use crate::{Error, Result, SoundConfig};
 
-use std::{io::Result as IoResult, sync::RwLock, u16, u32, u64, u8};
+use std::sync::RwLock;
+use std::{io::Result as IoResult, u16, u32, u64, u8};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
@@ -86,6 +88,7 @@ pub struct VhostUserSoundBackend {
     threads: Vec<RwLock<VhostUserSoundThread>>,
     virtio_cfg: VirtioSoundConfig,
     exit_event: EventFd,
+    _audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>>,
 }
 
 impl VhostUserSoundBackend {
@@ -108,6 +111,8 @@ impl VhostUserSoundBackend {
             ])?)]
         };
 
+        let audio_backend = allocate_audio_backend(config.audio_backend_name)?;
+
         Ok(Self {
             threads,
             virtio_cfg: VirtioSoundConfig {
@@ -116,6 +121,7 @@ impl VhostUserSoundBackend {
                 chmpas: 0.into(),
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
+            _audio_backend: RwLock::new(audio_backend),
         })
     }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+mod audio_backends;
 mod vhu_sound;
 mod virtio_sound;
 
@@ -10,7 +11,7 @@ use log::{info, warn};
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, VolatileSlice};
 
 use crate::vhu_sound::VhostUserSoundBackend;
 
@@ -25,6 +26,10 @@ pub enum Error {
     HandleUnknownEvent,
     #[error("Failed to create a new EventFd")]
     EventFdCreate(IoError),
+    #[error("Request missing data buffer")]
+    SoundReqMissingData,
+    #[error("Audio backend not supported")]
+    AudioBackendNotSupported,
 }
 
 impl std::convert::From<Error> for IoError {
@@ -41,6 +46,8 @@ pub struct SoundConfig {
     socket: String,
     /// use multiple threads to hanlde the virtqueues
     multi_thread: bool,
+    /// audio backend name
+    audio_backend_name: String,
 }
 
 impl SoundConfig {
@@ -50,6 +57,7 @@ impl SoundConfig {
         Self {
             socket,
             multi_thread,
+            audio_backend_name: "null".to_string(),
         }
     }
 
@@ -57,6 +65,19 @@ impl SoundConfig {
     /// requests from the guest.
     pub fn get_socket_path(&self) -> String {
         String::from(&self.socket)
+    }
+}
+
+pub type SoundBitmap = ();
+
+#[derive(Debug)]
+pub struct SoundRequest<'a> {
+    data_slice: Option<VolatileSlice<'a, SoundBitmap>>,
+}
+
+impl<'a> SoundRequest<'a> {
+    pub fn data_slice(&self) -> Option<&VolatileSlice<'a, SoundBitmap>> {
+        self.data_slice.as_ref()
     }
 }
 
@@ -69,7 +90,7 @@ pub fn start_backend_server(config: SoundConfig) {
     let mut daemon = VhostUserDaemon::new(
         String::from("vhost-user-sound"),
         backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        GuestMemoryAtomic::new(GuestMemoryMmap::<SoundBitmap>::new()),
     )
     .unwrap();
 

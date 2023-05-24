@@ -18,12 +18,12 @@ libc = "0.2"
 log = "0.4"
 thiserror = "1.0"
 vhost = { version = "0.7", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.8"
+vhost-user-backend = "0.9"
 virtio-bindings = "0.2"
-virtio-queue = "0.7"
-vm-memory = "0.10"
+virtio-queue = "0.8"
+vm-memory = "0.11"
 vmm-sys-util = "0.11"
 
 [dev-dependencies]
-virtio-queue = { version = "0.7", features = ["test-utils"] }
-vm-memory = { version = "0.10", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { version = "0.8", features = ["test-utils"] }
+vm-memory = { version = "0.11", features = ["backend-mmap", "backend-atomic"] }

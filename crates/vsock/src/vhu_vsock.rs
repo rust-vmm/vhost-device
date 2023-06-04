@@ -123,8 +123,6 @@ pub(crate) enum Error {
     EmptyBackendRxQ,
     #[error("Failed to create an EventFd")]
     EventFdCreate(std::io::Error),
-    #[error("Failed to parse a configuration file")]
-    ConfigParse,
 }
 
 impl std::convert::From<Error> for std::io::Error {

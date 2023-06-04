@@ -41,20 +41,38 @@ the crate are split into various files as described below:
 Run the vhost-user-vsock device:
 ```
 vhost-user-vsock --guest-cid=<CID assigned to the guest> \
-  --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>
-  --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>
+  --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
+  --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device> \
   [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
-  --config=<path to the local yaml configuration file>
+```
+or
+```
+vhost-user-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
 ```
 
-Configuration Example
+Specify the `--vm` argument multiple times to specify multiple devices like this:
+```
+vhost-user-vsock \
+--vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock \
+--vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768
+```
 
+Or use a configuration file:
+```
+vhost-user-vsock --config=<path to the local yaml configuration file>
+```
+
+Configuration file example:
 ```yaml
 vms:
     - guest_cid: 3
       socket: /tmp/vhost3.socket
       uds_path: /tmp/vm3.sock
       tx_buffer_size: 65536
+    - guest_cid: 4
+      socket: /tmp/vhost4.socket
+      uds_path: /tmp/vm4.sock
+      tx_buffer_size: 32768
 ```
 
 Run VMM (e.g. QEMU):
@@ -71,11 +89,11 @@ qemu-system-x86_64 \
 ## Working example
 
 ```sh
-shell1$ vhost-user-vsock --guest-cid=4 --uds-path=/tmp/vm4.vsock --socket=/tmp/vhost4.socket
+shell1$ vhost-user-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
 ```
 or if you want to configure the TX buffer size
 ```sh
-shell1$ vhost-user-vsock --guest-cid=4 --uds-path=/tmp/vm4.vsock --socket=/tmp/vhost4.socket --tx-buffer-size=65536
+shell1$ vhost-user-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536
 ```
 
 ```sh

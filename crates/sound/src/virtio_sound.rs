@@ -160,8 +160,9 @@ pub struct VirtioSoundConfig {
     /// total number of all available PCM streams
     pub streams: Le32,
     /// total number of all available channel maps
-    pub chmpas: Le32,
+    pub chmaps: Le32,
 }
+
 // SAFETY: The layout of the structure is fixed and can be initialized by
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioSoundConfig {}

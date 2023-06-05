@@ -118,7 +118,7 @@ impl VhostUserSoundBackend {
             virtio_cfg: VirtioSoundConfig {
                 jacks: 0.into(),
                 streams: 1.into(),
-                chmpas: 0.into(),
+                chmaps: 0.into(),
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
             _audio_backend: RwLock::new(audio_backend),

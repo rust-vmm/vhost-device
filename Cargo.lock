@@ -1245,6 +1245,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost-device-scmi"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "clap",
+ "env_logger",
+ "log",
+ "thiserror",
+ "vhost",
+ "vhost-user-backend",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-scsi"
 version = "0.1.0"
 dependencies = [

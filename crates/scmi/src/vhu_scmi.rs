@@ -412,6 +412,54 @@ mod tests {
 
     use super::*;
 
+    fn scmi_header(message_id: u8, protocol_id: u8) -> u32 {
+        u32::from(message_id) | u32::from(protocol_id) << 10
+    }
+
+    fn build_cmd_desc_chain(
+        protocol_id: u8,
+        message_id: u8,
+        parameters: Vec<u32>,
+    ) -> ScmiDescriptorChain {
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
+        let mut next_addr = vq.desc_table().total_size() + 0x100;
+        let mut index = 0;
+        let request_size: u32 = (4 + parameters.len() * 4) as u32;
+
+        // Descriptor for the SCMI request
+        let desc_request =
+            Descriptor::new(next_addr, request_size, VRING_DESC_F_NEXT as u16, index + 1);
+        let mut bytes: Vec<u8> = vec![];
+        bytes.append(&mut scmi_header(message_id, protocol_id).to_le_bytes().to_vec());
+        for p in parameters {
+            bytes.append(&mut p.to_le_bytes().to_vec());
+        }
+        mem.write_slice(bytes.as_slice(), desc_request.addr())
+            .unwrap();
+        vq.desc_table().store(index, desc_request).unwrap();
+        next_addr += u64::from(desc_request.len());
+        index += 1;
+
+        // Descriptor for the SCMI response
+        let desc_response = Descriptor::new(next_addr, 0x100, VRING_DESC_F_WRITE as u16, 0);
+        vq.desc_table().store(index, desc_response).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+        // Create descriptor chain from pre-filled memory.
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
     fn build_event_desc_chain() -> ScmiDescriptorChain {
         let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let vq = MockSplitQueue::new(mem, 16);
@@ -474,6 +522,63 @@ mod tests {
             .unwrap()
             .next()
             .unwrap()
+    }
+
+    fn validate_desc_chains(
+        desc_chains: &[ScmiDescriptorChain],
+        chain_index: usize,
+        protocol_id: u8,
+        message_id: u8,
+        status: i32,
+        data: Vec<u32>,
+    ) {
+        let desc_chain = &desc_chains[chain_index];
+        let descriptors: Vec<_> = desc_chain.clone().collect();
+        let mut response = vec![0; descriptors[1].len() as usize];
+
+        desc_chain
+            .memory()
+            .read(&mut response, descriptors[1].addr())
+            .unwrap();
+
+        let mut result: Vec<u8> = scmi_header(message_id, protocol_id).to_le_bytes().to_vec();
+        result.append(&mut status.to_le_bytes().to_vec());
+        for d in &data {
+            result.append(&mut d.to_le_bytes().to_vec());
+        }
+        assert_eq!(response[0..result.len()], result);
+    }
+
+    #[test]
+    fn test_process_requests() {
+        let mut backend = VuScmiBackend::new().unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // Descriptor chain size zero, shouldn't fail
+        backend
+            .process_requests(Vec::<ScmiDescriptorChain>::new(), &vring)
+            .unwrap();
+
+        // Valid single SCMI request: base protocol version
+        let desc_chains = vec![build_cmd_desc_chain(0x10, 0x0, vec![])];
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(&desc_chains, 0, 0x10, 0x0, 0, vec![0x20000]);
+
+        // Valid multi SCMI request: base protocol version + implementation version
+        let desc_chains = vec![
+            build_cmd_desc_chain(0x10, 0x0, vec![]),
+            build_cmd_desc_chain(0x10, 0x5, vec![]),
+        ];
+        backend
+            .process_requests(desc_chains.clone(), &vring)
+            .unwrap();
+        validate_desc_chains(&desc_chains, 0, 0x10, 0x0, 0, vec![0x20000]);
+        validate_desc_chains(&desc_chains, 1, 0x10, 0x5, 0, vec![0]);
     }
 
     #[test]
@@ -564,6 +669,24 @@ mod tests {
                 .process_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             VuScmiError::UnexpectedMinimumDescriptorSize(4, 2)
+        );
+
+        // Invalid request length (too small).
+        let desc_chain = build_cmd_desc_chain(0x10, 0x2, vec![]);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            VuScmiError::UnexpectedDescriptorSize(8, 4)
+        );
+
+        // Invalid request length (too large).
+        let desc_chain = build_cmd_desc_chain(0x10, 0x0, vec![0]);
+        assert_eq!(
+            backend
+                .process_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            VuScmiError::UnexpectedDescriptorSize(4, 8)
         );
 
         // Read only descriptors.

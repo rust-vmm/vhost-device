@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+
+use itertools::Itertools;
 use log::debug;
 
 pub type MessageHeader = u32;
@@ -8,7 +11,6 @@ pub type MessageHeader = u32;
 // VirtIO SCMI specification talks about u8 SCMI values.
 // Let's stick with SCMI specification for implementation simplicity.
 #[derive(Clone, Debug, PartialEq)]
-#[allow(dead_code)]
 enum MessageValue {
     Signed(i32),
     Unsigned(u32),
@@ -65,8 +67,15 @@ impl From<ReturnStatus> for Response {
     }
 }
 
+impl From<MessageValue> for Response {
+    fn from(value: MessageValue) -> Self {
+        Self {
+            values: vec![ReturnStatus::Success.as_value(), value],
+        }
+    }
+}
+
 impl From<&MessageValues> for Response {
-    #[allow(dead_code)]
     fn from(value: &MessageValues) -> Self {
         let mut response_values = vec![ReturnStatus::Success.as_value()];
         response_values.extend_from_slice(value.as_slice());
@@ -126,34 +135,6 @@ impl ScmiResponse {
     }
 }
 
-pub struct ScmiHandler {}
-
-impl ScmiHandler {
-    pub const fn new() -> Self {
-        Self {}
-    }
-
-    pub fn handle(&mut self, request: ScmiRequest) -> ScmiResponse {
-        let response = match request.message_type {
-            // TODO: Implement a mechanism to invoke the proper protocol &
-            // message handling on command requests.
-            MessageType::Command => Response::from(ReturnStatus::NotSupported),
-            MessageType::Unsupported => Response::from(ReturnStatus::NotSupported),
-        };
-        ScmiResponse::from(request.header, response)
-    }
-
-    pub fn number_of_parameters(&self, _request: &ScmiRequest) -> Option<NParameters> {
-        // TODO: Implement.
-        Some(0)
-    }
-
-    pub fn store_parameters(&self, _request: &mut ScmiRequest, _buffer: &[u8]) {
-        // TODO: Implement (depends on knowledge of the number of parameters).
-    }
-}
-
-#[allow(dead_code)]
 pub struct ScmiRequest {
     header: MessageHeader,     // 32-bit unsigned integer, split below:
     message_id: MessageId,     // bits 7:0
@@ -161,7 +142,7 @@ pub struct ScmiRequest {
     protocol_id: ProtocolId,   // bits 17:10
     // token: u16,             // bits 27:18
     // bits 31:28 are reserved, must be 0
-    _parameters: Option<MessageValues>, // set later based on the number of parameters
+    parameters: Option<MessageValues>, // set later based on the number of parameters
 }
 
 impl ScmiRequest {
@@ -185,7 +166,256 @@ impl ScmiRequest {
             message_id,
             message_type,
             protocol_id,
-            _parameters: None,
+            parameters: None,
+        }
+    }
+
+    fn get_unsigned(&self, parameter: usize) -> u32 {
+        match self.parameters.as_ref().expect("Missing parameters")[parameter] {
+            MessageValue::Unsigned(value) => value,
+            _ => panic!("Wrong parameter"),
+        }
+    }
+}
+
+const BASE_PROTOCOL_ID: ProtocolId = 0x10;
+const BASE_VERSION: MessageId = 0x0;
+const BASE_PROTOCOL_ATTRIBUTES: MessageId = 0x1;
+const BASE_MESSAGE_ATTRIBUTES: MessageId = 0x2;
+const BASE_DISCOVER_VENDOR: MessageId = 0x3;
+const BASE_DISCOVER_IMPLEMENTATION_VERSION: MessageId = 0x5;
+const BASE_DISCOVER_LIST_PROTOCOLS: MessageId = 0x6;
+
+enum ParameterType {
+    _SignedInt32,
+    UnsignedInt32,
+}
+type ParameterSpecification = Vec<ParameterType>;
+
+type HandlerFunction = fn(&ScmiHandler, &ScmiRequest) -> Response;
+struct HandlerInfo {
+    name: String,
+    parameters: ParameterSpecification,
+    function: HandlerFunction,
+}
+
+// HandlerMap layout is suboptimal but let's prefer simplicity for now.
+struct HandlerMap(HashMap<(ProtocolId, MessageId), HandlerInfo>);
+
+impl HandlerMap {
+    fn new() -> Self {
+        let mut map = Self(HashMap::new());
+        map.make_base_handlers();
+        map
+    }
+
+    fn keys(&self) -> std::collections::hash_map::Keys<(u8, u8), HandlerInfo> {
+        self.0.keys()
+    }
+
+    fn get(&self, protocol_id: ProtocolId, message_id: MessageId) -> Option<&HandlerInfo> {
+        self.0.get(&(protocol_id, message_id))
+    }
+
+    fn bind(
+        &mut self,
+        protocol_id: ProtocolId,
+        message_id: MessageId,
+        name: &str,
+        parameters: ParameterSpecification,
+        function: HandlerFunction,
+    ) {
+        assert!(
+            self.get(protocol_id, message_id).is_none(),
+            "Multiple handlers defined for SCMI message {}/{}",
+            protocol_id,
+            message_id
+        );
+        self.0.insert(
+            (protocol_id, message_id),
+            HandlerInfo {
+                name: name.to_string(),
+                parameters,
+                function,
+            },
+        );
+    }
+
+    fn make_base_handlers(&mut self) {
+        self.bind(
+            BASE_PROTOCOL_ID,
+            BASE_VERSION,
+            "base/version",
+            vec![],
+            |_, _| -> Response {
+                // 32-bit unsigned integer
+                // major: upper 16 bits
+                // minor: lower 16 bits
+                Response::from(MessageValue::Unsigned(0x20000))
+            },
+        );
+        self.bind(
+            BASE_PROTOCOL_ID,
+            BASE_PROTOCOL_ATTRIBUTES,
+            "base/protocol_attributes",
+            vec![],
+            |handler, _| -> Response {
+                // The base protocol doesn't count.
+                Response::from(MessageValue::Unsigned(handler.number_of_protocols() - 1))
+            },
+        );
+        self.bind(
+            BASE_PROTOCOL_ID,
+            BASE_MESSAGE_ATTRIBUTES,
+            "base/message_attributes",
+            vec![ParameterType::UnsignedInt32],
+            ScmiHandler::message_attributes,
+        );
+        self.bind(
+            BASE_PROTOCOL_ID,
+            BASE_DISCOVER_VENDOR,
+            "base/discover_vendor",
+            vec![],
+            |_, _| -> Response { Response::from(MessageValue::String("rust-vmm".to_string(), 16)) },
+        );
+        self.bind(
+            BASE_PROTOCOL_ID,
+            BASE_DISCOVER_IMPLEMENTATION_VERSION,
+            "base/discover_implementation_version",
+            vec![],
+            |_, _| -> Response { Response::from(MessageValue::Unsigned(0)) },
+        );
+        self.bind(
+            BASE_PROTOCOL_ID,
+            BASE_DISCOVER_LIST_PROTOCOLS,
+            "base/discover_list_protocols",
+            vec![ParameterType::UnsignedInt32],
+            ScmiHandler::discover_list_protocols,
+        );
+    }
+}
+
+pub struct ScmiHandler {
+    handlers: HandlerMap,
+}
+
+impl ScmiHandler {
+    pub fn new() -> Self {
+        Self {
+            handlers: HandlerMap::new(),
+        }
+    }
+
+    fn request_handler(&self, request: &ScmiRequest) -> Option<&HandlerInfo> {
+        self.handlers.get(request.protocol_id, request.message_id)
+    }
+
+    pub fn handle(&mut self, request: ScmiRequest) -> ScmiResponse {
+        let response = match request.message_type {
+            MessageType::Command => match self.request_handler(&request) {
+                Some(info) => {
+                    debug!(
+                        "Calling handler for {}({:?})",
+                        info.name,
+                        request.parameters.as_ref().unwrap_or(&vec![])
+                    );
+                    (info.function)(self, &request)
+                }
+                _ => Response::from(ReturnStatus::NotSupported),
+            },
+            MessageType::Unsupported => Response::from(ReturnStatus::NotSupported),
+        };
+        ScmiResponse::from(request.header, response)
+    }
+
+    pub fn number_of_parameters(&self, request: &ScmiRequest) -> Option<NParameters> {
+        self.request_handler(request).map(|info| {
+            info.parameters
+                .len()
+                .try_into()
+                .expect("Invalid parameter specification")
+        })
+    }
+
+    pub fn store_parameters(&self, request: &mut ScmiRequest, buffer: &[u8]) {
+        let handler = &self
+            .request_handler(request)
+            .expect("Attempt to process an unsupported SCMI message");
+        let n_parameters = handler.parameters.len();
+        debug!(
+            "SCMI request {}/{} parameters length: {}, buffer length: {}",
+            request.message_id,
+            request.protocol_id,
+            n_parameters,
+            buffer.len()
+        );
+        let value_size = 4;
+        assert!(
+            buffer.len() == n_parameters * value_size,
+            "Unexpected parameters buffer size: buffer={} parameters={}",
+            buffer.len(),
+            n_parameters
+        );
+        let mut values: MessageValues = Vec::with_capacity(n_parameters);
+        for n in 0..n_parameters {
+            let slice: [u8; 4] = buffer[4 * n..4 * (n + 1)]
+                .try_into()
+                .expect("Insufficient data for parameters");
+            let v = match handler.parameters[n] {
+                ParameterType::_SignedInt32 => MessageValue::Signed(i32::from_le_bytes(slice)),
+                ParameterType::UnsignedInt32 => MessageValue::Unsigned(u32::from_le_bytes(slice)),
+            };
+            debug!("SCMI parameter {}: {:?}", n, v);
+            values.push(v);
+        }
+        request.parameters = Some(values);
+    }
+
+    fn number_of_protocols(&self) -> u32 {
+        let n: usize = self.handlers.keys().unique_by(|k| k.0).count();
+        n.try_into()
+            .expect("Impossibly large number of SCMI protocols")
+    }
+
+    fn discover_list_protocols(&self, request: &ScmiRequest) -> Response {
+        // Base protocol is skipped
+        let skip: usize = request
+            .get_unsigned(0)
+            .try_into()
+            .expect("Extremely many protocols");
+        let protocols: Vec<ProtocolId> = self
+            .handlers
+            .keys()
+            .filter(|(protocol_id, _)| *protocol_id != BASE_PROTOCOL_ID)
+            .map(|(protocol_id, _)| *protocol_id)
+            .unique()
+            .sorted()
+            .skip(skip)
+            .collect();
+        let n_protocols = protocols.len();
+        debug!("Number of listed protocols after {}: {}", skip, n_protocols);
+        let mut values: Vec<MessageValue> = vec![MessageValue::Unsigned(n_protocols as u32)];
+        if n_protocols > 0 {
+            let mut compressed: Vec<u32> = vec![0; 1 + (n_protocols - 1) / 4];
+            for i in 0..n_protocols {
+                debug!("Adding protocol: {}", protocols[i]);
+                compressed[i % 4] |= u32::from(protocols[i]) << ((i % 4) * 8);
+            }
+            for item in compressed {
+                values.push(MessageValue::Unsigned(item));
+            }
+        }
+        Response::from(&values)
+    }
+
+    fn message_attributes(&self, request: &ScmiRequest) -> Response {
+        let message_id: Result<MessageId, _> = request.get_unsigned(0).try_into();
+        if message_id.is_err() {
+            return Response::from(ReturnStatus::InvalidParameters);
+        }
+        match self.handlers.get(request.protocol_id, message_id.unwrap()) {
+            Some(_) => Response::from(MessageValue::Unsigned(0)),
+            None => Response::from(ReturnStatus::NotFound),
         }
     }
 }
@@ -200,6 +430,16 @@ mod tests {
         let response = Response::from(status);
         assert_eq!(response.values.len(), 1);
         assert_eq!(response.values[0], MessageValue::Signed(status as i32));
+    }
+
+    #[test]
+    fn test_response_from_value() {
+        let value = MessageValue::Unsigned(28);
+        let status = ReturnStatus::Success;
+        let response = Response::from(value.clone());
+        assert_eq!(response.values.len(), 2);
+        assert_eq!(response.values[0], MessageValue::Signed(status as i32));
+        assert_eq!(response.values[1], value);
     }
 
     #[test]
@@ -277,5 +517,177 @@ mod tests {
         assert_eq!(request.message_id, 0xAB);
         assert_eq!(request.message_type, MessageType::Unsupported);
         assert_eq!(request.protocol_id, 0x40);
+    }
+
+    fn make_request(protocol_id: ProtocolId, message_id: MessageId) -> ScmiRequest {
+        let header: MessageHeader = u32::from(message_id) | (u32::from(protocol_id) << 10);
+        ScmiRequest::new(header)
+    }
+
+    fn store_parameters(
+        handler: &ScmiHandler,
+        request: &mut ScmiRequest,
+        parameters: &[MessageValue],
+    ) {
+        let mut bytes: Vec<u8> = vec![];
+        for p in parameters {
+            let value = match p {
+                MessageValue::Unsigned(n) => u32::to_le_bytes(*n),
+                MessageValue::Signed(n) => i32::to_le_bytes(*n),
+                _ => panic!("Unsupported parameter type"),
+            };
+            bytes.append(&mut value.to_vec());
+        }
+        handler.store_parameters(request, bytes.as_slice());
+    }
+
+    #[test]
+    fn test_handler_parameters() {
+        let handler = ScmiHandler::new();
+        let mut request = make_request(BASE_PROTOCOL_ID, BASE_DISCOVER_LIST_PROTOCOLS);
+        assert_eq!(handler.number_of_parameters(&request), Some(1));
+
+        let value: u32 = 1234567890;
+        let parameters = [MessageValue::Unsigned(value)];
+        store_parameters(&handler, &mut request, &parameters);
+        assert_eq!(request.parameters, Some(parameters.to_vec()));
+        assert_eq!(request.get_unsigned(0), value);
+    }
+
+    fn test_message(
+        protocol_id: ProtocolId,
+        message_id: MessageId,
+        parameters: Vec<MessageValue>,
+        result_code: ReturnStatus,
+        result_values: Vec<MessageValue>,
+    ) {
+        let mut handler = ScmiHandler::new();
+        let mut request = make_request(protocol_id, message_id);
+        let header = request.header;
+        if !parameters.is_empty() {
+            let parameter_slice = parameters.as_slice();
+            store_parameters(&handler, &mut request, parameter_slice);
+        }
+        let response = handler.handle(request);
+        assert_eq!(response.header, header);
+        let mut bytes: Vec<u8> = vec![];
+        bytes.append(&mut header.to_le_bytes().to_vec());
+        bytes.append(&mut (result_code as i32).to_le_bytes().to_vec());
+        for value in result_values {
+            let mut value_vec = match value {
+                MessageValue::Unsigned(n) => n.to_le_bytes().to_vec(),
+                MessageValue::Signed(n) => n.to_le_bytes().to_vec(),
+                MessageValue::String(s, size) => {
+                    let mut v = s.as_bytes().to_vec();
+                    let v_len = v.len();
+                    assert!(
+                        v_len < size,
+                        "String longer than specified: {v_len} >= {size}"
+                    );
+                    v.resize(size, b'\0');
+                    v
+                }
+            };
+            bytes.append(&mut value_vec);
+        }
+        assert_eq!(response.ret_bytes, bytes.as_slice());
+    }
+
+    #[test]
+    fn test_base_version() {
+        let values = vec![MessageValue::Unsigned(0x20000)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_VERSION,
+            vec![],
+            ReturnStatus::Success,
+            values,
+        );
+    }
+
+    #[test]
+    fn test_base_protocol_attributes() {
+        let result = vec![MessageValue::Unsigned(0)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_PROTOCOL_ATTRIBUTES,
+            vec![],
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_base_protocol_message_attributes_supported() {
+        let parameters = vec![MessageValue::Unsigned(u32::from(BASE_DISCOVER_VENDOR))];
+        let result = vec![MessageValue::Unsigned(0)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_base_protocol_message_attributes_unsupported() {
+        let parameters = vec![MessageValue::Unsigned(0x4)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::NotFound,
+            vec![],
+        );
+    }
+
+    #[test]
+    fn test_base_protocol_message_attributes_invalid() {
+        let parameters = vec![MessageValue::Unsigned(0x100)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::InvalidParameters,
+            vec![],
+        );
+    }
+
+    #[test]
+    fn test_base_discover_vendor() {
+        let result = vec![MessageValue::String(String::from("rust-vmm"), 16)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_DISCOVER_VENDOR,
+            vec![],
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_base_discover_implementation_version() {
+        let values = vec![MessageValue::Unsigned(0)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_DISCOVER_IMPLEMENTATION_VERSION,
+            vec![],
+            ReturnStatus::Success,
+            values,
+        );
+    }
+
+    #[test]
+    fn test_base_discover_list_protocols() {
+        let parameters = vec![MessageValue::Unsigned(0)];
+        let result = vec![MessageValue::Unsigned(0)];
+        test_message(
+            BASE_PROTOCOL_ID,
+            BASE_DISCOVER_LIST_PROTOCOLS,
+            parameters,
+            ReturnStatus::Success,
+            result,
+        );
     }
 }

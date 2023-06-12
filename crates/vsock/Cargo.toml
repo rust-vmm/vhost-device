@@ -18,6 +18,7 @@ futures = { version = "0.3", features = ["thread-pool"] }
 log = "0.4"
 thiserror = "1.0"
 vhost = { version = "0.7", features = ["vhost-user-slave"] }
+vhost-device-utils = { path = "../utils" }
 vhost-user-backend = "0.9"
 virtio-bindings = "0.2"
 virtio-queue = "0.8"

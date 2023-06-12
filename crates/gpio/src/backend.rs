@@ -5,16 +5,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{info, warn};
 use std::num::ParseIntError;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use std::thread::spawn;
 
 use clap::Parser;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
-use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 use crate::gpio::{GpioController, GpioDevice, PhysDevice};
 use crate::vhu_gpio::VhostUserGpioBackend;
@@ -144,34 +140,12 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
             // daemon.
             let device = D::open(device_num).unwrap();
             let controller = GpioController::<D>::new(device).unwrap();
-            let backend = Arc::new(RwLock::new(VhostUserGpioBackend::new(controller).unwrap()));
-            let listener = Listener::new(socket.clone(), true).unwrap();
-
-            let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-device-gpio-backend"),
-                backend.clone(),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .unwrap();
-
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            backend.read().unwrap().exit_event.write(1).unwrap();
+            let backend = VhostUserGpioBackend::new(controller).unwrap();
+            let daemon = vhost_device_utils::create_daemon(
+                RwLock::new(backend),
+                "vhost-device-gpio-backend",
+            );
+            daemon.start(socket.clone()).unwrap();
         });
 
         handles.push(handle);

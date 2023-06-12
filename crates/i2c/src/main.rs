@@ -8,16 +8,12 @@
 mod i2c;
 mod vhu_i2c;
 
-use log::{info, warn};
 use std::num::ParseIntError;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
 
 use clap::Parser;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
-use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 use i2c::{I2cDevice, I2cMap, PhysDevice, MAX_I2C_VDEV};
 use vhu_i2c::VhostUserI2cBackend;
@@ -191,36 +187,10 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
             // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
             // trouble to other threads/guests or the main() function and should be safe for the
             // daemon.
-            let backend = Arc::new(RwLock::new(
-                VhostUserI2cBackend::new(i2c_map.clone()).unwrap(),
-            ));
-            let listener = Listener::new(socket.clone(), true).unwrap();
+            let backend = RwLock::new(VhostUserI2cBackend::new(i2c_map.clone()).unwrap());
 
-            let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-device-i2c-backend"),
-                backend.clone(),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .unwrap();
-
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            backend.read().unwrap().exit_event.write(1).unwrap();
+            let daemon = vhost_device_utils::create_daemon(backend, "vhost-device-i2c-backend");
+            daemon.start(socket.clone()).unwrap();
         });
 
         handles.push(handle);
@@ -241,6 +211,8 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use vhost::vhost_user::Listener;
+
     use super::*;
     use crate::i2c::tests::DummyDevice;
 

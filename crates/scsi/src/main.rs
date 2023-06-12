@@ -4,18 +4,12 @@ mod scsi;
 mod vhu_scsi;
 mod virtio;
 
-use std::{
-    fs::File,
-    path::PathBuf,
-    sync::{Arc, RwLock},
-};
+use std::{fs::File, path::PathBuf, sync::RwLock};
 
 use clap::Parser;
-use log::{error, info, warn};
+use log::{error, warn};
 use thiserror::Error as ThisError;
-use vhost::vhost_user::{self, Listener};
-use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+use vhost::vhost_user::{self};
 
 use crate::scsi::emulation::{
     block_device::{BlockDevice, FileBackend, MediumRotationRate},
@@ -91,39 +85,10 @@ fn create_backend(args: &ScsiArgs) -> Result<VhostUserScsiBackend> {
 }
 
 fn start_backend(backend: VhostUserScsiBackend, args: ScsiArgs) -> Result<()> {
-    let backend = Arc::new(RwLock::new(backend));
-    let mut daemon = VhostUserDaemon::new(
-        "vhost-user-scsi".into(),
-        Arc::clone(&backend),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .expect("Creating daemon");
-
+    let daemon = vhost_device_utils::create_daemon(RwLock::new(backend), "vhost-device-scsi");
     daemon
-        .start(Listener::new(args.socket_path, true).map_err(Error::FailedCreatingListener)?)
-        .expect("Starting daemon");
-
-    match daemon.wait() {
-        Ok(()) => {
-            info!("Stopping cleanly.");
-        }
-        Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-            info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-        }
-        Err(e) => {
-            warn!("Error running daemon: {:?}", e);
-        }
-    }
-
-    // No matter the result, we need to shut down the worker thread.
-    // unwrap will only panic if we already panicked somewhere else
-    backend
-        .read()
-        .unwrap()
-        .exit_event
-        .write(1)
-        .expect("Shutting down worker thread");
-    Ok(())
+        .start(args.socket_path)
+        .map_err(Error::FailedCreatingListener)
 }
 
 fn main() -> Result<()> {

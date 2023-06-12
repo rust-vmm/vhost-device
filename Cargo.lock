@@ -651,9 +651,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.18"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "518ef76f2f87365916b142844c16d8fefd85039bc5699050210a7778ee1cd1de"
+checksum = "b06a4cde4c0f271a446782e3eff8de789548ce57dbc8eca9292c27f4a42004b4"
 
 [[package]]
 name = "memchr"
@@ -1223,6 +1223,7 @@ dependencies = [
  "log",
  "thiserror",
  "vhost",
+ "vhost-device-utils",
  "vhost-user-backend",
  "virtio-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-queue",
@@ -1240,6 +1241,7 @@ dependencies = [
  "log",
  "thiserror",
  "vhost",
+ "vhost-device-utils",
  "vhost-user-backend",
  "virtio-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-queue",
@@ -1260,6 +1262,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "vhost",
+ "vhost-device-utils",
  "vhost-user-backend",
  "virtio-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-queue",
@@ -1279,11 +1282,22 @@ dependencies = [
  "tempfile",
  "thiserror",
  "vhost",
+ "vhost-device-utils",
  "vhost-user-backend",
  "virtio-bindings 0.2.0 (git+https://github.com/rust-vmm/vm-virtio?rev=467c8ec99375a5f4e08b85b18257cd7e0bac1dc0)",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
+]
+
+[[package]]
+name = "vhost-device-utils"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "vhost",
+ "vhost-user-backend",
+ "vm-memory",
 ]
 
 [[package]]
@@ -1317,6 +1331,7 @@ dependencies = [
  "serial_test",
  "thiserror",
  "vhost",
+ "vhost-device-utils",
  "vhost-user-backend",
  "virtio-bindings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-queue",

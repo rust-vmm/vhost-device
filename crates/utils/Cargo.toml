@@ -1,0 +1,15 @@
+[package]
+name = "vhost-device-utils"
+version = "0.1.0"
+description = "vhost-device internal helper library"
+repository = "https://github.com/rust-vmm/vhost-device"
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+vhost = { version = "0.7", features = ["vhost-user"] }
+vhost-user-backend = "0.9"
+vm-memory = "0.11"

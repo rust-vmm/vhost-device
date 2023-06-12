@@ -8,16 +8,13 @@ mod vhu_vsock;
 mod vhu_vsock_thread;
 mod vsock_conn;
 
-use std::{convert::TryFrom, sync::Arc, thread};
+use std::{convert::TryFrom, thread};
 
 use crate::vhu_vsock::{VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
-use log::{info, warn};
+
 use serde::Deserialize;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
-use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 const DEFAULT_GUEST_CID: u64 = 3;
 const DEFAULT_TX_BUFFER_SIZE: u32 = 64 * 1024;
@@ -174,42 +171,20 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
 /// vhost-user-vsock backend server.
 pub(crate) fn start_backend_server(config: VsockConfig) {
     loop {
-        let backend = Arc::new(VhostUserVsockBackend::new(config.clone()).unwrap());
+        let backend = VhostUserVsockBackend::new(config.clone()).unwrap();
 
-        let listener = Listener::new(config.get_socket_path(), true).unwrap();
+        let handle = vhost_device_utils::create_daemon(backend, "vhost-user-vsock");
 
-        let mut daemon = VhostUserDaemon::new(
-            String::from("vhost-user-vsock"),
-            backend.clone(),
-            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-        )
-        .unwrap();
+        let mut vring_workers = handle.daemon.get_epoll_handlers();
 
-        let mut vring_workers = daemon.get_epoll_handlers();
-
-        for thread in backend.threads.iter() {
+        for thread in handle.backend.threads.iter() {
             thread
                 .lock()
                 .unwrap()
                 .set_vring_worker(Some(vring_workers.remove(0)));
         }
 
-        daemon.start(listener).unwrap();
-
-        match daemon.wait() {
-            Ok(()) => {
-                info!("Stopping cleanly");
-            }
-            Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-                info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-            }
-            Err(e) => {
-                warn!("Error running daemon: {:?}", e);
-            }
-        }
-
-        // No matter the result, we need to shut down the worker thread.
-        backend.exit_event.write(1).unwrap();
+        handle.start(config.get_socket_path()).unwrap();
     }
 }
 
@@ -254,6 +229,9 @@ mod tests {
     use serial_test::serial;
     use std::fs::File;
     use std::io::Write;
+    use std::sync::Arc;
+    use vhost_user_backend::VhostUserDaemon;
+    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
     impl VsockArgs {
         fn from_args(guest_cid: u64, socket: &str, uds_path: &str, tx_buffer_size: u32) -> Self {

@@ -19,6 +19,7 @@ log = "0.4"
 num_enum = "0.5"
 thiserror = "1.0"
 vhost = { version = "0.7", features = ["vhost-user-slave"] }
+vhost-device-utils = { path = "../utils" }
 vhost-user-backend = "0.9"
 # until the scsi bindings hit a release, we have to use the commit that adds them as rev.
 virtio-bindings = { git = "https://github.com/rust-vmm/vm-virtio", rev = "467c8ec99375a5f4e08b85b18257cd7e0bac1dc0" }

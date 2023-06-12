@@ -5,16 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 mod vhu_rng;
 
-use log::{info, warn};
 use std::fs::File;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 use clap::Parser;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
-use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 use vhu_rng::VuRngBackend;
 
@@ -114,41 +110,12 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
             // killing the thread, which .unwrap() does.  When that happens an error code is
             // generated and displayed by the runtime mechanic.  Killing a thread doesn't affect
             // the other threads spun-off by the daemon.
-            let vu_rng_backend = Arc::new(RwLock::new(
-                VuRngBackend::new(random.clone(), period_ms, max_bytes).unwrap(),
-            ));
+            let vu_rng_backend =
+                RwLock::new(VuRngBackend::new(random.clone(), period_ms, max_bytes).unwrap());
 
-            let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-device-rng-backend"),
-                Arc::clone(&vu_rng_backend),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .unwrap();
-
-            let listener = Listener::new(socket.clone(), true).unwrap();
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            vu_rng_backend
-                .read()
-                .unwrap()
-                .exit_event
-                .write(1)
-                .expect("Shutting down worker thread");
+            let daemon =
+                vhost_device_utils::create_daemon(vu_rng_backend, "vhost-device-rng-backend");
+            daemon.start(socket.clone()).unwrap();
         });
 
         handles.push(handle);

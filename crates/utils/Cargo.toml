@@ -6,10 +6,15 @@ repository = "https://github.com/rust-vmm/vhost-device"
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 
+[features]
+default = ["systemd"]
+systemd = ["dep:systemd"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 log = "0.4"
+systemd = { version = "0.10", optional = true }
 vhost = { version = "0.7", features = ["vhost-user"] }
 vhost-user-backend = "0.9"
 vm-memory = "0.11"

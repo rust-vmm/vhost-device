@@ -30,6 +30,26 @@ pub enum Error {
     SoundReqMissingData,
     #[error("Audio backend not supported")]
     AudioBackendNotSupported,
+    #[error("Descriptor not found")]
+    DescriptorNotFound,
+    #[error("Descriptor read failed")]
+    DescriptorReadFailed,
+    #[error("Descriptor write failed")]
+    DescriptorWriteFailed,
+    #[error("Isufficient descriptor size, required: {0}, found: {1}")]
+    InsufficientDescriptorSize(usize, usize),
+    #[error("Failed to send notification")]
+    SendNotificationFailed,
+    #[error("Invalid descriptor count {0}")]
+    UnexpectedDescriptorCount(usize),
+    #[error("Invalid descriptor size, expected: {0}, found: {1}")]
+    UnexpectedDescriptorSize(usize, usize),
+    #[error("Invalid descriptor size, expected at least: {0}, found: {1}")]
+    UnexpectedMinimumDescriptorSize(usize, usize),
+    #[error("Received unexpected readable descriptor at index {0}")]
+    UnexpectedReadableDescriptor(usize),
+    #[error("Received unexpected write only descriptor at index {0}")]
+    UnexpectedWriteOnlyDescriptor(usize),
 }
 
 impl std::convert::From<Error> for IoError {

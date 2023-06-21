@@ -102,7 +102,23 @@ impl VhostUserSoundThread {
                 self.process_event(vring)?;
             }
             TX_QUEUE_IDX => {
-                self.process_tx(vring)?;
+                let vring = &vrings[2];
+                if self.event_idx {
+                    // vm-virtio's Queue implementation only checks avail_index
+                    // once, so to properly support EVENT_IDX we need to keep
+                    // calling process_request_queue() until it stops finding
+                    // new requests on the queue.
+                    loop {
+                        vring.disable_notification().unwrap();
+                        self.process_tx(vring)?;
+                        if !vring.enable_notification().unwrap() {
+                            break;
+                        }
+                    }
+                } else {
+                    // Without EVENT_IDX, a single call is enough.
+                    self.process_tx(vring)?;
+                }
             }
             RX_QUEUE_IDX => {
                 self.process_rx(vring)?;
@@ -299,7 +315,102 @@ impl VhostUserSoundThread {
         Ok(false)
     }
 
-    fn process_tx(&self, _vring: &VringRwLock) -> IoResult<bool> {
+    fn process_tx(&self, vring: &VringRwLock) -> Result<bool> {
+        let requests: Vec<SndDescriptorChain> = vring
+            .get_mut()
+            .get_queue_mut()
+            .iter(self.mem.as_ref().unwrap().memory())
+            .map_err(|_| Error::DescriptorNotFound)?
+            .collect();
+
+        debug!("Requests to tx: {}", requests.len());
+
+        for desc_chain in requests {
+            let descriptors: Vec<_> = desc_chain.clone().collect();
+            debug!("Sound request with n descriptors: {}", descriptors.len());
+
+            // TODO: to handle the case in which READ_ONLY descs
+            // have both the header and the data
+
+            let last_desc = descriptors.len() - 1;
+            let desc_response = descriptors[last_desc];
+
+            if desc_response.len() as usize != size_of::<VirtioSoundPcmStatus>() {
+                return Err(Error::UnexpectedDescriptorSize(
+                    size_of::<VirtioSoundPcmStatus>(),
+                    desc_response.len() as usize,
+                ));
+            }
+
+            if !desc_response.is_write_only() {
+                return Err(Error::UnexpectedReadableDescriptor(1));
+            }
+
+            let response = VirtioSoundPcmStatus { status: VIRTIO_SND_S_OK.into(), latency_bytes: 0.into() };
+
+            let desc_request = descriptors[0];
+
+            if desc_request.len() as usize != size_of::<VirtioSoundPcmXfer>() {
+                return Err(Error::UnexpectedDescriptorSize(
+                    size_of::<VirtioSoundPcmXfer>(),
+                    desc_request.len() as usize,
+                ));
+            }
+
+            if desc_request.is_write_only() {
+                return Err(Error::UnexpectedWriteOnlyDescriptor(1));
+            }
+
+            let mut all_bufs=Vec::<u8>::new();
+            let data_descs = &descriptors[1..descriptors.len() -1];
+
+            for data in data_descs{
+                if data.is_write_only(){
+                    return Err(Error::UnexpectedWriteOnlyDescriptor(1));
+                }
+
+                let mut buf = vec![0u8; data.len() as usize];
+
+                desc_chain
+                    .memory()
+                    .read_slice(&mut buf, data.addr())
+                    .map_err(|_| Error::DescriptorReadFailed)?;
+
+                all_bufs.extend(buf);
+            }
+
+            let hdr_request = desc_chain
+            .memory()
+            .read_obj::<VirtioSoundPcmXfer>(desc_request.addr())
+            .map_err(|_| Error::DescriptorReadFailed)?;
+
+            let _stream_id = hdr_request.stream_id.to_native();
+
+            // TODO: to invoke audio_backend.write(stream_id, all_bufs, len)
+
+            // 5.14.6.8.1.1
+            // The device MUST NOT complete the I/O request until the buffer is
+            // totally consumed.
+            desc_chain
+                .memory()
+                .write_obj(response, desc_response.addr())
+                .map_err(|_| Error::DescriptorWriteFailed)?;
+
+            let len = desc_response.len() as u32;
+
+            if vring
+                .add_used(desc_chain.head_index(), len)
+                .is_err()
+            {
+                error!("Couldn't return used descriptors to the ring");
+            }
+        }
+        // Send notification once all the requests are processed
+        debug!("Sending processed tx notification");
+        vring
+            .signal_used_queue()
+            .map_err(|_| Error::SendNotificationFailed)?;
+        debug!("Process tx queue finished");
         Ok(false)
     }
 

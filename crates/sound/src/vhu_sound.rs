@@ -72,7 +72,7 @@ impl VhostUserSoundThread {
         Ok(())
     }
 
-    fn handle_event(&self, device_event: u16, vrings: &[VringRwLock]) -> IoResult<bool> {
+    fn handle_event(&self, device_event: u16, vrings: &[VringRwLock], audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>) -> IoResult<bool> {
         let vring = &vrings[device_event as usize];
         let queue_idx = self.queue_indexes[device_event as usize];
         debug!("handle event call queue: {}", queue_idx);
@@ -110,14 +110,14 @@ impl VhostUserSoundThread {
                     // new requests on the queue.
                     loop {
                         vring.disable_notification().unwrap();
-                        self.process_tx(vring)?;
+                        self.process_tx(vring, &audio_backend)?;
                         if !vring.enable_notification().unwrap() {
                             break;
                         }
                     }
                 } else {
                     // Without EVENT_IDX, a single call is enough.
-                    self.process_tx(vring)?;
+                    self.process_tx(vring, &audio_backend)?;
                 }
             }
             RX_QUEUE_IDX => {
@@ -315,7 +315,7 @@ impl VhostUserSoundThread {
         Ok(false)
     }
 
-    fn process_tx(&self, vring: &VringRwLock) -> Result<bool> {
+    fn process_tx(&self, vring: &VringRwLock, _audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>) -> Result<bool> {
         let requests: Vec<SndDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
@@ -517,7 +517,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
         self.threads[thread_id]
             .read()
             .unwrap()
-            .handle_event(device_event, vrings)
+            .handle_event(device_event, vrings, &self._audio_backend)
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {

@@ -1,0 +1,37 @@
+[package]
+name = "vhost-device-video"
+version = "0.1.0"
+authors = ["Albert Esteve <aesteve@redhat.com>"]
+description = "A virtio-video device using the vhost-user protocol."
+repository = "https://github.com/rust-vmm/vhost-device"
+readme = "README.md"
+keywords = ["vhost", "video", "virt", "backend"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+default = []
+
+[dependencies]
+bitflags = "2.3.3"
+clap = { version = "4.4",  features = ["derive"] }
+env_logger = "0.10"
+epoll = "4.3"
+num_enum = "0.7"
+log = "0.4"
+libc = "0.2.147"
+thiserror = "1.0"
+futures-executor = { version = "0.3", features = ["thread-pool"] }
+vhost = { version = "0.8", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.10"
+virtio-bindings = "0.2.1"
+virtio-queue = "0.9"
+vm-memory = "0.12"
+vmm-sys-util = "0.11"
+
+[dev-dependencies]
+virtio-queue = { version = "0.9", features = ["test-utils"] }
+vm-memory = { version = "0.12", features = ["backend-mmap", "backend-atomic"] }

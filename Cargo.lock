@@ -1111,6 +1111,7 @@ dependencies = [
  "vhost",
  "vhost-user-backend",
  "virtio-bindings 0.2.0",
+ "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
 ]

@@ -40,6 +40,7 @@ More information may be found in its [README file](./staging/README.md).
 Here is the list of device backends in **staging**:
 
 - [Sound](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-sound/README.md)
+- [Video](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-video/README.md)
 
 <!--
 Template:

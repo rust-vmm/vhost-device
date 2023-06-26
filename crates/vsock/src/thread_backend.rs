@@ -59,6 +59,8 @@ pub(crate) struct VsockThreadBackend {
     host_socket_path: String,
     /// epoll for registering new host-side connections.
     epoll_fd: i32,
+    /// CID of the guest.
+    guest_cid: u64,
     /// Set of allocated local ports.
     pub local_port_set: HashSet<u32>,
     tx_buffer_size: u32,
@@ -73,6 +75,7 @@ impl VsockThreadBackend {
     pub fn new(
         host_socket_path: String,
         epoll_fd: i32,
+        guest_cid: u64,
         tx_buffer_size: u32,
         cid_map: Arc<RwLock<CidMap>>,
     ) -> Self {
@@ -85,6 +88,7 @@ impl VsockThreadBackend {
             stream_map: HashMap::new(),
             host_socket_path,
             epoll_fd,
+            guest_cid,
             local_port_set: HashSet::new(),
             tx_buffer_size,
             cid_map,
@@ -162,6 +166,14 @@ impl VsockThreadBackend {
     /// Returns:
     /// - always `Ok(())` if packet has been consumed correctly
     pub fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
+        if pkt.src_cid() != self.guest_cid {
+            warn!(
+                "vsock: dropping packet with inconsistent src_cid: {:?} from guest configured with CID: {:?}",
+                pkt.src_cid(), self.guest_cid
+            );
+            return Ok(());
+        }
+
         let dst_cid = pkt.dst_cid();
         if dst_cid != VSOCK_HOST_CID {
             let cid_map = self.cid_map.read().unwrap();
@@ -331,6 +343,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_vsock_thread_backend() {
+        const CID: u64 = 3;
         const VSOCK_SOCKET_PATH: &str = "test_vsock_thread_backend.vsock";
         const VSOCK_PEER_PORT: u32 = 1234;
         const VSOCK_PEER_PATH: &str = "test_vsock_thread_backend.vsock_1234";
@@ -345,6 +358,7 @@ mod tests {
         let mut vtp = VsockThreadBackend::new(
             VSOCK_SOCKET_PATH.to_string(),
             epoll_fd,
+            CID,
             CONN_TX_BUF_SIZE,
             cid_map,
         );
@@ -367,6 +381,7 @@ mod tests {
         packet.set_type(VSOCK_TYPE_STREAM);
         assert!(vtp.send_pkt(&packet).is_ok());
 
+        packet.set_src_cid(CID);
         packet.set_dst_cid(VSOCK_HOST_CID);
         packet.set_dst_port(VSOCK_PEER_PORT);
         assert!(vtp.send_pkt(&packet).is_ok());
@@ -417,6 +432,7 @@ mod tests {
         let mut vtp = VsockThreadBackend::new(
             VSOCK_SOCKET_PATH.to_string(),
             epoll_fd,
+            CID,
             CONN_TX_BUF_SIZE,
             cid_map,
         );

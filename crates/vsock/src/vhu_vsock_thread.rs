@@ -100,7 +100,13 @@ impl VhostUserVsockThread {
             host_listener: host_sock,
             vring_worker: None,
             epoll_file,
-            thread_backend: VsockThreadBackend::new(uds_path, epoll_fd, tx_buffer_size, cid_map),
+            thread_backend: VsockThreadBackend::new(
+                uds_path,
+                epoll_fd,
+                guest_cid,
+                tx_buffer_size,
+                cid_map,
+            ),
             guest_cid,
             pool: ThreadPoolBuilder::new()
                 .pool_size(1)

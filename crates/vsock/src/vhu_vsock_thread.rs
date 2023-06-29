@@ -10,7 +10,7 @@ use std::{
         net::{UnixListener, UnixStream},
         prelude::{AsRawFd, FromRawFd, RawFd},
     },
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use futures::executor::{ThreadPool, ThreadPoolBuilder};
@@ -19,17 +19,27 @@ use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
 use crate::{
     rxops::*,
     thread_backend::*,
-    vhu_vsock::{ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, VSOCK_HOST_CID},
+    vhu_vsock::{
+        CidMap, ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT, SIBLING_VM_EVENT,
+        VSOCK_HOST_CID,
+    },
     vsock_conn::*,
 };
 
 type ArcVhostBknd = Arc<VhostUserVsockBackend>;
 
+enum RxQueueType {
+    Standard,
+    RawPkts,
+}
 pub(crate) struct VhostUserVsockThread {
     /// Guest memory map.
     pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
@@ -55,11 +65,19 @@ pub(crate) struct VhostUserVsockThread {
     local_port: Wrapping<u32>,
     /// The tx buffer size
     tx_buffer_size: u32,
+    /// EventFd to notify this thread for custom events. Currently used to notify
+    /// this thread to process raw vsock packets sent from a sibling VM.
+    pub sibling_event_fd: EventFd,
 }
 
 impl VhostUserVsockThread {
     /// Create a new instance of VhostUserVsockThread.
-    pub fn new(uds_path: String, guest_cid: u64, tx_buffer_size: u32) -> Result<Self> {
+    pub fn new(
+        uds_path: String,
+        guest_cid: u64,
+        tx_buffer_size: u32,
+        cid_map: Arc<RwLock<CidMap>>,
+    ) -> Result<Self> {
         // TODO: better error handling, maybe add a param to force the unlink
         let _ = std::fs::remove_file(uds_path.clone());
         let host_sock = UnixListener::bind(&uds_path)
@@ -72,6 +90,8 @@ impl VhostUserVsockThread {
 
         let host_raw_fd = host_sock.as_raw_fd();
 
+        let sibling_event_fd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+
         let thread = VhostUserVsockThread {
             mem: None,
             event_idx: false,
@@ -80,7 +100,7 @@ impl VhostUserVsockThread {
             host_listener: host_sock,
             vring_worker: None,
             epoll_file,
-            thread_backend: VsockThreadBackend::new(uds_path, epoll_fd, tx_buffer_size),
+            thread_backend: VsockThreadBackend::new(uds_path, epoll_fd, tx_buffer_size, cid_map),
             guest_cid,
             pool: ThreadPoolBuilder::new()
                 .pool_size(1)
@@ -88,6 +108,7 @@ impl VhostUserVsockThread {
                 .map_err(Error::CreateThreadPool)?,
             local_port: Wrapping(0),
             tx_buffer_size,
+            sibling_event_fd,
         };
 
         VhostUserVsockThread::epoll_register(epoll_fd, host_raw_fd, epoll::Events::EPOLLIN)?;
@@ -149,6 +170,15 @@ impl VhostUserVsockThread {
             .as_ref()
             .unwrap()
             .register_listener(self.get_epoll_fd(), EventSet::IN, u64::from(BACKEND_EVENT))
+            .unwrap();
+        self.vring_worker
+            .as_ref()
+            .unwrap()
+            .register_listener(
+                self.sibling_event_fd.as_raw_fd(),
+                EventSet::IN,
+                u64::from(SIBLING_VM_EVENT),
+            )
             .unwrap();
     }
 
@@ -388,7 +418,11 @@ impl VhostUserVsockThread {
     }
 
     /// Iterate over the rx queue and process rx requests.
-    fn process_rx_queue(&mut self, vring: &VringRwLock) -> Result<bool> {
+    fn process_rx_queue(
+        &mut self,
+        vring: &VringRwLock,
+        rx_queue_type: RxQueueType,
+    ) -> Result<bool> {
         let mut used_any = false;
         let atomic_mem = match &self.mem {
             Some(m) => m,
@@ -414,7 +448,12 @@ impl VhostUserVsockThread {
                 self.tx_buffer_size,
             ) {
                 Ok(mut pkt) => {
-                    if self.thread_backend.recv_pkt(&mut pkt).is_ok() {
+                    let recv_result = match rx_queue_type {
+                        RxQueueType::Standard => self.thread_backend.recv_pkt(&mut pkt),
+                        RxQueueType::RawPkts => self.thread_backend.recv_raw_pkt(&mut pkt),
+                    };
+
+                    if recv_result.is_ok() {
                         PKT_HEADER_SIZE + pkt.len() as usize
                     } else {
                         queue.iter(mem).unwrap().go_to_previous_position();
@@ -455,8 +494,17 @@ impl VhostUserVsockThread {
                 }
             });
 
-            if !self.thread_backend.pending_rx() {
-                break;
+            match rx_queue_type {
+                RxQueueType::Standard => {
+                    if !self.thread_backend.pending_rx() {
+                        break;
+                    }
+                }
+                RxQueueType::RawPkts => {
+                    if !self.thread_backend.pending_raw_pkts() {
+                        break;
+                    }
+                }
             }
         }
         Ok(used_any)
@@ -475,13 +523,13 @@ impl VhostUserVsockThread {
                 }
                 vring.disable_notification().unwrap();
 
-                self.process_rx_queue(vring)?;
+                self.process_rx_queue(vring, RxQueueType::Standard)?;
                 if !vring.enable_notification().unwrap() {
                     break;
                 }
             }
         } else {
-            self.process_rx_queue(vring)?;
+            self.process_rx_queue(vring, RxQueueType::Standard)?;
         }
         Ok(false)
     }
@@ -581,6 +629,26 @@ impl VhostUserVsockThread {
         }
         Ok(false)
     }
+
+    /// Wrapper to process raw vsock packets queue based on whether event idx is enabled or not.
+    pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+        if event_idx {
+            loop {
+                if !self.thread_backend.pending_raw_pkts() {
+                    break;
+                }
+                vring.disable_notification().unwrap();
+
+                self.process_rx_queue(vring, RxQueueType::RawPkts)?;
+                if !vring.enable_notification().unwrap() {
+                    break;
+                }
+            }
+        } else {
+            self.process_rx_queue(vring, RxQueueType::RawPkts)?;
+        }
+        Ok(false)
+    }
 }
 
 impl Drop for VhostUserVsockThread {
@@ -592,6 +660,7 @@ impl Drop for VhostUserVsockThread {
 mod tests {
     use super::*;
     use serial_test::serial;
+    use std::collections::HashMap;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -606,8 +675,14 @@ mod tests {
     #[test]
     #[serial]
     fn test_vsock_thread() {
-        let t =
-            VhostUserVsockThread::new("test_vsock_thread.vsock".to_string(), 3, CONN_TX_BUF_SIZE);
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let t = VhostUserVsockThread::new(
+            "test_vsock_thread.vsock".to_string(),
+            3,
+            CONN_TX_BUF_SIZE,
+            cid_map,
+        );
         assert!(t.is_ok());
 
         let mut t = t.unwrap();
@@ -662,14 +737,21 @@ mod tests {
     #[test]
     #[serial]
     fn test_vsock_thread_failures() {
-        let t =
-            VhostUserVsockThread::new("/sys/not_allowed.vsock".to_string(), 3, CONN_TX_BUF_SIZE);
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let t = VhostUserVsockThread::new(
+            "/sys/not_allowed.vsock".to_string(),
+            3,
+            CONN_TX_BUF_SIZE,
+            cid_map.clone(),
+        );
         assert!(t.is_err());
 
         let mut t = VhostUserVsockThread::new(
             "test_vsock_thread_failures.vsock".to_string(),
             3,
             CONN_TX_BUF_SIZE,
+            cid_map,
         )
         .unwrap();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());

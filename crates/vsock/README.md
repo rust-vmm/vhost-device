@@ -142,6 +142,34 @@ host$ nc -l -U /tmp/vm4.vsock_1234
 guest$ nc --vsock 2 1234
 ```
 
+### Sibling VM communication
+
+If you add multiple VMs, they can communicate with each other. For example, if you have two VMs with
+CID 3 and 4, you can run the following commands to make them communicate:
+
+```sh
+shell1$ vhost-user-vsock --vm guest-cid=3,uds-path=/tmp/vm3.vsock,socket=/tmp/vhost3.socket \
+          --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
+shell2$ qemu-system-x86_64 \
+          -drive file=vm1.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
+          -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages" \
+          -machine q35,accel=kvm,memory-backend=mem0 \
+          -chardev socket,id=char0,reconnect=0,path=/tmp/vhost3.socket \
+          -device vhost-user-vsock-pci,chardev=char0
+shell3$ qemu-system-x86_64 \
+          -drive file=vm2.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
+          -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages2" \
+          -machine q35,accel=kvm,memory-backend=mem0 \
+          -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
+          -device vhost-user-vsock-pci,chardev=char0
+```
+
+```sh
+# nc-vsock patched to set `.svm_flags = VMADDR_FLAG_TO_HOST`
+guest_cid3$ nc-vsock -l 1234
+guest_cid4$ nc-vsock 3 1234
+```
+
 ## License
 
 This project is licensed under either of

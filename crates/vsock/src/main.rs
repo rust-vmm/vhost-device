@@ -233,7 +233,7 @@ pub(crate) fn start_backend_servers(configs: &[VsockConfig]) {
 fn main() {
     env_logger::init();
 
-    let mut configs = match Vec::<VsockConfig>::try_from(VsockArgs::parse()) {
+    let configs = match Vec::<VsockConfig>::try_from(VsockArgs::parse()) {
         Ok(c) => c,
         Err(e) => {
             println!("Error parsing arguments: {}", e);
@@ -241,11 +241,7 @@ fn main() {
         }
     };
 
-    if configs.len() == 1 {
-        start_backend_server(configs.pop().unwrap());
-    } else {
-        start_backend_servers(&configs);
-    }
+    start_backend_servers(&configs);
 }
 
 #[cfg(test)]

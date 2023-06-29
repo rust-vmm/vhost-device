@@ -4,6 +4,7 @@
 
 mod scmi;
 mod vhu_scmi;
+mod devices;
 
 use std::process::exit;
 use std::sync::{Arc, RwLock};

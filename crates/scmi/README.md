@@ -8,14 +8,6 @@ It is tested with QEMU's `-device vhost-user-scmi-pci` but should work
 with any virtual machine monitor (VMM) that supports vhost-user. See
 the Examples section below.
 
-The currently supported SCMI protocols are:
-
-- base protocol
-
-The currently supported SCMI connections on the host are:
-
-- none
-
 ## Synopsis
 
 **vhost-device-scmi** [*OPTIONS*]
@@ -55,6 +47,16 @@ use to communicate as well as share the guests memory over a memfd:
       -m 4096 \
       -object memory-backend-file,id=mem,size=4G,mem-path=/dev/shm,share=on \
       ...
+
+## Supported SCMI protocols
+
+The currently supported SCMI protocols are:
+
+- base
+- sensor management
+
+Basically only the mandatory and necessary parts of the protocols are
+implemented.
 
 ## License
 

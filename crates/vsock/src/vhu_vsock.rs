@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     io::{self, Result as IoResult},
-    sync::Mutex,
+    sync::{Arc, Mutex, RwLock},
     u16, u32, u64, u8,
 };
 
@@ -22,6 +23,8 @@ use vmm_sys_util::{
 
 use crate::vhu_vsock_thread::*;
 
+pub(crate) type CidMap = HashMap<u64, Arc<VhostUserVsockBackend>>;
+
 const NUM_QUEUES: usize = 2;
 const QUEUE_SIZE: usize = 256;
 
@@ -34,6 +37,9 @@ const EVT_QUEUE_EVENT: u16 = 2;
 
 /// Notification coming from the backend.
 pub(crate) const BACKEND_EVENT: u16 = 3;
+
+/// Notification coming from the sibling VM.
+pub(crate) const SIBLING_VM_EVENT: u16 = 4;
 
 /// CID of the host
 pub(crate) const VSOCK_HOST_CID: u64 = 2;
@@ -123,6 +129,8 @@ pub(crate) enum Error {
     EmptyBackendRxQ,
     #[error("Failed to create an EventFd")]
     EventFdCreate(std::io::Error),
+    #[error("Raw vsock packets queue is empty")]
+    EmptyRawPktsQueue,
 }
 
 impl std::convert::From<Error> for std::io::Error {
@@ -211,11 +219,12 @@ pub(crate) struct VhostUserVsockBackend {
 }
 
 impl VhostUserVsockBackend {
-    pub fn new(config: VsockConfig) -> Result<Self> {
+    pub fn new(config: VsockConfig, cid_map: Arc<RwLock<CidMap>>) -> Result<Self> {
         let thread = Mutex::new(VhostUserVsockThread::new(
             config.get_uds_path(),
             config.get_guest_cid(),
             config.get_tx_buffer_size(),
+            cid_map,
         )?);
         let queues_per_thread = vec![QUEUE_MASK];
 
@@ -297,6 +306,11 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
                     }
                 }
             }
+            SIBLING_VM_EVENT => {
+                let _ = thread.sibling_event_fd.read();
+                thread.process_raw_pkts(vring_rx, evt_idx)?;
+                return Ok(false);
+            }
             _ => {
                 return Err(Error::HandleUnknownEvent.into());
             }
@@ -355,7 +369,9 @@ mod tests {
             CONN_TX_BUF_SIZE,
         );
 
-        let backend = VhostUserVsockBackend::new(config);
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let backend = VhostUserVsockBackend::new(config, cid_map);
 
         assert!(backend.is_ok());
         let backend = backend.unwrap();
@@ -428,7 +444,9 @@ mod tests {
             CONN_TX_BUF_SIZE,
         );
 
-        let backend = VhostUserVsockBackend::new(config);
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let backend = VhostUserVsockBackend::new(config, cid_map.clone());
         assert!(backend.is_err());
 
         let config = VsockConfig::new(
@@ -438,7 +456,7 @@ mod tests {
             CONN_TX_BUF_SIZE,
         );
 
-        let backend = VhostUserVsockBackend::new(config).unwrap();
+        let backend = VhostUserVsockBackend::new(config, cid_map).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );
@@ -462,7 +480,7 @@ mod tests {
         );
         assert_eq!(
             backend
-                .handle_event(BACKEND_EVENT + 1, EventSet::IN, &vrings, 0)
+                .handle_event(SIBLING_VM_EVENT + 1, EventSet::IN, &vrings, 0)
                 .unwrap_err()
                 .to_string(),
             Error::HandleUnknownEvent.to_string()

@@ -8,9 +8,14 @@ mod vhu_vsock;
 mod vhu_vsock_thread;
 mod vsock_conn;
 
-use std::{convert::TryFrom, sync::Arc, thread};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    sync::{Arc, RwLock},
+    thread,
+};
 
-use crate::vhu_vsock::{VhostUserVsockBackend, VsockConfig};
+use crate::vhu_vsock::{CidMap, VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
 use log::{info, warn};
 use serde::Deserialize;
@@ -172,9 +177,14 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
 
 /// This is the public API through which an external program starts the
 /// vhost-user-vsock backend server.
-pub(crate) fn start_backend_server(config: VsockConfig) {
+pub(crate) fn start_backend_server(config: VsockConfig, cid_map: Arc<RwLock<CidMap>>) {
     loop {
-        let backend = Arc::new(VhostUserVsockBackend::new(config.clone()).unwrap());
+        let backend =
+            Arc::new(VhostUserVsockBackend::new(config.clone(), cid_map.clone()).unwrap());
+        cid_map
+            .write()
+            .unwrap()
+            .insert(config.get_guest_cid(), backend.clone());
 
         let listener = Listener::new(config.get_socket_path(), true).unwrap();
 
@@ -210,17 +220,20 @@ pub(crate) fn start_backend_server(config: VsockConfig) {
 
         // No matter the result, we need to shut down the worker thread.
         backend.exit_event.write(1).unwrap();
+        cid_map.write().unwrap().remove(&config.get_guest_cid());
     }
 }
 
 pub(crate) fn start_backend_servers(configs: &[VsockConfig]) {
+    let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
     let mut handles = Vec::new();
 
     for c in configs.iter() {
         let config = c.clone();
+        let cid_map = cid_map.clone();
         let handle = thread::Builder::new()
             .name(format!("vhu-vsock-cid-{}", c.get_guest_cid()))
-            .spawn(move || start_backend_server(config))
+            .spawn(move || start_backend_server(config, cid_map))
             .unwrap();
         handles.push(handle);
     }
@@ -367,7 +380,10 @@ mod tests {
             CONN_TX_BUF_SIZE,
         );
 
-        let backend = Arc::new(VhostUserVsockBackend::new(config).unwrap());
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let backend = Arc::new(VhostUserVsockBackend::new(config, cid_map.clone()).unwrap());
+        cid_map.write().unwrap().insert(CID, backend.clone());
 
         let daemon = VhostUserDaemon::new(
             String::from("vhost-user-vsock"),

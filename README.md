@@ -45,14 +45,20 @@ logic to service the virtio requests directly in the application.
 
 ## Build dependency
 
-The GPIO crate needs a local installation of libgpiod library to be available,
-which can be done like:
+The GPIO crate needs a local installation of libgpiod library to be available.
+If your distro ships libgpiod >= v2.0, then you should be fine.
 
-$ git clone --depth 1 --branch v2.0-rc1 https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/
-$ cd libgpiod
-$ ./autogen.sh && make
+Otherwise, you will need to build libgpiod yourself:
 
-Either you can do a 'make install' now on your system, or provide path to the
-locally build library like this while building vhost-device crates:
+    git clone --depth 1 --branch v2.0.x https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/
+    cd libgpiod
+    ./autogen.sh --prefix="$PWD/install/"
+    make install
 
-$ RUSTFLAGS='-L /home/<username>/libgpiod/lib/.libs/'  cargo build --release
+In order to inform tools about the build location, you can now set:
+
+    export PKG_CONFIG_PATH="<PATH-TO-LIBGPIOD>/install/lib/pkgconfig/"
+
+To prevent setting this in every terminal session, you can also configure
+cargo to
+[set it automatically](https://doc.rust-lang.org/cargo/reference/config.html#env).

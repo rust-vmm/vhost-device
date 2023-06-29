@@ -1,22 +1,40 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
+use std::{
+    cmp::min,
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use itertools::Itertools;
-use log::debug;
+use log::{debug, error, info};
+use thiserror::Error as ThisError;
 
 pub type MessageHeader = u32;
+
+pub const MAX_SIMPLE_STRING_LENGTH: usize = 16; // incl. NULL terminator
+
 // SCMI specification talks about Le32 parameter and return values.
 // VirtIO SCMI specification talks about u8 SCMI values.
 // Let's stick with SCMI specification for implementation simplicity.
-#[derive(Clone, Debug, PartialEq)]
-enum MessageValue {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MessageValue {
     Signed(i32),
     Unsigned(u32),
     String(String, usize), // string, expected characters
 }
-type MessageValues = Vec<MessageValue>;
+
+impl MessageValue {
+    pub(crate) fn get_unsigned(&self) -> u32 {
+        match self {
+            Self::Unsigned(value) => *value,
+            _ => panic!("Wrong parameter"),
+        }
+    }
+}
+
+pub type MessageValues = Vec<MessageValue>;
 
 #[derive(Debug, PartialEq)]
 enum MessageType {
@@ -24,8 +42,8 @@ enum MessageType {
     Command,     // 0
     Unsupported, // anything else
 }
-type MessageId = u8;
-type ProtocolId = u8;
+pub type MessageId = u8;
+pub type ProtocolId = u8;
 type NParameters = u8;
 
 #[derive(Clone, Copy)]
@@ -171,10 +189,11 @@ impl ScmiRequest {
     }
 
     fn get_unsigned(&self, parameter: usize) -> u32 {
-        match self.parameters.as_ref().expect("Missing parameters")[parameter] {
-            MessageValue::Unsigned(value) => value,
-            _ => panic!("Wrong parameter"),
-        }
+        self.parameters.as_ref().expect("Missing parameters")[parameter].get_unsigned()
+    }
+
+    fn get_usize(&self, parameter: usize) -> usize {
+        self.get_unsigned(parameter) as usize
     }
 }
 
@@ -185,6 +204,19 @@ const BASE_MESSAGE_ATTRIBUTES: MessageId = 0x2;
 const BASE_DISCOVER_VENDOR: MessageId = 0x3;
 const BASE_DISCOVER_IMPLEMENTATION_VERSION: MessageId = 0x5;
 const BASE_DISCOVER_LIST_PROTOCOLS: MessageId = 0x6;
+
+pub const SENSOR_PROTOCOL_ID: ProtocolId = 0x15;
+const SENSOR_VERSION: MessageId = 0x0;
+const SENSOR_ATTRIBUTES: MessageId = 0x1;
+const SENSOR_MESSAGE_ATTRIBUTES: MessageId = 0x2;
+pub const SENSOR_DESCRIPTION_GET: MessageId = 0x3;
+pub const SENSOR_READING_GET: MessageId = 0x6;
+pub const SENSOR_AXIS_DESCRIPTION_GET: MessageId = 0x7;
+pub const SENSOR_CONFIG_GET: MessageId = 0x9;
+pub const SENSOR_CONFIG_SET: MessageId = 0xA;
+pub const SENSOR_CONTINUOUS_UPDATE_NOTIFY: MessageId = 0xB;
+
+pub const SENSOR_UNIT_METERS_PER_SECOND_SQUARED: u32 = 89;
 
 enum ParameterType {
     _SignedInt32,
@@ -206,6 +238,7 @@ impl HandlerMap {
     fn new() -> Self {
         let mut map = Self(HashMap::new());
         map.make_base_handlers();
+        map.make_sensor_handlers();
         map
     }
 
@@ -293,16 +326,227 @@ impl HandlerMap {
             ScmiHandler::discover_list_protocols,
         );
     }
+
+    fn make_sensor_handlers(&mut self) {
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_VERSION,
+            "sensor/version",
+            vec![],
+            |_, _| -> Response {
+                // 32-bit unsigned integer
+                // major: upper 16 bits
+                // minor: lower 16 bits
+                Response::from(MessageValue::Unsigned(0x30000))
+            },
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_ATTRIBUTES,
+            "sensor/attributes",
+            vec![],
+            |handler: &ScmiHandler, _| -> Response {
+                let n_sensors = u32::from(handler.devices.number_of_devices(SENSOR_PROTOCOL_ID));
+                let values: MessageValues = vec![
+                    MessageValue::Unsigned(n_sensors), // # of sensors, no async commands
+                    MessageValue::Unsigned(0), // lower shared memory address -- not supported
+                    MessageValue::Unsigned(0), // higer shared memory address -- not supported
+                    MessageValue::Unsigned(0), // length of shared memory -- not supported
+                ];
+                Response::from(&values)
+            },
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_MESSAGE_ATTRIBUTES,
+            "sensor/message_attributes",
+            vec![ParameterType::UnsignedInt32],
+            ScmiHandler::message_attributes,
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_DESCRIPTION_GET,
+            "sensor/description_get",
+            vec![ParameterType::UnsignedInt32],
+            |handler: &ScmiHandler, request: &ScmiRequest| -> Response {
+                let first_index = request.get_usize(0);
+                let n_sensors = handler.devices.number_of_devices(SENSOR_PROTOCOL_ID) as usize;
+                if first_index >= n_sensors {
+                    return Response::from(ReturnStatus::InvalidParameters);
+                }
+                // Let's use something reasonable to fit into the available VIRTIO buffers:
+                let max_sensors_to_return = 256;
+                let sensors_to_return = min(n_sensors - first_index, max_sensors_to_return);
+                let last_non_returned_sensor = first_index + sensors_to_return;
+                let remaining_sensors = if n_sensors > last_non_returned_sensor {
+                    n_sensors - last_non_returned_sensor
+                } else {
+                    0
+                };
+                let mut values = vec![MessageValue::Unsigned(
+                    sensors_to_return as u32 | (remaining_sensors as u32) << 16,
+                )];
+                for index in first_index..last_non_returned_sensor {
+                    values.push(MessageValue::Unsigned(index as u32));
+                    let result = handler.handle_device(
+                        index,
+                        SENSOR_PROTOCOL_ID,
+                        SENSOR_DESCRIPTION_GET,
+                        &[],
+                    );
+                    if result.is_err() {
+                        return handler.device_response(result, index);
+                    }
+                    let mut sensor_values = result.unwrap();
+                    values.append(&mut sensor_values);
+                }
+                Response::from(&values)
+            },
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_READING_GET,
+            "sensor/reading_get",
+            vec![ParameterType::UnsignedInt32, ParameterType::UnsignedInt32],
+            |handler: &ScmiHandler, request: &ScmiRequest| -> Response {
+                // Check flags
+                if request.get_unsigned(1) != 0 {
+                    // Asynchronous reporting not supported
+                    return Response::from(ReturnStatus::NotSupported);
+                }
+                handler.handle_device_response(request, &[])
+            },
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_AXIS_DESCRIPTION_GET,
+            "sensor/axis_description_get",
+            vec![ParameterType::UnsignedInt32, ParameterType::UnsignedInt32],
+            |handler: &ScmiHandler, request: &ScmiRequest| -> Response {
+                handler.handle_device_response(request, &[1])
+            },
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONFIG_GET,
+            "sensor/config_get",
+            vec![ParameterType::UnsignedInt32],
+            |handler: &ScmiHandler, request: &ScmiRequest| -> Response {
+                handler.handle_device_response(request, &[])
+            },
+        );
+
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONFIG_SET,
+            "sensor/config_set",
+            vec![ParameterType::UnsignedInt32, ParameterType::UnsignedInt32],
+            |handler: &ScmiHandler, request: &ScmiRequest| -> Response {
+                handler.handle_device_response(request, &[1])
+            },
+        );
+
+        // Linux VIRTIO SCMI seems to insist on presence of this:
+        self.bind(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONTINUOUS_UPDATE_NOTIFY,
+            "sensor/continuous_update_notify",
+            vec![ParameterType::UnsignedInt32, ParameterType::UnsignedInt32],
+            |handler: &ScmiHandler, request: &ScmiRequest| -> Response {
+                handler.handle_device_response(request, &[1])
+            },
+        );
+    }
 }
+
+#[derive(Debug, PartialEq, Eq, ThisError)]
+pub enum ScmiDeviceError {
+    #[error("Invalid parameters")]
+    InvalidParameters,
+    #[error("No such device")]
+    NoSuchDevice,
+    #[error("Device not enabled")]
+    NotEnabled,
+    #[error("Unsupported request")]
+    UnsupportedRequest,
+}
+
+pub trait ScmiDevice: Send {
+    fn protocol(&self) -> ProtocolId;
+    fn handle(
+        &mut self,
+        message_id: MessageId,
+        parameters: &[MessageValue],
+    ) -> Result<MessageValues, ScmiDeviceError>;
+}
+
+type DeviceList = Vec<Box<dyn ScmiDevice>>;
+
+struct DeviceMap(Arc<Mutex<HashMap<ProtocolId, DeviceList>>>);
+
+impl DeviceMap {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(HashMap::new())))
+    }
+
+    // This is the maximum number of the remaining sensors
+    // SENSOR_DESCRIPTION_GET supports -- the upper 16 bits of the response.
+    const MAX_NUMBER_OF_PROTOCOL_DEVICES: usize = 0xFFFF;
+
+    fn insert(&mut self, device: Box<dyn ScmiDevice>) {
+        let mut device_map = self.0.lock().unwrap();
+        let devices = device_map.entry(device.protocol()).or_default();
+        if devices.len() >= Self::MAX_NUMBER_OF_PROTOCOL_DEVICES {
+            panic!(
+                "Too many devices defined for protocol {}",
+                device.protocol()
+            );
+        }
+        devices.push(device);
+    }
+
+    fn number_of_devices(&self, protocol_id: ProtocolId) -> u16 {
+        match self.0.lock().unwrap().get(&protocol_id) {
+            Some(devices) => devices.len() as u16,
+            None => 0,
+        }
+    }
+
+    fn handle(
+        &self,
+        device_index: usize,
+        protocol_id: ProtocolId,
+        message_id: MessageId,
+        parameters: &[MessageValue],
+    ) -> Result<MessageValues, ScmiDeviceError> {
+        match self.0.lock().unwrap().get_mut(&protocol_id) {
+            Some(devices) => match devices.get_mut(device_index) {
+                Some(device) => device.handle(message_id, parameters),
+                None => Result::Err(ScmiDeviceError::NoSuchDevice),
+            },
+            None => Result::Err(ScmiDeviceError::NoSuchDevice),
+        }
+    }
+}
+
+pub type DeviceResult = Result<MessageValues, ScmiDeviceError>;
 
 pub struct ScmiHandler {
     handlers: HandlerMap,
+    devices: DeviceMap,
 }
 
 impl ScmiHandler {
     pub fn new() -> Self {
         Self {
             handlers: HandlerMap::new(),
+            devices: DeviceMap::new(),
         }
     }
 
@@ -377,6 +621,56 @@ impl ScmiHandler {
             .expect("Impossibly large number of SCMI protocols")
     }
 
+    pub fn register_device(&mut self, device: Box<dyn ScmiDevice>) {
+        self.devices.insert(device);
+    }
+
+    fn handle_device(
+        &self,
+        device_index: usize,
+        protocol_id: ProtocolId,
+        message_id: MessageId,
+        parameters: &[MessageValue],
+    ) -> DeviceResult {
+        self.devices
+            .handle(device_index, protocol_id, message_id, parameters)
+    }
+
+    fn device_response(&self, result: DeviceResult, device_index: usize) -> Response {
+        match result {
+            Ok(values) => Response::from(&values),
+            Err(error) => match error {
+                ScmiDeviceError::NoSuchDevice
+                | ScmiDeviceError::NotEnabled
+                | ScmiDeviceError::InvalidParameters => {
+                    info!("Invalid device access: {}, {}", device_index, error);
+                    Response::from(ReturnStatus::InvalidParameters)
+                }
+                ScmiDeviceError::UnsupportedRequest => {
+                    info!("Unsupported request for {}", device_index);
+                    Response::from(ReturnStatus::NotSupported)
+                }
+            },
+        }
+    }
+
+    fn handle_device_response(&self, request: &ScmiRequest, parameters: &[usize]) -> Response {
+        let device_index = request.get_usize(0);
+        let protocol_id = request.protocol_id;
+        let message_id = request.message_id;
+        let parameter_values: Vec<MessageValue> = parameters
+            .iter()
+            .map(|i| MessageValue::Unsigned(request.get_unsigned(*i)))
+            .collect();
+        let result = self.handle_device(
+            device_index,
+            protocol_id,
+            message_id,
+            parameter_values.as_slice(),
+        );
+        self.device_response(result, device_index)
+    }
+
     fn discover_list_protocols(&self, request: &ScmiRequest) -> Response {
         // Base protocol is skipped
         let skip: usize = request
@@ -422,6 +716,8 @@ impl ScmiHandler {
 
 #[cfg(test)]
 mod tests {
+    use crate::devices;
+
     use super::*;
 
     #[test]
@@ -448,7 +744,7 @@ mod tests {
         let values = vec![
             MessageValue::Signed(-2),
             MessageValue::Unsigned(8),
-            MessageValue::String("foo".to_owned(), 16),
+            MessageValue::String("foo".to_owned(), MAX_SIMPLE_STRING_LENGTH),
         ];
         let len = values.len() + 1;
         let response = Response::from(&values);
@@ -463,7 +759,7 @@ mod tests {
         let values = vec![
             MessageValue::Signed(-2),
             MessageValue::Unsigned(800_000_000),
-            MessageValue::String("foo".to_owned(), 16),
+            MessageValue::String("foo".to_owned(), MAX_SIMPLE_STRING_LENGTH),
         ];
         let response = Response::from(&values);
         ScmiResponse::from(header, response)
@@ -554,6 +850,22 @@ mod tests {
         assert_eq!(request.get_unsigned(0), value);
     }
 
+    #[test]
+    fn test_unsupported_parameters() {
+        let handler = ScmiHandler::new();
+        let request = make_request(BASE_PROTOCOL_ID, 0x4);
+        assert_eq!(handler.number_of_parameters(&request), None);
+    }
+
+    fn make_handler() -> ScmiHandler {
+        let mut handler = ScmiHandler::new();
+        for i in 0..2 {
+            let fake_sensor = Box::new(devices::FakeSensor::new(format!("fake{i}")));
+            handler.register_device(fake_sensor);
+        }
+        handler
+    }
+
     fn test_message(
         protocol_id: ProtocolId,
         message_id: MessageId,
@@ -561,13 +873,32 @@ mod tests {
         result_code: ReturnStatus,
         result_values: Vec<MessageValue>,
     ) {
-        let mut handler = ScmiHandler::new();
+        let mut handler = make_handler();
+        test_message_with_handler(
+            protocol_id,
+            message_id,
+            parameters,
+            result_code,
+            result_values,
+            &mut handler,
+        );
+    }
+
+    fn test_message_with_handler(
+        protocol_id: ProtocolId,
+        message_id: MessageId,
+        parameters: Vec<MessageValue>,
+        result_code: ReturnStatus,
+        result_values: Vec<MessageValue>,
+        handler: &mut ScmiHandler,
+    ) {
         let mut request = make_request(protocol_id, message_id);
         let header = request.header;
         if !parameters.is_empty() {
             let parameter_slice = parameters.as_slice();
-            store_parameters(&handler, &mut request, parameter_slice);
+            store_parameters(handler, &mut request, parameter_slice);
         }
+
         let response = handler.handle(request);
         assert_eq!(response.header, header);
         let mut bytes: Vec<u8> = vec![];
@@ -607,7 +938,7 @@ mod tests {
 
     #[test]
     fn test_base_protocol_attributes() {
-        let result = vec![MessageValue::Unsigned(0)];
+        let result = vec![MessageValue::Unsigned(1)];
         test_message(
             BASE_PROTOCOL_ID,
             BASE_PROTOCOL_ATTRIBUTES,
@@ -656,7 +987,10 @@ mod tests {
 
     #[test]
     fn test_base_discover_vendor() {
-        let result = vec![MessageValue::String(String::from("rust-vmm"), 16)];
+        let result = vec![MessageValue::String(
+            "rust-vmm".to_owned(),
+            MAX_SIMPLE_STRING_LENGTH,
+        )];
         test_message(
             BASE_PROTOCOL_ID,
             BASE_DISCOVER_VENDOR,
@@ -681,7 +1015,7 @@ mod tests {
     #[test]
     fn test_base_discover_list_protocols() {
         let parameters = vec![MessageValue::Unsigned(0)];
-        let result = vec![MessageValue::Unsigned(0)];
+        let result = vec![MessageValue::Unsigned(1), MessageValue::Unsigned(21)];
         test_message(
             BASE_PROTOCOL_ID,
             BASE_DISCOVER_LIST_PROTOCOLS,
@@ -689,5 +1023,254 @@ mod tests {
             ReturnStatus::Success,
             result,
         );
+    }
+
+    #[test]
+    fn test_sensor_version() {
+        let values = vec![MessageValue::Unsigned(0x30000)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_VERSION,
+            vec![],
+            ReturnStatus::Success,
+            values,
+        );
+    }
+
+    #[test]
+    fn test_sensor_attributes() {
+        let result = vec![
+            MessageValue::Unsigned(2),
+            MessageValue::Unsigned(0),
+            MessageValue::Unsigned(0),
+            MessageValue::Unsigned(0),
+        ];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_ATTRIBUTES,
+            vec![],
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_sensor_message_attributes_supported() {
+        let parameters = vec![MessageValue::Unsigned(u32::from(SENSOR_DESCRIPTION_GET))];
+        let result = vec![MessageValue::Unsigned(0)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_sensor_message_attributes_unsupported() {
+        let parameters = vec![MessageValue::Unsigned(0x5)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::NotFound,
+            vec![],
+        );
+    }
+
+    #[test]
+    fn test_sensor_protocol_message_attributes_invalid() {
+        let parameters = vec![MessageValue::Unsigned(0x100)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::InvalidParameters,
+            vec![],
+        );
+    }
+
+    fn check_sensor_description(sensor_index: u32) {
+        let n_sensors = 2;
+        let parameters = vec![MessageValue::Unsigned(sensor_index)];
+        let mut result = vec![MessageValue::Unsigned(n_sensors - sensor_index)];
+        for i in sensor_index..n_sensors {
+            let mut description = vec![
+                MessageValue::Unsigned(i),
+                MessageValue::Unsigned(1 << 30),
+                MessageValue::Unsigned(3 << 16 | 1 << 8),
+                MessageValue::String(format!("fake{i}"), MAX_SIMPLE_STRING_LENGTH),
+            ];
+            result.append(&mut description);
+        }
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_DESCRIPTION_GET,
+            parameters,
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_sensor_description_get() {
+        check_sensor_description(0);
+        check_sensor_description(1);
+    }
+
+    #[test]
+    fn test_sensor_description_get_invalid() {
+        let parameters = vec![MessageValue::Unsigned(2)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_DESCRIPTION_GET,
+            parameters,
+            ReturnStatus::InvalidParameters,
+            vec![],
+        );
+    }
+
+    fn check_sensor_axis_description(axis_index: u32) {
+        let n_axes = 3;
+        let parameters = vec![
+            MessageValue::Unsigned(0),
+            MessageValue::Unsigned(axis_index),
+        ];
+        let mut result = vec![MessageValue::Unsigned(n_axes - axis_index)];
+        for i in axis_index..n_axes {
+            let name = format!("acc_{}", char::from_u32('X' as u32 + i).unwrap()).to_string();
+            let mut description = vec![
+                MessageValue::Unsigned(i),
+                MessageValue::Unsigned(0),
+                MessageValue::Unsigned(SENSOR_UNIT_METERS_PER_SECOND_SQUARED),
+                MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
+            ];
+            result.append(&mut description);
+        }
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_AXIS_DESCRIPTION_GET,
+            parameters,
+            ReturnStatus::Success,
+            result,
+        );
+    }
+
+    #[test]
+    fn test_sensor_axis_description_get() {
+        check_sensor_axis_description(0);
+        check_sensor_axis_description(1);
+        check_sensor_axis_description(2);
+    }
+
+    #[test]
+    fn test_sensor_axis_description_get_invalid() {
+        let parameters = vec![MessageValue::Unsigned(0), MessageValue::Unsigned(3)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_AXIS_DESCRIPTION_GET,
+            parameters,
+            ReturnStatus::InvalidParameters,
+            vec![],
+        );
+    }
+
+    fn check_enabled(sensor: u32, enabled: bool, handler: &mut ScmiHandler) {
+        let enabled_flag = u32::from(enabled);
+        let parameters = vec![MessageValue::Unsigned(sensor)];
+        let result = vec![MessageValue::Unsigned(enabled_flag)];
+        test_message_with_handler(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONFIG_GET,
+            parameters,
+            ReturnStatus::Success,
+            result,
+            handler,
+        );
+    }
+
+    #[test]
+    fn test_sensor_config_get() {
+        let mut handler = make_handler();
+        check_enabled(0, false, &mut handler);
+    }
+
+    fn enable_sensor(sensor: u32, enable: bool, handler: &mut ScmiHandler) {
+        let enable_flag = u32::from(enable);
+        let parameters = vec![
+            MessageValue::Unsigned(sensor),
+            MessageValue::Unsigned(enable_flag),
+        ];
+        let result = vec![];
+        test_message_with_handler(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONFIG_SET,
+            parameters,
+            ReturnStatus::Success,
+            result,
+            handler,
+        );
+    }
+
+    #[test]
+    fn test_sensor_config_set() {
+        let mut handler = make_handler();
+        enable_sensor(0, true, &mut handler);
+        check_enabled(0, true, &mut handler);
+        check_enabled(1, false, &mut handler);
+        enable_sensor(1, true, &mut handler);
+        check_enabled(1, true, &mut handler);
+        enable_sensor(0, true, &mut handler);
+        check_enabled(0, true, &mut handler);
+        enable_sensor(0, false, &mut handler);
+        check_enabled(0, false, &mut handler);
+    }
+
+    #[test]
+    fn test_sensor_config_set_invalid() {
+        let parameters = vec![MessageValue::Unsigned(0), MessageValue::Unsigned(3)];
+        test_message(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONFIG_SET,
+            parameters,
+            ReturnStatus::NotSupported,
+            vec![],
+        );
+    }
+
+    #[test]
+    fn test_sensor_reading_get() {
+        let mut handler = make_handler();
+        for sensor in 0..2 {
+            enable_sensor(sensor, true, &mut handler);
+        }
+        for iteration in 0..2 {
+            for sensor in 0..2 {
+                let parameters = vec![MessageValue::Unsigned(sensor), MessageValue::Unsigned(0)];
+                let result = vec![
+                    MessageValue::Unsigned(iteration),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(iteration + 100),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(iteration + 200),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(0),
+                    MessageValue::Unsigned(0),
+                ];
+                test_message_with_handler(
+                    SENSOR_PROTOCOL_ID,
+                    SENSOR_READING_GET,
+                    parameters,
+                    ReturnStatus::Success,
+                    result,
+                    &mut handler,
+                );
+            }
+        }
     }
 }

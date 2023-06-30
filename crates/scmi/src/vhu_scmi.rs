@@ -20,7 +20,10 @@ use vm_memory::{
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
+use crate::devices::available_devices;
+use crate::scmi::ScmiDevice;
 use crate::scmi::{MessageHeader, ScmiHandler, ScmiRequest};
+use crate::VuScmiConfig;
 
 // QUEUE_SIZE must be apparently at least 1024 for MMIO.
 // There is probably a maximum size per descriptor defined in the kernel.
@@ -40,6 +43,8 @@ pub enum VuScmiError {
     DescriptorReadFailed,
     #[error("Descriptor write failed")]
     DescriptorWriteFailed,
+    #[error("Error when configuring device {0}: {1}")]
+    DeviceConfigurationError(String, String),
     #[error("Failed to create new EventFd")]
     EventFdFailed,
     #[error("Failed to handle event, didn't match EPOLLIN")]
@@ -60,6 +65,8 @@ pub enum VuScmiError {
     UnexpectedReadableDescriptor(usize),
     #[error("Received unexpected write only descriptor at index {0}")]
     UnexpectedWriteOnlyDescriptor(usize),
+    #[error("Unknown device requested: {0}")]
+    UnknownDeviceRequested(String),
 }
 
 impl From<VuScmiError> for io::Error {
@@ -88,14 +95,31 @@ pub struct VuScmiBackend {
 }
 
 impl VuScmiBackend {
-    pub fn new() -> Result<Self> {
+    pub fn new(config: &VuScmiConfig) -> Result<Self> {
+        let mut handler = ScmiHandler::new();
+        let device_mapping = available_devices();
+        for (name, properties) in config.devices.iter() {
+            match device_mapping.get(name) {
+                Some(constructor) => {
+                    let mut device: Box<dyn ScmiDevice> = constructor();
+                    if let Err(message) = device.configure(properties) {
+                        return Result::Err(VuScmiError::DeviceConfigurationError(
+                            name.clone(),
+                            message,
+                        ));
+                    }
+                    handler.register_device(device);
+                }
+                None => return Result::Err(VuScmiError::UnknownDeviceRequested(name.clone())),
+            };
+        }
         Ok(Self {
             event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuScmiError::EventFdFailed)?,
             mem: None,
             event_vring: None,
             event_descriptors: vec![],
-            scmi_handler: ScmiHandler::new(),
+            scmi_handler: handler,
         })
     }
 
@@ -549,9 +573,17 @@ mod tests {
         assert_eq!(response[0..result.len()], result);
     }
 
+    fn make_backend() -> VuScmiBackend {
+        let config = VuScmiConfig {
+            socket_path: "/foo/scmi.sock".to_owned(),
+            devices: vec![],
+        };
+        VuScmiBackend::new(&config).unwrap()
+    }
+
     #[test]
     fn test_process_requests() {
-        let mut backend = VuScmiBackend::new().unwrap();
+        let mut backend = make_backend();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
@@ -583,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_process_requests_failure() {
-        let mut backend = VuScmiBackend::new().unwrap();
+        let mut backend = make_backend();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
@@ -749,7 +781,7 @@ mod tests {
 
     #[test]
     fn test_event_requests() {
-        let mut backend = VuScmiBackend::new().unwrap();
+        let mut backend = make_backend();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
@@ -778,7 +810,7 @@ mod tests {
 
     #[test]
     fn test_event_requests_failure() {
-        let mut backend = VuScmiBackend::new().unwrap();
+        let mut backend = make_backend();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
@@ -815,7 +847,7 @@ mod tests {
 
     #[test]
     fn test_backend() {
-        let mut backend = VuScmiBackend::new().unwrap();
+        let mut backend = make_backend();
 
         assert_eq!(backend.num_queues(), NUM_QUEUES);
         assert_eq!(backend.max_queue_size(), QUEUE_SIZE);

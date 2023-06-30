@@ -11,6 +11,8 @@ use itertools::Itertools;
 use log::{debug, error, info};
 use thiserror::Error as ThisError;
 
+use crate::DeviceProperties;
+
 pub type MessageHeader = u32;
 
 pub const MAX_SIMPLE_STRING_LENGTH: usize = 16; // incl. NULL terminator
@@ -478,6 +480,7 @@ pub enum ScmiDeviceError {
 }
 
 pub trait ScmiDevice: Send {
+    fn configure(&mut self, properties: &DeviceProperties) -> Result<(), String>;
     fn protocol(&self) -> ProtocolId;
     fn handle(
         &mut self,
@@ -716,7 +719,7 @@ impl ScmiHandler {
 
 #[cfg(test)]
 mod tests {
-    use crate::devices;
+    use crate::devices::FakeSensor;
 
     use super::*;
 
@@ -860,7 +863,9 @@ mod tests {
     fn make_handler() -> ScmiHandler {
         let mut handler = ScmiHandler::new();
         for i in 0..2 {
-            let fake_sensor = Box::new(devices::FakeSensor::new(format!("fake{i}")));
+            let properties = vec![("name".to_owned(), format!("fake{i}"))];
+            let mut fake_sensor = FakeSensor::new();
+            fake_sensor.configure(&properties).unwrap();
             handler.register_device(fake_sensor);
         }
         handler

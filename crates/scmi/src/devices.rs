@@ -1,14 +1,28 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
+
 use log::debug;
 
-use crate::scmi::{
-    DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice, ScmiDeviceError,
-    MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET, SENSOR_CONFIG_SET,
-    SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
-    SENSOR_READING_GET, SENSOR_UNIT_METERS_PER_SECOND_SQUARED,
+use crate::{
+    scmi::{
+        DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice,
+        ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET,
+        SENSOR_CONFIG_SET, SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET,
+        SENSOR_PROTOCOL_ID, SENSOR_READING_GET, SENSOR_UNIT_METERS_PER_SECOND_SQUARED,
+    },
+    DeviceProperties,
 };
+
+type DeviceSpecification = fn() -> Box<dyn ScmiDevice>;
+type NameDeviceMapping = HashMap<String, DeviceSpecification>;
+
+pub fn available_devices() -> NameDeviceMapping {
+    let mut devices: NameDeviceMapping = HashMap::new();
+    devices.insert(String::from("fake"), FakeSensor::new);
+    devices
+}
 
 pub struct FakeSensor {
     enabled: bool,
@@ -19,16 +33,31 @@ pub struct FakeSensor {
 impl FakeSensor {
     const NUMBER_OF_AXES: u32 = 3;
 
-    pub const fn new(name: String) -> Self {
-        Self {
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> Box<dyn ScmiDevice> {
+        let name = String::from("fake");
+        let sensor = Self {
             enabled: false,
             value: 0,
             name,
-        }
+        };
+        Box::new(sensor)
     }
 }
 
 impl ScmiDevice for FakeSensor {
+    fn configure(&mut self, properties: &DeviceProperties) -> Result<(), String> {
+        for (k, v) in properties {
+            if k == "name" {
+                // TODO: Check for duplicate names
+                self.name = String::from(v);
+            } else {
+                return Result::Err(format!("Invalid device option: {k}"));
+            }
+        }
+        Ok(())
+    }
+
     fn protocol(&self) -> ProtocolId {
         SENSOR_PROTOCOL_ID
     }

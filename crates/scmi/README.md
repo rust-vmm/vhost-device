@@ -24,6 +24,13 @@ the Examples section below.
 
   Location of the vhost-user Unix domain sockets.
 
+.. option:: -d, --device=SPEC
+
+  SCMI device specification in the format `ID,PROPERTY=VALUE,...`.
+  Can be used multiple times for multiple exposed devices.
+  If no device is specified then no device will be provided to the
+  guest OS but VirtIO SCMI will be still available there.
+
 You can set `RUST_LOG` environment variable to `debug` to get maximum
 messages on the standard error output.
 
@@ -33,7 +40,7 @@ The daemon should be started first:
 
 ::
 
-  host# vhost-device-scmi --socket-path=scmi.sock
+  host# vhost-device-scmi --socket-path=scmi.sock --device fake,name=foo
 
 The QEMU invocation needs to create a chardev socket the device can
 use to communicate as well as share the guests memory over a memfd:

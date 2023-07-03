@@ -243,7 +243,7 @@ impl VhostUserVsockThread {
                 self.thread_backend.listener_map.entry(fd)
             {
                 // New connection from the host
-                if evset != epoll::Events::EPOLLIN {
+                if evset.bits() != epoll::Events::EPOLLIN.bits() {
                     // Has to be EPOLLIN as it was not connected previously
                     return;
                 }
@@ -312,7 +312,7 @@ impl VhostUserVsockThread {
                 let key = self.thread_backend.listener_map.get(&fd).unwrap();
                 let conn = self.thread_backend.conn_map.get_mut(key).unwrap();
 
-                if evset == epoll::Events::EPOLLOUT {
+                if evset.bits() == epoll::Events::EPOLLOUT.bits() {
                     // Flush any remaining data from the tx buffer
                     match conn.tx_buf.flush_to(&mut conn.stream) {
                         Ok(cnt) => {

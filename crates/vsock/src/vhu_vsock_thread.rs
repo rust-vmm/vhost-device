@@ -92,21 +92,31 @@ impl VhostUserVsockThread {
 
         let sibling_event_fd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
+        let thread_backend = VsockThreadBackend::new(
+            uds_path.clone(),
+            epoll_fd,
+            guest_cid,
+            tx_buffer_size,
+            cid_map.clone(),
+        );
+
+        cid_map.write().unwrap().insert(
+            guest_cid,
+            (
+                thread_backend.raw_pkts_queue.clone(),
+                sibling_event_fd.try_clone().unwrap(),
+            ),
+        );
+
         let thread = VhostUserVsockThread {
             mem: None,
             event_idx: false,
             host_sock: host_sock.as_raw_fd(),
-            host_sock_path: uds_path.clone(),
+            host_sock_path: uds_path,
             host_listener: host_sock,
             vring_worker: None,
             epoll_file,
-            thread_backend: VsockThreadBackend::new(
-                uds_path,
-                epoll_fd,
-                guest_cid,
-                tx_buffer_size,
-                cid_map,
-            ),
+            thread_backend,
             guest_cid,
             pool: ThreadPoolBuilder::new()
                 .pool_size(1)
@@ -660,6 +670,11 @@ impl VhostUserVsockThread {
 impl Drop for VhostUserVsockThread {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.host_sock_path);
+        self.thread_backend
+            .cid_map
+            .write()
+            .unwrap()
+            .remove(&self.guest_cid);
     }
 }
 #[cfg(test)]

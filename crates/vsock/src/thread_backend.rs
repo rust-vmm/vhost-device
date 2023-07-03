@@ -23,6 +23,8 @@ use crate::{
     vsock_conn::*,
 };
 
+pub(crate) type RawPktsQ = VecDeque<RawVsockPacket>;
+
 pub(crate) struct RawVsockPacket {
     pub header: [u8; PKT_HEADER_SIZE],
     pub data: Vec<u8>,
@@ -65,9 +67,9 @@ pub(crate) struct VsockThreadBackend {
     pub local_port_set: HashSet<u32>,
     tx_buffer_size: u32,
     /// Maps the guest CID to the corresponding backend. Used for sibling VM communication.
-    cid_map: Arc<RwLock<CidMap>>,
+    pub cid_map: Arc<RwLock<CidMap>>,
     /// Queue of raw vsock packets recieved from sibling VMs to be sent to the guest.
-    raw_pkts_queue: VecDeque<RawVsockPacket>,
+    pub raw_pkts_queue: Arc<RwLock<RawPktsQ>>,
 }
 
 impl VsockThreadBackend {
@@ -92,7 +94,7 @@ impl VsockThreadBackend {
             local_port_set: HashSet::new(),
             tx_buffer_size,
             cid_map,
-            raw_pkts_queue: VecDeque::new(),
+            raw_pkts_queue: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
 
@@ -103,7 +105,7 @@ impl VsockThreadBackend {
 
     /// Checks if there are pending raw vsock packets to be sent to the guest.
     pub fn pending_raw_pkts(&self) -> bool {
-        !self.raw_pkts_queue.is_empty()
+        !self.raw_pkts_queue.read().unwrap().is_empty()
     }
 
     /// Deliver a vsock packet to the guest vsock driver.
@@ -178,14 +180,13 @@ impl VsockThreadBackend {
         if dst_cid != VSOCK_HOST_CID {
             let cid_map = self.cid_map.read().unwrap();
             if cid_map.contains_key(&dst_cid) {
-                let sibling_backend = cid_map.get(&dst_cid).unwrap();
-                let mut sibling_backend_thread = sibling_backend.threads[0].lock().unwrap();
+                let (sibling_raw_pkts_queue, sibling_event_fd) = cid_map.get(&dst_cid).unwrap();
 
-                sibling_backend_thread
-                    .thread_backend
-                    .raw_pkts_queue
+                sibling_raw_pkts_queue
+                    .write()
+                    .unwrap()
                     .push_back(RawVsockPacket::from_vsock_packet(pkt)?);
-                let _ = sibling_backend_thread.sibling_event_fd.write(1);
+                let _ = sibling_event_fd.write(1);
             } else {
                 warn!("vsock: dropping packet for unknown cid: {:?}", dst_cid);
             }
@@ -254,6 +255,8 @@ impl VsockThreadBackend {
     pub fn recv_raw_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         let raw_vsock_pkt = self
             .raw_pkts_queue
+            .write()
+            .unwrap()
             .pop_front()
             .ok_or(Error::EmptyRawPktsQueue)?;
 
@@ -436,10 +439,6 @@ mod tests {
 
         let sibling_backend =
             Arc::new(VhostUserVsockBackend::new(sibling_config, cid_map.clone()).unwrap());
-        cid_map
-            .write()
-            .unwrap()
-            .insert(SIBLING_CID, sibling_backend.clone());
 
         let epoll_fd = epoll::create(false).unwrap();
         let mut vtp =

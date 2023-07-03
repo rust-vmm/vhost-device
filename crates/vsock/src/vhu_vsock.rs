@@ -21,9 +21,10 @@ use vmm_sys_util::{
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
+use crate::thread_backend::RawPktsQ;
 use crate::vhu_vsock_thread::*;
 
-pub(crate) type CidMap = HashMap<u64, Arc<VhostUserVsockBackend>>;
+pub(crate) type CidMap = HashMap<u64, (Arc<RwLock<RawPktsQ>>, EventFd)>;
 
 const NUM_QUEUES: usize = 2;
 const QUEUE_SIZE: usize = 256;

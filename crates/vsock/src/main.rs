@@ -195,10 +195,6 @@ pub(crate) fn start_backend_server(
             VhostUserVsockBackend::new(config.clone(), cid_map.clone())
                 .map_err(BackendError::CouldNotCreateBackend)?,
         );
-        cid_map
-            .write()
-            .unwrap()
-            .insert(config.get_guest_cid(), backend.clone());
 
         let listener = Listener::new(config.get_socket_path(), true).unwrap();
 
@@ -234,7 +230,6 @@ pub(crate) fn start_backend_server(
 
         // No matter the result, we need to shut down the worker thread.
         backend.exit_event.write(1).unwrap();
-        cid_map.write().unwrap().remove(&config.get_guest_cid());
     }
 }
 
@@ -453,8 +448,7 @@ mod tests {
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
-        let backend = Arc::new(VhostUserVsockBackend::new(config, cid_map.clone()).unwrap());
-        cid_map.write().unwrap().insert(CID, backend.clone());
+        let backend = Arc::new(VhostUserVsockBackend::new(config, cid_map).unwrap());
 
         let daemon = VhostUserDaemon::new(
             String::from("vhost-user-vsock"),

@@ -9,13 +9,32 @@ mod pw_backend;
 #[cfg(feature = "null-backend")]
 use self::null::NullBackend;
 #[cfg(feature = "pw-backend")]
-use self::pw_backend::PwBackend;
-use crate::{Error, Result, SoundRequest};
+use self::pw_backend::{PwBackend, PCMParams};
+use crate::{Error, Result};
 
 pub trait AudioBackend {
-    fn write(&self, req: &SoundRequest) -> Result<()>;
+    fn write(&self, stream_id: u32) -> Result<()>;
+    fn read(&self, stream_id: u32) -> Result<()>;
 
-    fn read(&self, req: &mut SoundRequest) -> Result<()>;
+    fn set_param(&self, _stream_id: u32, _params: PCMParams) -> Result<()> {
+        Ok(())
+    }
+
+    fn prepare(&self, _stream_id: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn release(&self, _stream_id: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn start(&self, _stream_id: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn stop(&self, _stream_id: u32) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub fn alloc_audio_backend(name: String) -> Result<Box<dyn AudioBackend + Send + Sync>> {

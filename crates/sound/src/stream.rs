@@ -1,10 +1,12 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use std::{collections::VecDeque, sync::Arc};
+
 use thiserror::Error as ThisError;
 use vm_memory::{Le32, Le64};
 
-use crate::{virtio_sound::*, SUPPORTED_FORMATS, SUPPORTED_RATES};
+use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
 #[derive(Debug, ThisError)]
@@ -172,6 +174,7 @@ pub struct Stream {
     pub channels_min: u8,
     pub channels_max: u8,
     pub state: PCMState,
+    pub buffers: VecDeque<Buffer>,
 }
 
 impl Default for Stream {
@@ -185,6 +188,7 @@ impl Default for Stream {
             channels_min: 1,
             channels_max: 6,
             state: Default::default(),
+            buffers: VecDeque::new(),
         }
     }
 }
@@ -265,5 +269,37 @@ impl PcmParams {
 
     pub fn frame(&self) -> usize {
         self.sample_bytes() * self.channels as usize
+    }
+}
+
+pub struct Buffer {
+    pub bytes: Vec<u8>,
+    pub pos: usize,
+    pub message: Arc<IOMessage>,
+}
+
+impl std::fmt::Debug for Buffer {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct(stringify!(Buffer))
+            .field("bytes", &self.bytes.len())
+            .field("pos", &self.pos)
+            .field("message", &Arc::as_ptr(&self.message))
+            .finish()
+    }
+}
+
+impl Buffer {
+    pub fn new(bytes: Vec<u8>, message: Arc<IOMessage>) -> Self {
+        Self {
+            bytes,
+            pos: 0,
+            message,
+        }
+    }
+}
+
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        log::trace!("dropping buffer {:?}", self);
     }
 }

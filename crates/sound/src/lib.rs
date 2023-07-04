@@ -20,7 +20,6 @@ use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
 use virtio_sound::*;
 use vm_memory::{
     ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32,
-    VolatileSlice,
 };
 
 use crate::device::VhostUserSoundBackend;
@@ -224,16 +223,39 @@ impl SoundConfig {
     }
 }
 
-pub type SoundBitmap = ();
-
-#[derive(Debug)]
-pub struct SoundRequest<'a> {
-    data_slice: Option<VolatileSlice<'a, SoundBitmap>>,
+pub struct IOMessage {
+    status: std::sync::atomic::AtomicU32,
+    desc_chain: SoundDescriptorChain,
+    descriptor: virtio_queue::Descriptor,
+    vring: VringRwLock,
 }
 
-impl<'a> SoundRequest<'a> {
-    pub fn data_slice(&self) -> Option<&VolatileSlice<'a, SoundBitmap>> {
-        self.data_slice.as_ref()
+impl Drop for IOMessage {
+    fn drop(&mut self) {
+        log::trace!("dropping IOMessage");
+        let resp = VirtioSoundPcmStatus {
+            status: self.status.load(std::sync::atomic::Ordering::SeqCst).into(),
+            latency_bytes: 0.into(),
+        };
+
+        if let Err(err) = self
+            .desc_chain
+            .memory()
+            .write_obj(resp, self.descriptor.addr())
+        {
+            log::error!("Error::DescriptorWriteFailed: {}", err);
+            return;
+        }
+        if self
+            .vring
+            .add_used(self.desc_chain.head_index(), resp.as_slice().len() as u32)
+            .is_err()
+        {
+            log::error!("Couldn't add used");
+        }
+        if self.vring.signal_used_queue().is_err() {
+            log::error!("Couldn't signal used queue");
+        }
     }
 }
 
@@ -247,7 +269,7 @@ pub fn start_backend_server(config: SoundConfig) {
     let mut daemon = VhostUserDaemon::new(
         String::from("vhost-user-sound"),
         backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::<SoundBitmap>::new()),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )
     .unwrap();
 

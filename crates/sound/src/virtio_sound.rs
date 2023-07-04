@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-#![allow(dead_code)] //TODO: remove
-
 use vm_memory::{ByteValued, Le32, Le64};
 
 // virtqueues
@@ -48,8 +46,8 @@ pub const VIRTIO_SND_S_IO_ERR: u32 = 0x8003;
 
 // device data flow directions
 
-pub const VIRTIO_SND_D_OUTPUT: u8 = 0;
-pub const VIRTIO_SND_D_INPUT: u8 = 1;
+pub const VIRTIO_SND_D_OUTPUT: u32 = 0;
+pub const VIRTIO_SND_D_INPUT: u32 = 1;
 
 // supported jack features
 
@@ -152,7 +150,7 @@ pub const VIRTIO_SND_CHMAP_BRC: u8 = 40; /* bottom right center */
 pub const VIRTIO_SND_CHMAP_MAX_SIZE: usize = 18;
 
 /// Virtio Sound Configuration
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundConfig {
     /// total number of all available jacks
@@ -168,7 +166,7 @@ pub struct VirtioSoundConfig {
 unsafe impl ByteValued for VirtioSoundConfig {}
 
 /// Virtio Sound Request / Response common header
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundHeader {
     /// request type / response status
@@ -179,7 +177,7 @@ pub struct VirtioSoundHeader {
 unsafe impl ByteValued for VirtioSoundHeader {}
 
 /// Virtio Sound event notification
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundEvent {
     /// PCM stream event type
@@ -192,7 +190,7 @@ pub struct VirtioSoundEvent {
 unsafe impl ByteValued for VirtioSoundEvent {}
 
 /// Virtio Sound request information about any kind of configuration item
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundQueryInfo {
     /// item request type (VIRTIO_SND_R_*_INFO)
@@ -209,7 +207,7 @@ pub struct VirtioSoundQueryInfo {
 unsafe impl ByteValued for VirtioSoundQueryInfo {}
 
 /// Virtio Sound response common information header
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundInfo {
     /// function group node identifier
@@ -220,7 +218,7 @@ pub struct VirtioSoundInfo {
 unsafe impl ByteValued for VirtioSoundInfo {}
 
 /// Jack control request / Jack common header
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundJackHeader {
     /// jack request type (VIRTIO_SND_R_JACK_*)
@@ -233,7 +231,7 @@ pub struct VirtioSoundJackHeader {
 unsafe impl ByteValued for VirtioSoundJackHeader {}
 
 /// Jack response information about available jacks
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundJackInfo {
     /// jack response header type
@@ -254,7 +252,7 @@ unsafe impl ByteValued for VirtioSoundJackInfo {}
 
 ///If the VIRTIO_SND_JACK_F_REMAP feature bit is set in the jack information
 /// Remap control request
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundJackRemap {
     pub hdr: VirtioSoundJackHeader, /* .code = VIRTIO_SND_R_JACK_REMAP */
@@ -266,7 +264,7 @@ pub struct VirtioSoundJackRemap {
 unsafe impl ByteValued for VirtioSoundJackRemap {}
 
 /// PCM control request / PCM common header
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundPcmHeader {
     pub hdr: VirtioSoundHeader,
@@ -277,7 +275,7 @@ pub struct VirtioSoundPcmHeader {
 unsafe impl ByteValued for VirtioSoundPcmHeader {}
 
 /// PCM response information
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundPcmInfo {
     pub hdr: VirtioSoundInfo,
@@ -295,7 +293,7 @@ pub struct VirtioSoundPcmInfo {
 unsafe impl ByteValued for VirtioSoundPcmInfo {}
 
 /// Set selected stream parameters for the specified stream ID
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSndPcmSetParams {
     pub hdr: VirtioSoundPcmHeader,
@@ -312,7 +310,7 @@ pub struct VirtioSndPcmSetParams {
 unsafe impl ByteValued for VirtioSndPcmSetParams {}
 
 /// PCM I/O header
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundPcmXfer {
     pub stream_id: Le32,
@@ -322,7 +320,7 @@ pub struct VirtioSoundPcmXfer {
 unsafe impl ByteValued for VirtioSoundPcmXfer {}
 
 /// PCM I/O status
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundPcmStatus {
     pub status: Le32,
@@ -333,7 +331,7 @@ pub struct VirtioSoundPcmStatus {
 unsafe impl ByteValued for VirtioSoundPcmStatus {}
 
 /// channel maps response information
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundChmapInfo {
     pub hdr: VirtioSoundInfo,

@@ -1,19 +1,22 @@
+// Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-mod audio_backends;
-mod vhu_sound;
-mod virtio_sound;
+pub mod audio_backends;
+pub mod device;
+pub mod virtio_sound;
 
-use std::io::{Error as IoError, ErrorKind};
-use std::sync::Arc;
+use std::{
+    io::{Error as IoError, ErrorKind},
+    sync::Arc,
+};
 
 use log::{info, warn};
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, Le32, VolatileSlice};
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, VolatileSlice};
 
-use crate::vhu_sound::VhostUserSoundBackend;
+use crate::device::VhostUserSoundBackend;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -30,44 +33,12 @@ pub enum Error {
     SoundReqMissingData,
     #[error("Audio backend not supported")]
     AudioBackendNotSupported,
-    #[error("Descriptor not found")]
-    DescriptorNotFound,
-    #[error("Descriptor read failed")]
-    DescriptorReadFailed,
-    #[error("Descriptor write failed")]
-    DescriptorWriteFailed,
-    #[error("Isufficient descriptor size, required: {0}, found: {1}")]
-    InsufficientDescriptorSize(usize, usize),
-    #[error("Failed to send notification")]
-    SendNotificationFailed,
-    #[error("Invalid descriptor count {0}")]
-    UnexpectedDescriptorCount(usize),
-    #[error("Invalid descriptor size, expected: {0}, found: {1}")]
-    UnexpectedDescriptorSize(usize, usize),
-    #[error("Invalid descriptor size, expected at least: {0}, found: {1}")]
-    UnexpectedMinimumDescriptorSize(usize, usize),
-    #[error("Received unexpected readable descriptor at index {0}")]
-    UnexpectedReadableDescriptor(usize),
-    #[error("Received unexpected write only descriptor at index {0}")]
-    UnexpectedWriteOnlyDescriptor(usize),
 }
 
 impl std::convert::From<Error> for IoError {
     fn from(e: Error) -> Self {
-        IoError::new(ErrorKind::Other, e)
+        Self::new(ErrorKind::Other, e)
     }
-}
-
-#[derive(Default, Clone)]
-pub struct PCMParams {
-    pub features: Le32,
-    /// size of hardware buffer in bytes
-    pub buffer_bytes: Le32,
-    /// size of hardware period in bytes
-    pub period_bytes: Le32,
-    pub channels: u8,
-    pub format: u8,
-    pub rate: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +104,10 @@ pub fn start_backend_server(config: SoundConfig) {
             info!("Stopping cleanly");
         }
         Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-            info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
+            info!(
+                "vhost-user connection closed with partial message. If the VM is shutting down, \
+                 this is expected behavior; otherwise, it might be a bug."
+            );
         }
         Err(e) => {
             warn!("Error running daemon: {:?}", e);

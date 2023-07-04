@@ -1,9 +1,9 @@
+// Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
+// Stefano Garzarella <sgarzare@redhat.com>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-
 use std::convert::TryFrom;
 
 use clap::Parser;
-
 use vhost_user_sound::{start_backend_server, Error, Result, SoundConfig};
 
 #[derive(Parser, Debug)]
@@ -40,8 +40,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serial_test::serial;
+
+    use super::*;
 
     impl SoundArgs {
         fn from_args(socket: &str) -> Self {

@@ -1,41 +1,22 @@
+// Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 #[cfg(feature = "null-backend")]
 mod null;
 
 #[cfg(feature = "pw-backend")]
-mod pw_backend;
+mod pipewire;
 
 #[cfg(feature = "null-backend")]
 use self::null::NullBackend;
-use self::pw_backend::PwBackend;
 #[cfg(feature = "pw-backend")]
-use crate::PCMParams;
-use crate::{Error, Result};
+use self::pipewire::PwBackend;
+use crate::{Error, Result, SoundRequest};
 
 pub trait AudioBackend {
-    fn write(&self, stream_id: u32) -> Result<()>;
-    fn read(&self, stream_id: u32) -> Result<()>;
+    fn write(&self, req: &SoundRequest) -> Result<()>;
 
-    fn set_param(&self, _stream_id: u32, _params: PCMParams) -> Result<()> {
-        Ok(())
-    }
-
-    fn prepare(&self, _stream_id: u32) -> Result<()> {
-        Ok(())
-    }
-
-    fn release(&self, _stream_id: u32) -> Result<()> {
-        Ok(())
-    }
-
-    fn start(&self, _stream_id: u32) -> Result<()> {
-        Ok(())
-    }
-
-    fn stop(&self, _stream_id: u32) -> Result<()> {
-        Ok(())
-    }
+    fn read(&self, req: &mut SoundRequest) -> Result<()>;
 }
 
 pub fn alloc_audio_backend(name: String) -> Result<Box<dyn AudioBackend + Send + Sync>> {

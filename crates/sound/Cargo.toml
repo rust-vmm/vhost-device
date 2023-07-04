@@ -1,11 +1,11 @@
 [package]
 name = "vhost-user-sound"
 version = "0.1.0"
-authors = ["Stefano Garzarella <sgarzare@redhat.com>"]
+authors = ["Stefano Garzarella <sgarzare@redhat.com>", "Manos Pitsidianakis <manos.pitsidianakis@linaro.org>"]
 description = "A virtio-sound device using the vhost-user protocol."
 repository = "https://github.com/rust-vmm/vhost-device"
 readme = "README.md"
-keywords = ["vhost", "sound", "virtio-sound"]
+keywords = ["vhost", "sound", "virtio-sound", "virtio-snd", "virtio"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2018"
 
@@ -15,21 +15,20 @@ null-backend = []
 pw-backend = ["pipewire", "libspa", "pipewire-sys", "libspa-sys", "bindgen"]
 
 [dependencies]
-clap = { version = "4.1",  features = ["derive"] }
+bindgen = { version = "0.64.0", optional = true }
+clap = { version = "4.1", features = ["derive"] }
 env_logger = "0.10"
+libspa = { version = "0.6.0", optional = true }
+libspa-sys = { version = "0.6.0", optional = true }
 log = "0.4"
+pipewire = { version = "0.6.0", optional = true }
+pipewire-sys = { version = "0.6.0", optional = true }
 thiserror = "1.0"
 vhost = { version = "0.6", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.8"
-virtio-bindings = "0.2"
-virtio-queue = "0.7"
+virtio-bindings = "0.2.1"
 vm-memory = "0.10"
 vmm-sys-util = "0.11"
-pipewire = { version = "0.6.0", optional = true }
-libspa = { version = "0.6.0", optional = true }
-pipewire-sys = { version = "0.6.0", optional = true }
-libspa-sys = { version = "0.6.0", optional = true }
-bindgen = { version = "0.64.0", optional = true }
 
 [dev-dependencies]
 serial_test = "1.0"

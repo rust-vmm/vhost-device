@@ -5,12 +5,13 @@
 use std::{io::Result as IoResult, sync::RwLock, u16, u32, u64, u8};
 
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackend, VringRwLock};
+use vhost_user_backend::{VhostUserBackend, VringRwLock, VringT};
 use virtio_bindings::bindings::{
     virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
     virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
-use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap};
+use virtio_queue::QueueOwnedT;
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
@@ -26,6 +27,17 @@ struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     event_idx: bool,
     queue_indexes: Vec<u16>,
+}
+
+#[cfg(debug_assertions)]
+const fn queue_idx_as_str(q: u16) -> &'static str {
+    match q {
+        CONTROL_QUEUE_IDX => stringify!(CONTROL_QUEUE_IDX),
+        EVENT_QUEUE_IDX => stringify!(EVENT_QUEUE_IDX),
+        TX_QUEUE_IDX => stringify!(TX_QUEUE_IDX),
+        RX_QUEUE_IDX => stringify!(RX_QUEUE_IDX),
+        _ => "unknown queue idx",
+    }
 }
 
 impl VhostUserSoundThread {
@@ -59,31 +71,49 @@ impl VhostUserSoundThread {
     }
 
     fn handle_event(&self, device_event: u16, vrings: &[VringRwLock]) -> IoResult<bool> {
+        log::trace!("handle_event device_event {}", device_event);
+
         let vring = &vrings[device_event as usize];
         let queue_idx = self.queue_indexes[device_event as usize];
+        log::trace!(
+            "handle_event queue_idx {} == {}",
+            queue_idx,
+            queue_idx_as_str(queue_idx)
+        );
 
-        match queue_idx {
+        dbg!(match queue_idx {
             CONTROL_QUEUE_IDX => self.process_control(vring),
             EVENT_QUEUE_IDX => self.process_event(vring),
             TX_QUEUE_IDX => self.process_tx(vring),
             RX_QUEUE_IDX => self.process_rx(vring),
             _ => Err(Error::HandleUnknownEvent.into()),
-        }
+        })
     }
 
     fn process_control(&self, _vring: &VringRwLock) -> IoResult<bool> {
-        Ok(false)
+        let requests: Vec<_> = _vring
+            .get_mut()
+            .get_queue_mut()
+            .iter(self.mem.as_ref().unwrap().memory())
+            .map_err(|_| Error::DescriptorNotFound)?
+            .collect();
+        dbg!(&requests);
+
+        Ok(true)
     }
 
     fn process_event(&self, _vring: &VringRwLock) -> IoResult<bool> {
+        log::trace!("process_event");
         Ok(false)
     }
 
     fn process_tx(&self, _vring: &VringRwLock) -> IoResult<bool> {
+        log::trace!("process_tx");
         Ok(false)
     }
 
     fn process_rx(&self, _vring: &VringRwLock) -> IoResult<bool> {
+        log::trace!("process_rx");
         Ok(false)
     }
 }
@@ -97,7 +127,8 @@ pub struct VhostUserSoundBackend {
 
 impl VhostUserSoundBackend {
     pub fn new(config: SoundConfig) -> Result<Self> {
-        let threads = if config.multi_thread {
+        log::trace!("VhostUserSoundBackend::new config {:?}", &config);
+        let threads = if dbg!(config.multi_thread) {
             vec![
                 RwLock::new(VhostUserSoundThread::new(vec![
                     CONTROL_QUEUE_IDX,
@@ -152,16 +183,18 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::CONFIG
+        VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ
     }
 
     fn set_event_idx(&self, enabled: bool) {
+        log::trace!("set_event_idx enabled {:?}", enabled);
         for thread in self.threads.iter() {
             thread.write().unwrap().set_event_idx(enabled);
         }
     }
 
     fn update_memory(&self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
+        log::trace!("update_memory");
         for thread in self.threads.iter() {
             thread.write().unwrap().update_memory(mem.clone())?;
         }
@@ -176,6 +209,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
         vrings: &[VringRwLock],
         thread_id: usize,
     ) -> IoResult<bool> {
+        log::trace!("handle_event device_event {}", device_event);
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
@@ -187,6 +221,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        log::trace!("get_config offset {} size {}", offset, size);
         let offset = offset as usize;
         let size = size as usize;
 
@@ -210,6 +245,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
+        log::trace!("exit_event");
         self.exit_event.try_clone().ok()
     }
 }

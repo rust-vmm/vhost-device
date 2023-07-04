@@ -27,6 +27,7 @@ thiserror = "1.0"
 vhost = { version = "0.6", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.8"
 virtio-bindings = "0.2.1"
+virtio-queue = "0.7"
 vm-memory = "0.10"
 vmm-sys-util = "0.11"
 

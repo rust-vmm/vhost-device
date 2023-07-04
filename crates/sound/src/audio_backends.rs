@@ -20,6 +20,7 @@ pub trait AudioBackend {
 }
 
 pub fn alloc_audio_backend(name: String) -> Result<Box<dyn AudioBackend + Send + Sync>> {
+    log::trace!("allocating audio backend {}", name);
     match name.as_str() {
         #[cfg(feature = "null-backend")]
         "null" => Ok(Box::new(NullBackend::new())),

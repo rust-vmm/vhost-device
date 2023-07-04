@@ -13,10 +13,12 @@ impl NullBackend {
 
 impl AudioBackend for NullBackend {
     fn write(&self, _req: &SoundRequest) -> Result<()> {
+        log::trace!("NullBackend writing {:?}", _req);
         Ok(())
     }
 
     fn read(&self, req: &mut SoundRequest) -> Result<()> {
+        log::trace!("NullBackend reading {:?}", req);
         let buf = req.data_slice().ok_or(Error::SoundReqMissingData)?;
         let zero_mem = vec![0u8; buf.len()];
 

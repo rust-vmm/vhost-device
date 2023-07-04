@@ -1,6 +1,8 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+#[cfg(feature = "alsa-backend")]
+mod alsa;
 #[cfg(feature = "null-backend")]
 mod null;
 
@@ -9,6 +11,8 @@ mod pipewire;
 
 use std::sync::{Arc, RwLock};
 
+#[cfg(feature = "alsa-backend")]
+use self::alsa::AlsaBackend;
 #[cfg(feature = "null-backend")]
 use self::null::NullBackend;
 #[cfg(feature = "pw-backend")]
@@ -51,6 +55,8 @@ pub fn alloc_audio_backend(
         "null" => Ok(Box::new(NullBackend::new(streams))),
         #[cfg(feature = "pw-backend")]
         "pipewire" => Ok(Box::new(PwBackend::new(streams))),
+        #[cfg(feature = "alsa-backend")]
+        "alsa" => Ok(Box::new(AlsaBackend::new(streams))),
         _ => Err(Error::AudioBackendNotSupported),
     }
 }

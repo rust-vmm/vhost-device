@@ -10,11 +10,13 @@ license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2018"
 
 [features]
-default = ["null-backend", "pw-backend"]
+default = ["null-backend", "alsa-backend", "pw-backend"]
 null-backend = []
+alsa-backend = ["dep:alsa"]
 pw-backend = ["pipewire", "libspa", "pipewire-sys", "libspa-sys", "bindgen"]
 
 [dependencies]
+alsa = { version = "0.7", optional = true }
 bindgen = { version = "0.64.0", optional = true }
 clap = { version = "4.1", features = ["derive"] }
 env_logger = "0.10"

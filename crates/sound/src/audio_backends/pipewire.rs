@@ -1,28 +1,29 @@
 // Pipewire backend device
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use super::AudioBackend;
-use crate::{Error, Result, SoundRequest};
+use std::sync::{Arc, RwLock};
 
-pub struct PwBackend {}
+use super::AudioBackend;
+use crate::{Result, Stream};
+
+pub struct PwBackend {
+    streams: Arc<RwLock<Vec<Stream>>>,
+}
 
 impl PwBackend {
-    pub fn new() -> Self {
-        PwBackend {}
+    pub fn new(streams: Arc<RwLock<Vec<Stream>>>) -> Self {
+        Self { streams }
     }
 }
 
 impl AudioBackend for PwBackend {
-    fn write(&self, _req: &SoundRequest) -> Result<()> {
+    fn write(&self, stream_id: u32) -> Result<()> {
+        log::trace!("PipewireBackend write stream_id {}", stream_id);
         Ok(())
     }
 
-    fn read(&self, req: &mut SoundRequest) -> Result<()> {
-        let buf = req.data_slice().ok_or(Error::SoundReqMissingData)?;
-        let zero_mem = vec![0u8; buf.len()];
-
-        buf.copy_from(&zero_mem);
-
+    fn read(&self, _id: u32) -> Result<()> {
+        log::trace!("PipewireBackend read stream_id {}", _id);
         Ok(())
     }
 }

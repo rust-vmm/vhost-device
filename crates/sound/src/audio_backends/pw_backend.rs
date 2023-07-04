@@ -4,22 +4,11 @@
 use super::AudioBackend;
 use std::{thread};
 use std::{cell::Cell, rc::Rc};
-use crate::{Error, Result};
+use crate::Result;
 
-use vm_memory::{Le32, Le64};
+use vm_memory::Le32;
 use pipewire as pw;
-use pw::{sys::*};
-
-#[derive(Default, Debug)]
-pub struct StreamInfo {
-    pub id: usize,
-    pub params: PCMParams,
-    pub formats: Le64,
-    pub rates: Le64,
-    pub direction: u8,
-    pub channels_min: u8,
-    pub channels_max: u8,
-}
+use pw::sys::PW_ID_CORE;
 
 #[derive(Default, Debug)]
 pub struct PCMParams {

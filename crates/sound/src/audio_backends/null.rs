@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use super::AudioBackend;
-use crate::{Error, Result};
+use crate::Result;
 
 pub struct NullBackend {}
 

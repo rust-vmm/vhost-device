@@ -11,6 +11,7 @@ Here is the list of device backends that we support:
 - [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/crates/gpio/README.md)
 - [I2C](https://github.com/rust-vmm/vhost-device/blob/main/crates/i2c/README.md)
 - [RNG](https://github.com/rust-vmm/vhost-device/blob/main/crates/rng/README.md)
+- [Sound](https://github.com/rust-vmm/vhost-device/blob/main/crates/sound/README.md)
 - [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/crates/vsock/README.md)
 
 ## Testing and Code Coverage

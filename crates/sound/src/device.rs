@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
+    collections::BTreeSet,
     convert::TryFrom,
     io::Result as IoResult,
+    mem::size_of,
     sync::{Arc, RwLock},
 };
 
@@ -25,9 +27,9 @@ use vmm_sys_util::{
 
 use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
-    stream::{Error as StreamError, Stream},
+    stream::{Buffer, Error as StreamError, Stream},
     virtio_sound::{self, *},
-    ControlMessageKind, Error, Result, SoundConfig,
+    ControlMessageKind, Error, IOMessage, Result, SoundConfig,
 };
 
 struct VhostUserSoundThread {
@@ -170,10 +172,9 @@ impl VhostUserSoundThread {
 
             let code = ControlMessageKind::try_from(request.code).map_err(Error::from)?;
             match code {
-                ControlMessageKind::JackInfo => {
-                    resp.code = VIRTIO_SND_S_NOT_SUPP.into();
-                }
-                ControlMessageKind::JackRemap => {
+                ControlMessageKind::ChmapInfo
+                | ControlMessageKind::JackInfo
+                | ControlMessageKind::JackRemap => {
                     resp.code = VIRTIO_SND_S_NOT_SUPP.into();
                 }
                 ControlMessageKind::PcmInfo => {
@@ -237,18 +238,20 @@ impl VhostUserSoundThread {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let b = audio_backend.read().unwrap();
-                        b.set_parameters(
-                            stream_id,
-                            ControlMessage {
-                                kind: code,
-                                code: VIRTIO_SND_S_OK,
-                                desc_chain,
-                                descriptor: desc_hdr,
-                                vring: vring.clone(),
-                            },
-                        )
-                        .unwrap();
+                        audio_backend
+                            .read()
+                            .unwrap()
+                            .set_parameters(
+                                stream_id,
+                                ControlMessage {
+                                    kind: code,
+                                    code: VIRTIO_SND_S_OK,
+                                    desc_chain,
+                                    descriptor: desc_hdr,
+                                    vring: vring.clone(),
+                                },
+                            )
+                            .unwrap();
 
                         // PcmSetParams needs check valid formats/rates; the audio backend will
                         // reply when it drops the ControlMessage.
@@ -266,8 +269,7 @@ impl VhostUserSoundThread {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let b = audio_backend.write().unwrap();
-                        b.prepare(stream_id).unwrap();
+                        audio_backend.write().unwrap().prepare(stream_id).unwrap();
                     }
                 }
                 ControlMessageKind::PcmRelease => {
@@ -281,18 +283,20 @@ impl VhostUserSoundThread {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let b = audio_backend.write().unwrap();
-                        b.release(
-                            stream_id,
-                            ControlMessage {
-                                kind: code,
-                                code: VIRTIO_SND_S_OK,
-                                desc_chain,
-                                descriptor: desc_hdr,
-                                vring: vring.clone(),
-                            },
-                        )
-                        .unwrap();
+                        audio_backend
+                            .write()
+                            .unwrap()
+                            .release(
+                                stream_id,
+                                ControlMessage {
+                                    kind: code,
+                                    code: VIRTIO_SND_S_OK,
+                                    desc_chain,
+                                    descriptor: desc_hdr,
+                                    vring: vring.clone(),
+                                },
+                            )
+                            .unwrap();
 
                         // PcmRelease needs to flush IO messages; the audio backend will reply when
                         // it drops the ControlMessage.
@@ -310,8 +314,7 @@ impl VhostUserSoundThread {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let b = audio_backend.write().unwrap();
-                        b.start(stream_id).unwrap();
+                        audio_backend.write().unwrap().start(stream_id).unwrap();
                     }
                 }
                 ControlMessageKind::PcmStop => {
@@ -325,12 +328,8 @@ impl VhostUserSoundThread {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let b = audio_backend.write().unwrap();
-                        b.stop(stream_id).unwrap();
+                        audio_backend.write().unwrap().stop(stream_id).unwrap();
                     }
-                }
-                ControlMessageKind::ChmapInfo => {
-                    resp.code = VIRTIO_SND_S_NOT_SUPP.into();
                 }
             }
             log::trace!(
@@ -375,10 +374,121 @@ impl VhostUserSoundThread {
 
     fn process_tx(
         &self,
-        _vring: &VringRwLock,
-        _audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
+        vring: &VringRwLock,
+        audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
     ) -> IoResult<bool> {
-        log::trace!("process_tx");
+        let requests: Vec<SoundDescriptorChain> = vring
+            .get_mut()
+            .get_queue_mut()
+            .iter(self.mem.as_ref().unwrap().memory())
+            .map_err(|_| Error::DescriptorNotFound)?
+            .collect();
+
+        if requests.is_empty() {
+            return Ok(true);
+        }
+
+        #[derive(Copy, Clone, PartialEq, Debug)]
+        enum TxState {
+            Ready,
+            WaitingBufferForStreamId(u32),
+            Done,
+        }
+
+        let mut stream_ids = BTreeSet::default();
+
+        for desc_chain in requests {
+            let mut state = TxState::Ready;
+            let mut buffers = vec![];
+            let descriptors: Vec<_> = desc_chain.clone().collect();
+            let message = Arc::new(IOMessage {
+                vring: vring.clone(),
+                status: VIRTIO_SND_S_OK.into(),
+                desc_chain: desc_chain.clone(),
+                descriptor: descriptors.last().cloned().unwrap(),
+            });
+            for descriptor in &descriptors {
+                match state {
+                    TxState::Done => {
+                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
+                    }
+                    TxState::Ready if descriptor.is_write_only() => {
+                        if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
+                            return Err(Error::UnexpectedDescriptorSize(
+                                size_of::<VirtioSoundPcmStatus>(),
+                                descriptor.len(),
+                            )
+                            .into());
+                        }
+                        state = TxState::Done;
+                    }
+                    TxState::WaitingBufferForStreamId(stream_id) if descriptor.is_write_only() => {
+                        if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
+                            return Err(Error::UnexpectedDescriptorSize(
+                                size_of::<VirtioSoundPcmStatus>(),
+                                descriptor.len(),
+                            )
+                            .into());
+                        }
+                        let mut streams = self.streams.write().unwrap();
+                        for b in std::mem::take(&mut buffers) {
+                            streams[stream_id as usize].buffers.push_back(b);
+                        }
+                        state = TxState::Done;
+                    }
+                    TxState::Ready
+                        if descriptor.len() as usize != size_of::<VirtioSoundPcmXfer>() =>
+                    {
+                        return Err(Error::UnexpectedDescriptorSize(
+                            size_of::<VirtioSoundPcmXfer>(),
+                            descriptor.len(),
+                        )
+                        .into());
+                    }
+                    TxState::Ready => {
+                        let xfer = desc_chain
+                            .memory()
+                            .read_obj::<VirtioSoundPcmXfer>(descriptor.addr())
+                            .map_err(|_| Error::DescriptorReadFailed)?;
+                        let stream_id: u32 = xfer.stream_id.into();
+                        stream_ids.insert(stream_id);
+
+                        state = TxState::WaitingBufferForStreamId(stream_id);
+                    }
+                    TxState::WaitingBufferForStreamId(stream_id)
+                        if descriptor.len() as usize == size_of::<VirtioSoundPcmXfer>() =>
+                    {
+                        return Err(Error::UnexpectedDescriptorSize(
+                            u32::from(
+                                self.streams.read().unwrap()[stream_id as usize]
+                                    .params
+                                    .buffer_bytes,
+                            ) as usize,
+                            descriptor.len(),
+                        )
+                        .into());
+                    }
+                    TxState::WaitingBufferForStreamId(_stream_id) => {
+                        let mut buf = vec![0; descriptor.len() as usize];
+                        let bytes_read = desc_chain
+                            .memory()
+                            .read(&mut buf, descriptor.addr())
+                            .map_err(|_| Error::DescriptorReadFailed)?;
+                        buf.truncate(bytes_read);
+
+                        buffers.push(Buffer::new(buf, Arc::clone(&message)));
+                    }
+                }
+            }
+        }
+
+        if !stream_ids.is_empty() {
+            let b = audio_backend.write().unwrap();
+            for id in stream_ids {
+                b.write(id).unwrap();
+            }
+        }
+
         Ok(false)
     }
 

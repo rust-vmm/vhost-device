@@ -18,6 +18,7 @@ impl NullBackend {
 impl AudioBackend for NullBackend {
     fn write(&self, stream_id: u32) -> Result<()> {
         log::trace!("NullBackend write stream_id {}", stream_id);
+        _ = std::mem::take(&mut self.streams.write().unwrap()[stream_id as usize].buffers);
         Ok(())
     }
 

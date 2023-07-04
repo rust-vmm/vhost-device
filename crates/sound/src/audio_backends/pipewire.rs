@@ -19,6 +19,7 @@ impl PwBackend {
 impl AudioBackend for PwBackend {
     fn write(&self, stream_id: u32) -> Result<()> {
         log::trace!("PipewireBackend write stream_id {}", stream_id);
+        _ = std::mem::take(&mut self.streams.write().unwrap()[stream_id as usize].buffers);
         Ok(())
     }
 

@@ -7,6 +7,9 @@ use std::ops::Deref;
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use crate::vhu_sound::NR_STREAMS;
+use crate::PCMParams;
+use std::sync::RwLock;
 
 use pipewire as pw;
 use pw::sys::{pw_loop, pw_thread_loop_new, pw_thread_loop_signal, PW_ID_CORE};
@@ -14,19 +17,6 @@ use pw::sys::{pw_thread_loop, pw_thread_loop_start, pw_thread_loop_wait};
 use pw::sys::{pw_thread_loop_get_loop, pw_thread_loop_lock, pw_thread_loop_unlock};
 use pw::Core;
 use pw::LoopRef;
-use vm_memory::Le32;
-
-#[derive(Default, Debug)]
-pub struct PCMParams {
-    pub features: Le32,
-    /// size of hardware buffer in bytes
-    pub buffer_bytes: Le32,
-    /// size of hardware period in bytes
-    pub period_bytes: Le32,
-    pub channels: u8,
-    pub format: u8,
-    pub rate: u8,
-}
 
 pub struct PwThreadLoop(NonNull<pw_thread_loop>);
 
@@ -104,9 +94,9 @@ unsafe impl Send for PwBackend {}
 unsafe impl Sync for PwBackend {}
 
 pub struct PwBackend {
-    //pub streams: Arc<RwLock<Vec<StreamInfo>>>,
     pub thread_loop: Arc<PwThreadLoop>,
     pub core: Core,
+    pub stream_params: RwLock<Vec<PCMParams>>,
 }
 
 impl PwBackend {
@@ -142,7 +132,14 @@ impl PwBackend {
 
         println!("pipewire backend running");
 
-        Self { thread_loop, core }
+        let streams_param = vec![PCMParams::default(); NR_STREAMS];
+
+        Self {
+            thread_loop,
+            core,
+            stream_params : RwLock::new(streams_param)
+        }
+
     }
 }
 
@@ -161,7 +158,11 @@ impl AudioBackend for PwBackend {
         */
         Ok(())
     }
-    fn set_param(&self, _stream_id: u32, _params: PCMParams) -> Result<()> {
+
+    fn set_param(&self, stream_id: u32, params: PCMParams) -> Result<()> {
+        let mut stream_params = self.stream_params.write().unwrap();
+        stream_params[stream_id as usize] = params;
         Ok(())
     }
+
 }

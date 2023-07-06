@@ -21,6 +21,7 @@ use vmm_sys_util::{
 use crate::audio_backends::{alloc_audio_backend, AudioBackend};
 use crate::virtio_sound::*;
 use crate::{Error, Result, SoundConfig};
+use vm_memory::{Le32, Le64};
 
 pub const SUPPORTED_FORMATS: u64 = 1 << VIRTIO_SND_PCM_FMT_U8
     | 1 << VIRTIO_SND_PCM_FMT_S16
@@ -34,6 +35,30 @@ pub const SUPPORTED_RATES: u64 = 1 << VIRTIO_SND_PCM_RATE_8000
     | 1 << VIRTIO_SND_PCM_RATE_32000
     | 1 << VIRTIO_SND_PCM_RATE_44100
     | 1 << VIRTIO_SND_PCM_RATE_48000;
+
+pub const NR_STREAMS: usize = 1;
+
+pub struct StreamInfo {
+    pub features: Le32, /* 1 << VIRTIO_SND_PCM_F_XXX */
+    pub formats: Le64,  /* 1 << VIRTIO_SND_PCM_FMT_XXX */
+    pub rates: Le64,    /* 1 << VIRTIO_SND_PCM_RATE_XXX */
+    pub direction: u8,
+    pub channels_min: u8,
+    pub channels_max: u8,
+}
+
+impl StreamInfo {
+    pub fn output() -> Self {
+        Self {
+            features : 0.into(),
+            formats : SUPPORTED_FORMATS.into(),
+            rates : SUPPORTED_RATES.into(),
+            direction : VIRTIO_SND_D_OUTPUT,
+            channels_min : 1,
+            channels_max : 6,
+        }
+    }
+}
 
 struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
@@ -72,7 +97,7 @@ impl VhostUserSoundThread {
         Ok(())
     }
 
-    fn handle_event(&self, device_event: u16, vrings: &[VringRwLock], audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>) -> IoResult<bool> {
+    fn handle_event(&self, device_event: u16, vrings: &[VringRwLock], audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>, stream_info: &[StreamInfo]) -> IoResult<bool> {
         let vring = &vrings[device_event as usize];
         let queue_idx = self.queue_indexes[device_event as usize];
         debug!("handle event call queue: {}", queue_idx);
@@ -88,14 +113,14 @@ impl VhostUserSoundThread {
                     // new requests on the queue.
                     loop {
                         vring.disable_notification().unwrap();
-                        self.process_control(vring)?;
+                        self.process_control(vring, stream_info)?;
                         if !vring.enable_notification().unwrap() {
                             break;
                         }
                     }
                 } else {
                     // Without EVENT_IDX, a single call is enough.
-                    self.process_control(vring)?;
+                    self.process_control(vring, stream_info)?;
                 }
             }
             EVENT_QUEUE_IDX => {
@@ -131,7 +156,7 @@ impl VhostUserSoundThread {
     }
 
     /// Process the messages in the vring and dispatch replies
-    fn process_control(&self, vring: &VringRwLock) -> Result<bool> {
+    fn process_control(&self, vring: &VringRwLock, stream_info: &[StreamInfo]) -> Result<bool> {
         let requests: Vec<SndDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
@@ -174,6 +199,7 @@ impl VhostUserSoundThread {
             let response = VirtioSoundHeader { code: VIRTIO_SND_S_OK.into(), };
 
             let mut len = desc_response.len() as u32;
+
             let request_type = hdr_request.code.to_native();
             match request_type {
                 VIRTIO_SND_R_JACK_INFO => todo!(),
@@ -192,42 +218,51 @@ impl VhostUserSoundThread {
 
                     let start_id: usize = u32::from(query_info.start_id) as usize;
                     let count: usize = u32::from(query_info.count) as usize;
-                    let mut pcm_info = vec![VirtioSoundPcmInfo::default(); count];
-                    for pcm in &mut pcm_info {
-                        pcm.hdr.hda_fn_nid = 0.into();
-                        pcm.features = 0.into();
-                        pcm.formats = SUPPORTED_FORMATS.into();
-                        pcm.rates = SUPPORTED_RATES.into();
-                        pcm.direction = VIRTIO_SND_D_OUTPUT;
-                        pcm.channels_min = 1;
-                        pcm.channels_max = 6;
-                        pcm.padding = [0; 5];
-                    }
-                    if start_id + count > pcm_info.len() {
+
+                    if start_id + count > stream_info.len() {
                         error!(
                             "start_id({}) + count({}) must be smaller than the number of streams ({})",
                             start_id,
                             count,
-                            pcm_info.len()
+                            stream_info.len()
                         );
                         desc_chain
                             .memory()
                             .write_obj(VIRTIO_SND_S_BAD_MSG, desc_response.addr())
                             .map_err(|_| Error::DescriptorWriteFailed)?;
-                    }
-                    desc_chain
-                        .memory()
-                        .write_obj(response, desc_response.addr())
-                        .map_err(|_| Error::DescriptorWriteFailed)?;
-                    //let mut len = desc_response.len() as u32;
-
-                    for i in start_id..(start_id + count) {
+                    } else {
                         desc_chain
                             .memory()
-                            .write_slice(pcm_info[i].as_slice(), desc_pcm.addr())
+                            .write_obj(response, desc_response.addr())
                             .map_err(|_| Error::DescriptorWriteFailed)?;
+
+                        let mut buf = vec![];
+
+                        for i in start_id..start_id+count {
+                            let pcm_info = VirtioSoundPcmInfo {
+                                hdr : VirtioSoundInfo {
+                                    hda_fn_nid : Le32::from(i as u32)
+                                },
+                                features : stream_info[i].features,
+                                formats : stream_info[i].formats,
+                                rates : stream_info[i].rates,
+                                direction : stream_info[i].direction,
+                                channels_min : stream_info[i].channels_min,
+                                channels_max : stream_info[i].channels_max,
+                                padding : [0; 5]
+                            };
+                            buf.extend_from_slice(pcm_info.as_slice());
+                        };
+
+                        // TODO: to support the case when the number of items
+                        // do not fit in a single descriptor
+                        desc_chain
+                            .memory()
+                            .write_slice(&buf, desc_pcm.addr())
+                            .map_err(|_| Error::DescriptorWriteFailed)?;
+
+                        len += desc_pcm.len();
                     }
-                    len += desc_pcm.len();
                 },
                 VIRTIO_SND_R_CHMAP_INFO => todo!(),
                 VIRTIO_SND_R_JACK_REMAP => todo!(),
@@ -424,7 +459,8 @@ pub struct VhostUserSoundBackend {
     threads: Vec<RwLock<VhostUserSoundThread>>,
     virtio_cfg: VirtioSoundConfig,
     exit_event: EventFd,
-    _audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>>,
+    audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>>,
+    streams_info: Vec<StreamInfo>
 }
 
 type SndDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
@@ -451,15 +487,22 @@ impl VhostUserSoundBackend {
 
         let audio_backend = alloc_audio_backend(config.audio_backend_name)?;
 
+        let mut streams = Vec::<StreamInfo>::with_capacity(NR_STREAMS);
+
+        let stream_out_info = StreamInfo::output();
+        // TODO: to add a input stream
+        streams.push(stream_out_info);
+
         Ok(Self {
             threads,
             virtio_cfg: VirtioSoundConfig {
                 jacks: 0.into(),
-                streams: 1.into(),
+                streams: Le32::from(streams.len() as u32),
                 chmaps: 0.into(),
             },
+            streams_info: streams,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
-            _audio_backend: RwLock::new(audio_backend),
+            audio_backend: RwLock::new(audio_backend),
         })
     }
 
@@ -517,7 +560,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
         self.threads[thread_id]
             .read()
             .unwrap()
-            .handle_event(device_event, vrings, &self._audio_backend)
+            .handle_event(device_event, vrings, &self.audio_backend, &self.streams_info)
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {

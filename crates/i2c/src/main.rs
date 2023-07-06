@@ -8,8 +8,9 @@
 mod i2c;
 mod vhu_i2c;
 
-use log::{info, warn};
+use log::{error, info, warn};
 use std::num::ParseIntError;
+use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
 
@@ -233,10 +234,13 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() {
     env_logger::init();
 
-    start_backend::<PhysDevice>(I2cArgs::parse())
+    if let Err(e) = start_backend::<PhysDevice>(I2cArgs::parse()) {
+        error!("{e}");
+        exit(1);
+    }
 }
 
 #[cfg(test)]

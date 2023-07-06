@@ -5,8 +5,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{info, warn};
+use log::{error, info, warn};
 use std::num::ParseIntError;
+use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
 
@@ -184,10 +185,13 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
     Ok(())
 }
 
-pub(crate) fn gpio_init() -> Result<()> {
+pub(crate) fn gpio_init() {
     env_logger::init();
 
-    start_backend::<PhysDevice>(GpioArgs::parse())
+    if let Err(e) = start_backend::<PhysDevice>(GpioArgs::parse()) {
+        error!("{e}");
+        exit(1);
+    }
 }
 
 #[cfg(test)]

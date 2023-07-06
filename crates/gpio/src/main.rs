@@ -13,7 +13,7 @@ mod gpio;
 mod vhu_gpio;
 
 #[cfg(target_env = "gnu")]
-fn main() -> backend::Result<()> {
+fn main() {
     backend::gpio_init()
 }
 

@@ -5,8 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 mod vhu_rng;
 
-use log::{info, warn};
+use log::{error, info, warn};
 use std::fs::File;
+use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
@@ -161,10 +162,13 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn main() {
     env_logger::init();
 
-    start_backend(VuRngConfig::try_from(RngArgs::parse()).unwrap())
+    if let Err(e) = start_backend(VuRngConfig::try_from(RngArgs::parse()).unwrap()) {
+        error!("{e}");
+        exit(1);
+    }
 }
 
 #[cfg(test)]

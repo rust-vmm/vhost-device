@@ -7,6 +7,7 @@ mod virtio;
 use std::{
     fs::File,
     path::PathBuf,
+    process::exit,
     sync::{Arc, RwLock},
 };
 
@@ -126,11 +127,20 @@ fn start_backend(backend: VhostUserScsiBackend, args: ScsiArgs) -> Result<()> {
     Ok(())
 }
 
-fn main() -> Result<()> {
+fn run() -> Result<()> {
     env_logger::init();
     let args = ScsiArgs::parse();
     let backend = create_backend(&args)?;
-    start_backend(backend, args)
+    start_backend(backend, args)?;
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = run() {
+        error!("{e}");
+        exit(1);
+    }
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ const VHU_RNG_MAX_PERIOD_MS: u128 = 65536;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Eq, PartialEq, ThisError)]
+#[derive(Debug, ThisError)]
 /// Errors related to vhost-device-rng daemon.
 pub(crate) enum Error {
     #[error("RNG source file doesn't exists or can't be accessed")]
@@ -173,8 +173,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use assert_matches::assert_matches;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn verify_cmd_line_arguments() {
@@ -194,22 +196,22 @@ mod tests {
         // All configuration elements should be what we expect them to be.  Using
         // VuRngConfig::try_from() ensures that strings have been properly trimmed.
         assert_eq!(
-            VuRngConfig::try_from(default_args),
-            VuRngConfig::try_from(args.clone())
+            VuRngConfig::try_from(default_args).unwrap(),
+            VuRngConfig::try_from(args.clone()).unwrap()
         );
 
         // Setting a invalid period should trigger an InvalidPeriodInput error.
         let mut invalid_period_args = args.clone();
         invalid_period_args.period = VHU_RNG_MAX_PERIOD_MS + 1;
-        assert_eq!(
+        assert_matches!(
             VuRngConfig::try_from(invalid_period_args),
-            Err(Error::InvalidPeriodInput(VHU_RNG_MAX_PERIOD_MS + 1))
+            Err(Error::InvalidPeriodInput(p)) if p == VHU_RNG_MAX_PERIOD_MS + 1
         );
 
         // Setting the socket count to 0 should trigger an InvalidSocketCount error.
         let mut invalid_socket_count_args = args;
         invalid_socket_count_args.socket_count = 0;
-        assert_eq!(
+        assert_matches!(
             VuRngConfig::try_from(invalid_socket_count_args),
             Err(Error::InvalidSocketCount(0))
         );
@@ -230,7 +232,7 @@ mod tests {
         };
 
         // An invalid RNG source file should trigger an AccessRngSourceFile error.
-        assert_eq!(
+        assert_matches!(
             start_backend(config.clone()).unwrap_err(),
             Error::AccessRngSourceFile
         );
@@ -239,7 +241,7 @@ mod tests {
         // of the socket file.  Since the latter is invalid the vhost_user::Listener will
         // throw an error, forcing the thread to exit and the call to handle.join() to fail.
         config.rng_source = random_path.to_str().unwrap().to_string();
-        assert_eq!(
+        assert_matches!(
             start_backend(config).unwrap_err(),
             Error::FailedJoiningThreads
         );

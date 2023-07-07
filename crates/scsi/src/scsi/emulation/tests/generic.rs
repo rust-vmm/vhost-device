@@ -2,6 +2,7 @@
 
 //! Tests for stuff shared between commands.
 
+use assert_matches::assert_matches;
 use std::io::ErrorKind;
 
 use super::{do_command_fail, test_image};
@@ -103,5 +104,5 @@ fn test_short_cdb() {
         },
     );
 
-    assert!(matches!(res.unwrap_err(), CmdError::CdbTooShort));
+    assert_matches!(res.unwrap_err(), CmdError::CdbTooShort);
 }

@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use std::num::ParseIntError;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
-use std::thread::spawn;
+use std::thread::{spawn, JoinHandle};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
@@ -35,6 +35,14 @@ pub(crate) enum Error {
     ParseFailure(ParseIntError),
     #[error("Failed to join threads")]
     FailedJoiningThreads,
+    #[error("Could not open gpio device: {0}")]
+    CouldNotOpenDevice(crate::gpio::Error),
+    #[error("Could not create gpio controller: {0}")]
+    CouldNotCreateGpioController(crate::gpio::Error),
+    #[error("Could not create gpio backend: {0}")]
+    CouldNotCreateBackend(crate::vhu_gpio::Error),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
 }
 
 #[derive(Parser, Debug)]
@@ -134,7 +142,7 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
         let socket = config.socket_path.to_owned() + &i.to_string();
         let device_num = config.devices.inner[i];
 
-        let handle = spawn(move || loop {
+        let handle: JoinHandle<Result<()>> = spawn(move || loop {
             // A separate thread is spawned for each socket and can connect to a separate guest.
             // These are run in an infinite loop to not require the daemon to be restarted once a
             // guest exits.
@@ -143,9 +151,12 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
             // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
             // trouble to other threads/guests or the main() function and should be safe for the
             // daemon.
-            let device = D::open(device_num).unwrap();
-            let controller = GpioController::<D>::new(device).unwrap();
-            let backend = Arc::new(RwLock::new(VhostUserGpioBackend::new(controller).unwrap()));
+            let device = D::open(device_num).map_err(Error::CouldNotOpenDevice)?;
+            let controller =
+                GpioController::<D>::new(device).map_err(Error::CouldNotCreateGpioController)?;
+            let backend = Arc::new(RwLock::new(
+                VhostUserGpioBackend::new(controller).map_err(Error::CouldNotCreateBackend)?,
+            ));
             let listener = Listener::new(socket.clone(), true).unwrap();
 
             let mut daemon = VhostUserDaemon::new(
@@ -153,7 +164,7 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
                 backend.clone(),
                 GuestMemoryAtomic::new(GuestMemoryMmap::new()),
             )
-            .unwrap();
+            .map_err(Error::CouldNotCreateDaemon)?;
 
             daemon.start(listener).unwrap();
 
@@ -179,7 +190,7 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
     }
 
     for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)?;
+        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
     }
 
     Ok(())

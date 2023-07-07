@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use std::fs::File;
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
@@ -36,6 +36,10 @@ pub(crate) enum Error {
     InvalidSocketCount(u32),
     #[error("Threads can't be joined")]
     FailedJoiningThreads,
+    #[error("Could not create backend: {0}")]
+    CouldNotCreateBackend(std::io::Error),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
 }
 
 #[derive(Clone, Parser, Debug, PartialEq)]
@@ -110,13 +114,14 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
         let max_bytes = config.max_bytes;
         let random = Arc::clone(&random_file);
 
-        let handle = thread::spawn(move || loop {
+        let handle: JoinHandle<Result<()>> = thread::spawn(move || loop {
             // If creating the VuRngBackend isn't successull there isn't much else to do than
             // killing the thread, which .unwrap() does.  When that happens an error code is
             // generated and displayed by the runtime mechanic.  Killing a thread doesn't affect
             // the other threads spun-off by the daemon.
             let vu_rng_backend = Arc::new(RwLock::new(
-                VuRngBackend::new(random.clone(), period_ms, max_bytes).unwrap(),
+                VuRngBackend::new(random.clone(), period_ms, max_bytes)
+                    .map_err(Error::CouldNotCreateBackend)?,
             ));
 
             let mut daemon = VhostUserDaemon::new(
@@ -124,7 +129,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
                 Arc::clone(&vu_rng_backend),
                 GuestMemoryAtomic::new(GuestMemoryMmap::new()),
             )
-            .unwrap();
+            .map_err(Error::CouldNotCreateDaemon)?;
 
             let listener = Listener::new(socket.clone(), true).unwrap();
             daemon.start(listener).unwrap();
@@ -156,7 +161,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
     }
 
     for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)?;
+        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
     }
 
     Ok(())

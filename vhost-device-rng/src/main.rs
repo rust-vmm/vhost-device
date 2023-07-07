@@ -33,8 +33,6 @@ pub(crate) enum Error {
     InvalidPeriodInput(u128),
     #[error("Wrong socket count: {0}")]
     InvalidSocketCount(u32),
-    #[error("Threads can't be joined")]
-    FailedJoiningThreads,
     #[error("Could not create backend: {0}")]
     CouldNotCreateBackend(std::io::Error),
     #[error("Could not create daemon: {0}")]
@@ -139,7 +137,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
     }
 
     for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
+        handle.join().map_err(std::panic::resume_unwind).unwrap()?;
     }
 
     Ok(())

@@ -39,8 +39,6 @@ pub(crate) enum Error {
     I2cFailure(i2c::Error),
     #[error("Failed while parsing to integer: {0:?}")]
     ParseFailure(ParseIntError),
-    #[error("Failed to join threads")]
-    FailedJoiningThreads,
     #[error("Could not create backend: {0}")]
     CouldNotCreateBackend(vhu_i2c::Error),
     #[error("Could not create daemon: {0}")]
@@ -215,7 +213,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
     }
 
     for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
+        handle.join().map_err(std::panic::resume_unwind).unwrap()?;
     }
 
     Ok(())

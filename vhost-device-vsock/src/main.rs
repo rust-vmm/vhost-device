@@ -281,7 +281,12 @@ pub(crate) fn start_backend_servers(configs: &[VsockConfig]) -> Result<(), Backe
 
     while !handles.is_empty() {
         let thread_id = receiver.recv().unwrap();
-        handles.remove(&thread_id).unwrap().join().unwrap()?;
+        handles
+            .remove(&thread_id)
+            .unwrap()
+            .join()
+            .map_err(std::panic::resume_unwind)
+            .unwrap()?;
     }
 
     Ok(())

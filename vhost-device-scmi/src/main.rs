@@ -45,10 +45,8 @@ use std::{
 
 use clap::{CommandFactory, Parser};
 use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, error};
 
-use vhost::vhost_user;
-use vhost::vhost_user::Listener;
 use vhost_user_backend::VhostUserDaemon;
 use vhu_scmi::VuScmiBackend;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
@@ -113,7 +111,6 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
         }
 
         let backend = Arc::new(RwLock::new(backend_instance.unwrap()));
-        let listener = Listener::new(config.socket_path.clone(), true).unwrap();
         let mut daemon = VhostUserDaemon::new(
             "vhost-device-scmi".to_owned(),
             backend.clone(),
@@ -121,26 +118,9 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
         )
         .unwrap();
 
-        daemon.start(listener).unwrap();
-
-        match daemon.wait() {
-            Ok(()) => {
-                info!("Stopping cleanly");
-            }
-            Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-                info!(
-                    "vhost-user connection closed with partial message.
-                       If the VM is shutting down, this is expected behavior;
-                       otherwise, it might be a bug."
-                );
-            }
-            Err(e) => {
-                warn!("Error running daemon: {:?}", e);
-            }
-        }
-
-        // No matter the result, we need to shut down the worker thread.
-        backend.read().unwrap().exit_event.write(1).unwrap();
+        daemon
+            .serve(&config.socket_path)
+            .map_err(|e| format!("{e}"))?;
         debug!("Finishing backend");
     }
 }

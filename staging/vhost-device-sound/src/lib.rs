@@ -42,10 +42,8 @@ use std::{
 };
 
 use clap::ValueEnum;
-use log::{info, warn};
 pub use stream::Stream;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
 use virtio_sound::*;
 use vm_memory::{
@@ -347,36 +345,18 @@ impl Drop for IOMessage {
 /// vhost-device-sound backend server.
 pub fn start_backend_server(config: SoundConfig) {
     log::trace!("Using config {:?}.", &config);
-    let listener = Listener::new(config.get_socket_path(), true).unwrap();
+    let socket = config.get_socket_path();
     let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
 
     let mut daemon = VhostUserDaemon::new(
         String::from("vhost-device-sound"),
-        backend.clone(),
+        backend,
         GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )
     .unwrap();
 
     log::trace!("Starting daemon.");
-    daemon.start(listener).unwrap();
-
-    match daemon.wait() {
-        Ok(()) => {
-            info!("Stopping cleanly.");
-        }
-        Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-            info!(
-                "vhost-user connection closed with partial message. If the VM is shutting down, \
-                 this is expected behavior; otherwise, it might be a bug."
-            );
-        }
-        Err(e) => {
-            warn!("Error running daemon: {:?}", e);
-        }
-    }
-
-    // No matter the result, we need to shut down the worker thread.
-    backend.send_exit_event();
+    daemon.serve(socket).unwrap();
 }
 
 #[cfg(test)]

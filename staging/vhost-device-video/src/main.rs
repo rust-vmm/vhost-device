@@ -11,9 +11,8 @@ use std::{
 };
 
 use clap::Parser;
-use log::{info, warn};
+use log::info;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vhu_video::{BackendType, VuVideoBackend};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
@@ -26,8 +25,8 @@ pub(crate) enum Error {
     CouldNotCreateBackend(vhu_video::VuVideoError),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
-    #[error("Failed creating listener: {0}")]
-    FailedCreatingListener(vhost_user::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
 }
 
 #[derive(Clone, Parser, Debug)]
@@ -91,33 +90,8 @@ pub(crate) fn start_backend(config: VuVideoConfig) -> Result<()> {
         }
 
         daemon
-            .start(Listener::new(&config.socket_path, true).map_err(Error::FailedCreatingListener)?)
-            .expect("Stargin daemon");
-
-        match daemon.wait() {
-            Ok(()) => {
-                info!("Stopping cleanly");
-            }
-            Err(vhost_user_backend::Error::HandleRequest(
-                vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-            )) => {
-                info!(
-                    "vhost-user connection closed with partial message.
-                    If the VM is shutting down, this is expected behavior;
-                    otherwise, it might be a bug."
-                );
-            }
-            Err(e) => {
-                warn!("Error running daemon: {:?} -> {}", e, e.to_string());
-            }
-        }
-
-        vu_video_backend
-            .read()
-            .unwrap()
-            .exit_event
-            .write(1)
-            .expect("Shutting down worker thread");
+            .serve(&config.socket_path)
+            .map_err(Error::ServeFailed)?;
     }
 }
 
@@ -193,7 +167,7 @@ mod tests {
         };
         assert_matches!(
             start_backend(VuVideoConfig::try_from(config).unwrap()).unwrap_err(),
-            Error::FailedCreatingListener(_)
+            Error::ServeFailed(_)
         );
         // cleanup
         std::fs::remove_file(v4l2_device).expect("Failed to clean up");

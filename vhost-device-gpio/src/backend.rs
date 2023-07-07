@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{error, info, warn};
+use log::error;
 use std::num::ParseIntError;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
@@ -14,7 +14,6 @@ use std::thread::{spawn, JoinHandle};
 use clap::Parser;
 use env_logger::Env;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
@@ -47,6 +46,8 @@ pub(crate) enum Error {
     CouldNotCreateBackend(crate::vhu_gpio::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
 }
 
 const GPIO_AFTER_HELP: &str = "Each device number here will be used to \
@@ -179,7 +180,6 @@ fn start_device_backend<D: GpioDevice>(device: D, socket: String) -> Result<()> 
     let backend = Arc::new(RwLock::new(
         VhostUserGpioBackend::new(controller).map_err(Error::CouldNotCreateBackend)?,
     ));
-    let listener = Listener::new(socket, true).unwrap();
 
     let mut daemon = VhostUserDaemon::new(
         String::from("vhost-device-gpio-backend"),
@@ -188,21 +188,8 @@ fn start_device_backend<D: GpioDevice>(device: D, socket: String) -> Result<()> 
     )
     .map_err(Error::CouldNotCreateDaemon)?;
 
-    daemon.start(listener).unwrap();
+    daemon.serve(&socket).map_err(Error::ServeFailed)?;
 
-    match daemon.wait() {
-        Ok(()) => {
-            info!("Stopping cleanly.");
-        }
-        Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
-            info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-        }
-        Err(e) => {
-            warn!("Error running daemon: {:?}", e);
-        }
-    }
-    // No matter the result, we need to shut down the worker thread.
-    backend.read().unwrap().exit_event.write(1).unwrap();
     Ok(())
 }
 
@@ -360,9 +347,6 @@ mod tests {
         let socket_name = "~/path/not/present/gpio";
         let cmd_args = get_cmd_args(socket_name, "s1:s4:s3:s5", 4);
 
-        assert_matches!(
-            start_backend(cmd_args).unwrap_err(),
-            Error::FailedJoiningThreads
-        );
+        assert_matches!(start_backend(cmd_args).unwrap_err(), Error::ServeFailed(_));
     }
 }

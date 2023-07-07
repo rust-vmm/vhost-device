@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 mod vhu_rng;
 
-use log::{error, info, warn};
+use log::error;
 use std::fs::File;
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
@@ -13,7 +13,6 @@ use std::thread::{self, JoinHandle};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
@@ -40,6 +39,8 @@ pub(crate) enum Error {
     CouldNotCreateBackend(std::io::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
 }
 
 #[derive(Clone, Parser, Debug, PartialEq)]
@@ -131,30 +132,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
             )
             .map_err(Error::CouldNotCreateDaemon)?;
 
-            let listener = Listener::new(socket.clone(), true).unwrap();
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            vu_rng_backend
-                .read()
-                .unwrap()
-                .exit_event
-                .write(1)
-                .expect("Shutting down worker thread");
+            daemon.serve(&socket).map_err(Error::ServeFailed)?;
         });
 
         handles.push(handle);
@@ -243,12 +221,10 @@ mod tests {
         );
 
         // Set the RNG source to something valid, forcing the code to check the validity
-        // of the socket file.  Since the latter is invalid the vhost_user::Listener will
-        // throw an error, forcing the thread to exit and the call to handle.join() to fail.
+        // of the socket file.  Since the latter is invalid, serving will throw
+        // an error, forcing the thread to exit and the call to handle.join()
+        // to fail.
         config.rng_source = random_path.to_str().unwrap().to_string();
-        assert_matches!(
-            start_backend(config).unwrap_err(),
-            Error::FailedJoiningThreads
-        );
+        assert_matches!(start_backend(config).unwrap_err(), Error::ServeFailed(_));
     }
 }

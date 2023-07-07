@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use std::{convert, io, result};
 
 use thiserror::Error as ThisError;
-use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures, VhostUserBackendSpecs};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::bindings::virtio_ring::{
@@ -28,6 +28,7 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 1;
+const VIRTIO_ID_RNG: u32 = 4;
 
 type Result<T> = std::result::Result<T, VuRngError>;
 type RngDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
@@ -222,6 +223,15 @@ impl<T: 'static + Read + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for V
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         VhostUserProtocolFeatures::MQ
+            | VhostUserProtocolFeatures::STATUS
+            | VhostUserProtocolFeatures::STANDALONE
+    }
+
+    fn specs(&self) -> VhostUserBackendSpecs {
+        VhostUserBackendSpecs::new(VIRTIO_ID_RNG,
+                                   0,
+                                   NUM_QUEUES as u32,
+                                   NUM_QUEUES as u32)
     }
 
     fn set_event_idx(&mut self, enabled: bool) {

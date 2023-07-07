@@ -1305,6 +1305,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost"
+version = "0.8.0"
+source = "git+https://github.com/stsquad/vhost?branch=standalone/get-specs#b4313a1fcfe5aaba69efedbc7142b54891db2215"
+dependencies = [
+ "bitflags 1.3.2",
+ "libc",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-gpio"
 version = "0.1.0"
 dependencies = [
@@ -1314,8 +1325,8 @@ dependencies = [
  "libgpiod",
  "log",
  "thiserror",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vhost-user-backend 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1331,8 +1342,8 @@ dependencies = [
  "libc",
  "log",
  "thiserror",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vhost-user-backend 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1351,8 +1362,8 @@ dependencies = [
  "rand",
  "tempfile",
  "thiserror",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.8.0 (git+https://github.com/stsquad/vhost?branch=standalone/get-specs)",
+ "vhost-user-backend 0.10.0 (git+https://github.com/stsquad/vhost?branch=standalone/get-specs)",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1370,8 +1381,8 @@ dependencies = [
  "num_enum",
  "tempfile",
  "thiserror",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vhost-user-backend 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1386,7 +1397,21 @@ checksum = "e3ea9d5e8ec847cde4df1c04e586698a479706fd6beca37323f9d425b24b4c2f"
 dependencies = [
  "libc",
  "log",
- "vhost",
+ "vhost 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "vhost-user-backend"
+version = "0.10.0"
+source = "git+https://github.com/stsquad/vhost?branch=standalone/get-specs#b4313a1fcfe5aaba69efedbc7142b54891db2215"
+dependencies = [
+ "libc",
+ "log",
+ "vhost 0.8.0 (git+https://github.com/stsquad/vhost?branch=standalone/get-specs)",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1408,8 +1433,8 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "thiserror",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vhost-user-backend 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "virtio-bindings",
  "virtio-queue",
  "virtio-vsock",

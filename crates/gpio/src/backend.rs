@@ -22,7 +22,7 @@ use crate::vhu_gpio::VhostUserGpioBackend;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Eq, PartialEq, ThisError)]
+#[derive(Debug, ThisError)]
 /// Errors related to low level GPIO helpers
 pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
@@ -196,6 +196,8 @@ pub(crate) fn gpio_init() {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+
     use super::*;
     use crate::gpio::tests::DummyDevice;
 
@@ -220,7 +222,7 @@ mod tests {
         config.push(5).unwrap();
         config.push(6).unwrap();
 
-        assert_eq!(config.push(5).unwrap_err(), Error::DeviceDuplicate(5));
+        assert_matches!(config.push(5).unwrap_err(), Error::DeviceDuplicate(5));
     }
 
     #[test]
@@ -229,28 +231,28 @@ mod tests {
 
         // Invalid device number
         let cmd_args = get_cmd_args(socket_name, "1:4d:5", 3);
-        assert_eq!(
+        assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
-            Error::ParseFailure("4d".parse::<u32>().unwrap_err())
+            Error::ParseFailure(e) if e == "4d".parse::<u32>().unwrap_err()
         );
 
         // Zero socket count
         let cmd_args = get_cmd_args(socket_name, "1:4", 0);
-        assert_eq!(
+        assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::SocketCountInvalid(0)
         );
 
         // Duplicate client address: 4
         let cmd_args = get_cmd_args(socket_name, "1:4:5:6:4", 5);
-        assert_eq!(
+        assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::DeviceDuplicate(4)
         );
 
         // Device count mismatch
         let cmd_args = get_cmd_args(socket_name, "1:4:5:6", 5);
-        assert_eq!(
+        assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::DeviceCountMismatch(5, 4)
         );
@@ -280,7 +282,7 @@ mod tests {
         let socket_name = "~/path/not/present/gpio";
         let cmd_args = get_cmd_args(socket_name, "1:4:3:5", 4);
 
-        assert_eq!(
+        assert_matches!(
             start_backend::<DummyDevice>(cmd_args).unwrap_err(),
             Error::FailedJoiningThreads
         );

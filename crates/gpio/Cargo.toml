@@ -31,5 +31,6 @@ vmm-sys-util = "0.11"
 libgpiod = { version = "0.1" }
 
 [dev-dependencies]
+assert_matches = "1.5"
 virtio-queue = { version = "0.9", features = ["test-utils"] }
 vm-memory = { version = "0.12", features = ["backend-mmap", "backend-atomic"] }

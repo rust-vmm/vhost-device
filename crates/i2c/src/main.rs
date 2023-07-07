@@ -25,7 +25,7 @@ use vhu_i2c::VhostUserI2cBackend;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, PartialEq, ThisError)]
+#[derive(Debug, ThisError)]
 /// Errors related to low level i2c helpers
 pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
@@ -245,6 +245,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+
     use super::*;
     use crate::i2c::tests::DummyDevice;
 
@@ -281,12 +283,12 @@ mod tests {
         config.push(5).unwrap();
         config.push(6).unwrap();
 
-        assert_eq!(
+        assert_matches!(
             config.push(invalid_addr).unwrap_err(),
-            Error::ClientAddressInvalid(invalid_addr)
+            Error::ClientAddressInvalid(a) if a == invalid_addr
         );
 
-        assert_eq!(
+        assert_matches!(
             config.push(5).unwrap_err(),
             Error::ClientAddressDuplicate(5)
         );
@@ -298,21 +300,21 @@ mod tests {
 
         // Invalid client address
         let cmd_args = I2cArgs::from_args(socket_name, "1:4d", 5);
-        assert_eq!(
+        assert_matches!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
-            Error::ParseFailure("4d".parse::<u16>().unwrap_err())
+            Error::ParseFailure(e) if e == "4d".parse::<u16>().unwrap_err()
         );
 
         // Zero socket count
         let cmd_args = I2cArgs::from_args(socket_name, "1:4", 0);
-        assert_eq!(
+        assert_matches!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::SocketCountInvalid(0)
         );
 
         // Duplicate client address: 4
         let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:4:23", 5);
-        assert_eq!(
+        assert_matches!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ClientAddressDuplicate(4)
         );
@@ -355,7 +357,7 @@ mod tests {
             .push(DeviceConfig::new_with(2, vec![32, 21]))
             .unwrap();
 
-        assert_eq!(
+        assert_matches!(
             config
                 .push(DeviceConfig::new_with(5, vec![4, 23]))
                 .unwrap_err(),
@@ -372,11 +374,11 @@ mod tests {
             .push(DeviceConfig::new_with(5, vec![10, 23]))
             .unwrap();
 
-        assert_eq!(
+        assert_matches!(
             config
                 .push(DeviceConfig::new_with(1, vec![32, 21]))
                 .unwrap_err(),
-            Error::AdapterDuplicate(1.to_string())
+            Error::AdapterDuplicate(n) if n == "1"
         );
     }
 
@@ -386,7 +388,7 @@ mod tests {
         let socket_name = "~/path/not/present/i2c";
         let cmd_args = I2cArgs::from_args(socket_name, "1:4,3:5", 5);
 
-        assert_eq!(
+        assert_matches!(
             start_backend::<DummyDevice>(cmd_args).unwrap_err(),
             Error::FailedJoiningThreads
         );

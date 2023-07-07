@@ -12,7 +12,7 @@ use log::{error, info, warn};
 use std::num::ParseIntError;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
-use std::thread::spawn;
+use std::thread::{spawn, JoinHandle};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
@@ -42,6 +42,10 @@ pub(crate) enum Error {
     ParseFailure(ParseIntError),
     #[error("Failed to join threads")]
     FailedJoiningThreads,
+    #[error("Could not create backend: {0}")]
+    CouldNotCreateBackend(vhu_i2c::Error),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
 }
 
 #[derive(Parser, Debug)]
@@ -183,7 +187,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
         let socket = config.socket_path.to_owned() + &i.to_string();
         let i2c_map = i2c_map.clone();
 
-        let handle = spawn(move || loop {
+        let handle: JoinHandle<Result<()>> = spawn(move || loop {
             // A separate thread is spawned for each socket and can connect to a separate guest.
             // These are run in an infinite loop to not require the daemon to be restarted once a
             // guest exits.
@@ -193,7 +197,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
             // trouble to other threads/guests or the main() function and should be safe for the
             // daemon.
             let backend = Arc::new(RwLock::new(
-                VhostUserI2cBackend::new(i2c_map.clone()).unwrap(),
+                VhostUserI2cBackend::new(i2c_map.clone()).map_err(Error::CouldNotCreateBackend)?,
             ));
             let listener = Listener::new(socket.clone(), true).unwrap();
 
@@ -202,7 +206,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
                 backend.clone(),
                 GuestMemoryAtomic::new(GuestMemoryMmap::new()),
             )
-            .unwrap();
+            .map_err(Error::CouldNotCreateDaemon)?;
 
             daemon.start(listener).unwrap();
 
@@ -228,7 +232,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
     }
 
     for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)?;
+        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
     }
 
     Ok(())

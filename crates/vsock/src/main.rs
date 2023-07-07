@@ -11,13 +11,14 @@ mod vsock_conn;
 use std::{
     collections::HashMap,
     convert::TryFrom,
+    process::exit,
     sync::{Arc, RwLock},
     thread,
 };
 
 use crate::vhu_vsock::{CidMap, VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
-use log::{info, warn};
+use log::{error, info, warn};
 use serde::Deserialize;
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
@@ -45,6 +46,14 @@ enum VmArgsParseError {
     ParseInteger(std::num::ParseIntError),
     #[error("Required key `{0}` not found")]
     RequiredKeyNotFound(String),
+}
+
+#[derive(Debug, ThisError)]
+enum BackendError {
+    #[error("Could not create backend: {0}")]
+    CouldNotCreateBackend(vhu_vsock::Error),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
 }
 
 #[derive(Args, Clone, Debug, Deserialize)]
@@ -177,10 +186,15 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
 
 /// This is the public API through which an external program starts the
 /// vhost-user-vsock backend server.
-pub(crate) fn start_backend_server(config: VsockConfig, cid_map: Arc<RwLock<CidMap>>) {
+pub(crate) fn start_backend_server(
+    config: VsockConfig,
+    cid_map: Arc<RwLock<CidMap>>,
+) -> Result<(), BackendError> {
     loop {
-        let backend =
-            Arc::new(VhostUserVsockBackend::new(config.clone(), cid_map.clone()).unwrap());
+        let backend = Arc::new(
+            VhostUserVsockBackend::new(config.clone(), cid_map.clone())
+                .map_err(BackendError::CouldNotCreateBackend)?,
+        );
         cid_map
             .write()
             .unwrap()
@@ -193,7 +207,7 @@ pub(crate) fn start_backend_server(config: VsockConfig, cid_map: Arc<RwLock<CidM
             backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )
-        .unwrap();
+        .map_err(BackendError::CouldNotCreateDaemon)?;
 
         let mut vring_workers = daemon.get_epoll_handlers();
 
@@ -224,7 +238,7 @@ pub(crate) fn start_backend_server(config: VsockConfig, cid_map: Arc<RwLock<CidM
     }
 }
 
-pub(crate) fn start_backend_servers(configs: &[VsockConfig]) {
+pub(crate) fn start_backend_servers(configs: &[VsockConfig]) -> Result<(), BackendError> {
     let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
     let mut handles = Vec::new();
 
@@ -239,8 +253,10 @@ pub(crate) fn start_backend_servers(configs: &[VsockConfig]) {
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().unwrap()?;
     }
+
+    Ok(())
 }
 
 fn main() {
@@ -254,7 +270,10 @@ fn main() {
         }
     };
 
-    start_backend_servers(&configs);
+    if let Err(e) = start_backend_servers(&configs) {
+        error!("{e}");
+        exit(1);
+    }
 }
 
 #[cfg(test)]

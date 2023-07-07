@@ -19,10 +19,9 @@ use std::{
 
 use crate::vhu_vsock::{CidMap, VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
-use log::{error, info, warn};
+use log::error;
 use serde::Deserialize;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
@@ -56,6 +55,8 @@ enum BackendError {
     CouldNotCreateBackend(vhu_vsock::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
     #[error("Thread `{0}` panicked")]
     ThreadPanic(String, Box<dyn Any + Send>),
 }
@@ -228,8 +229,6 @@ pub(crate) fn start_backend_server(
                 .map_err(BackendError::CouldNotCreateBackend)?,
         );
 
-        let listener = Listener::new(config.get_socket_path(), true).unwrap();
-
         let mut daemon = VhostUserDaemon::new(
             String::from("vhost-device-vsock"),
             backend.clone(),
@@ -246,24 +245,12 @@ pub(crate) fn start_backend_server(
                 .register_listeners(epoll_handlers.remove(0));
         }
 
-        daemon.start(listener).unwrap();
-
-        match daemon.wait() {
-            Ok(()) => {
-                info!("Stopping cleanly");
-            }
-            Err(vhost_user_backend::Error::HandleRequest(
-                vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-            )) => {
-                info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-            }
-            Err(e) => {
-                warn!("Error running daemon: {:?}", e);
-            }
+        if let Err(e) = daemon
+            .serve(config.get_socket_path())
+            .map_err(BackendError::ServeFailed)
+        {
+            error!("{e}");
         }
-
-        // No matter the result, we need to shut down the worker thread.
-        backend.exit_event.write(1).unwrap();
     }
 }
 

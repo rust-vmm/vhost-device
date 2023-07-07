@@ -8,7 +8,7 @@
 mod i2c;
 mod vhu_i2c;
 
-use log::{error, info, warn};
+use log::error;
 use std::num::ParseIntError;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
@@ -16,7 +16,6 @@ use std::thread::{spawn, JoinHandle};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
@@ -46,6 +45,8 @@ pub(crate) enum Error {
     CouldNotCreateBackend(vhu_i2c::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
 }
 
 #[derive(Parser, Debug)]
@@ -199,7 +200,6 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
             let backend = Arc::new(RwLock::new(
                 VhostUserI2cBackend::new(i2c_map.clone()).map_err(Error::CouldNotCreateBackend)?,
             ));
-            let listener = Listener::new(socket.clone(), true).unwrap();
 
             let mut daemon = VhostUserDaemon::new(
                 String::from("vhost-device-i2c-backend"),
@@ -208,24 +208,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
             )
             .map_err(Error::CouldNotCreateDaemon)?;
 
-            daemon.start(listener).unwrap();
-
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
-
-            // No matter the result, we need to shut down the worker thread.
-            backend.read().unwrap().exit_event.write(1).unwrap();
+            daemon.serve(&socket).map_err(Error::ServeFailed)?;
         });
 
         handles.push(handle);
@@ -250,6 +233,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use vhost::vhost_user::Listener;
 
     use super::*;
     use crate::i2c::tests::DummyDevice;
@@ -394,7 +378,7 @@ mod tests {
 
         assert_matches!(
             start_backend::<DummyDevice>(cmd_args).unwrap_err(),
-            Error::FailedJoiningThreads
+            Error::ServeFailed(_)
         );
     }
 }

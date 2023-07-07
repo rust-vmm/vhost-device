@@ -12,9 +12,8 @@ use std::{
 };
 
 use clap::Parser;
-use log::{error, info, warn};
+use log::{error, warn};
 use thiserror::Error as ThisError;
-use vhost::vhost_user::{self, Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
@@ -28,8 +27,8 @@ use crate::vhu_scsi::VhostUserScsiBackend;
 enum Error {
     #[error("More than 256 LUNs aren't currently supported")]
     TooManyLUNs,
-    #[error("Failed creating listener: {0}")]
-    FailedCreatingListener(vhost_user::Error),
+    #[error("Failed serving the daemon: {0}")]
+    ServeFailed(vhost_user_backend::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -100,32 +99,8 @@ fn start_backend(backend: VhostUserScsiBackend, args: ScsiArgs) -> Result<()> {
     )
     .expect("Creating daemon");
 
-    daemon
-        .start(Listener::new(args.socket_path, true).map_err(Error::FailedCreatingListener)?)
-        .expect("Starting daemon");
+    daemon.serve(args.socket_path).map_err(Error::ServeFailed)?;
 
-    match daemon.wait() {
-        Ok(()) => {
-            info!("Stopping cleanly.");
-        }
-        Err(vhost_user_backend::Error::HandleRequest(
-            vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-        )) => {
-            info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-        }
-        Err(e) => {
-            warn!("Error running daemon: {:?}", e);
-        }
-    }
-
-    // No matter the result, we need to shut down the worker thread.
-    // unwrap will only panic if we already panicked somewhere else
-    backend
-        .read()
-        .unwrap()
-        .exit_event
-        .write(1)
-        .expect("Shutting down worker thread");
     Ok(())
 }
 
@@ -172,7 +147,7 @@ mod tests {
         };
         let backend = create_backend(&args).unwrap();
         let err = start_backend(backend, args).unwrap_err();
-        if let Error::FailedCreatingListener(_) = err {
+        if let Error::ServeFailed(_) = err {
         } else {
             panic!("expected failure when creating listener");
         }

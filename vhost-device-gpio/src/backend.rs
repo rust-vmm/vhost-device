@@ -36,8 +36,6 @@ pub(crate) enum Error {
     DeviceDuplicate(u32),
     #[error("Failed while parsing to integer: {0:?}")]
     ParseFailure(ParseIntError),
-    #[error("Failed to join threads")]
-    FailedJoiningThreads,
     #[error("Could not open gpio device: {0}")]
     CouldNotOpenDevice(crate::gpio::Error),
     #[error("Could not create gpio controller: {0}")]
@@ -227,7 +225,7 @@ fn start_backend(args: GpioArgs) -> Result<()> {
     }
 
     for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
+        handle.join().map_err(std::panic::resume_unwind).unwrap()?;
     }
 
     Ok(())

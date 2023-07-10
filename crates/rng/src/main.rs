@@ -170,7 +170,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
 fn main() {
     env_logger::init();
 
-    if let Err(e) = start_backend(VuRngConfig::try_from(RngArgs::parse()).unwrap()) {
+    if let Err(e) = VuRngConfig::try_from(RngArgs::parse()).and_then(start_backend) {
         error!("{e}");
         exit(1);
     }

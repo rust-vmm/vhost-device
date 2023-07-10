@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     os::unix::{
         net::UnixStream,
-        prelude::{AsRawFd, FromRawFd, RawFd},
+        prelude::{AsRawFd, RawFd},
     },
     sync::{Arc, RwLock},
 };
@@ -292,7 +292,7 @@ impl VsockThreadBackend {
             .insert(stream_fd, ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
 
         let conn = VsockConnection::new_peer_init(
-            stream,
+            stream.try_clone().map_err(Error::UnixConnect)?,
             pkt.dst_cid(),
             pkt.dst_port(),
             pkt.src_cid(),
@@ -307,11 +307,7 @@ impl VsockThreadBackend {
         self.backend_rxq
             .push_back(ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
 
-        self.stream_map.insert(
-            stream_fd,
-            // SAFETY: Safe as the file descriptor is guaranteed to be valid.
-            unsafe { UnixStream::from_raw_fd(stream_fd) },
-        );
+        self.stream_map.insert(stream_fd, stream);
         self.local_port_set.insert(pkt.dst_port());
 
         VhostUserVsockThread::epoll_register(

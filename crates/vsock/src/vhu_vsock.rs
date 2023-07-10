@@ -348,24 +348,34 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::convert::TryInto;
+    use tempfile::tempdir;
     use vhost_user_backend::VringT;
     use vm_memory::GuestAddress;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
     #[test]
-    #[serial]
     fn test_vsock_backend() {
         const CID: u64 = 3;
-        const VHOST_SOCKET_PATH: &str = "test_vsock_backend.socket";
-        const VSOCK_SOCKET_PATH: &str = "test_vsock_backend.vsock";
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend.socket")
+            .display()
+            .to_string();
+        let vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend.vsock")
+            .display()
+            .to_string();
 
         let config = VsockConfig::new(
             CID,
-            VHOST_SOCKET_PATH.to_string(),
-            VSOCK_SOCKET_PATH.to_string(),
+            vhost_socket_path.to_string(),
+            vsock_socket_path.to_string(),
             CONN_TX_BUF_SIZE,
         );
 
@@ -426,16 +436,28 @@ mod tests {
         assert!(!ret.unwrap());
 
         // cleanup
-        let _ = std::fs::remove_file(VHOST_SOCKET_PATH);
-        let _ = std::fs::remove_file(VSOCK_SOCKET_PATH);
+        let _ = std::fs::remove_file(vhost_socket_path);
+        let _ = std::fs::remove_file(vsock_socket_path);
+
+        test_dir.close().unwrap();
     }
 
     #[test]
-    #[serial]
     fn test_vsock_backend_failures() {
         const CID: u64 = 3;
-        const VHOST_SOCKET_PATH: &str = "test_vsock_backend_failures.socket";
-        const VSOCK_SOCKET_PATH: &str = "test_vsock_backend_failures.vsock";
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend_failures.socket")
+            .display()
+            .to_string();
+        let vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend_failures.vsock")
+            .display()
+            .to_string();
 
         let config = VsockConfig::new(
             CID,
@@ -451,8 +473,8 @@ mod tests {
 
         let config = VsockConfig::new(
             CID,
-            VHOST_SOCKET_PATH.to_string(),
-            VSOCK_SOCKET_PATH.to_string(),
+            vhost_socket_path.to_string(),
+            vsock_socket_path.to_string(),
             CONN_TX_BUF_SIZE,
         );
 
@@ -487,7 +509,9 @@ mod tests {
         );
 
         // cleanup
-        let _ = std::fs::remove_file(VHOST_SOCKET_PATH);
-        let _ = std::fs::remove_file(VSOCK_SOCKET_PATH);
+        let _ = std::fs::remove_file(vhost_socket_path);
+        let _ = std::fs::remove_file(vsock_socket_path);
+
+        test_dir.close().unwrap();
     }
 }

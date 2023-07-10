@@ -260,9 +260,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::fs::File;
     use std::io::Write;
+    use tempfile::tempdir;
 
     impl VsockArgs {
         fn from_args(guest_cid: u64, socket: &str, uds_path: &str, tx_buffer_size: u32) -> Self {
@@ -287,9 +287,12 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_config_setup() {
-        let args = VsockArgs::from_args(3, "/tmp/vhost4.socket", "/tmp/vm4.vsock", 64 * 1024);
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let socket_path = test_dir.path().join("vhost4.socket").display().to_string();
+        let uds_path = test_dir.path().join("vm4.vsock").display().to_string();
+        let args = VsockArgs::from_args(3, &socket_path, &uds_path, 64 * 1024);
 
         let configs = Vec::<VsockConfig>::try_from(args);
         assert!(configs.is_ok());
@@ -299,17 +302,38 @@ mod tests {
 
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), 3);
-        assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
-        assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
+        assert_eq!(config.get_socket_path(), socket_path);
+        assert_eq!(config.get_uds_path(), uds_path);
         assert_eq!(config.get_tx_buffer_size(), 64 * 1024);
+
+        test_dir.close().unwrap();
     }
 
     #[test]
-    #[serial]
     fn test_vsock_config_setup_from_vm_args() {
-        let params = "--vm socket=/tmp/vhost3.socket,uds_path=/tmp/vm3.vsock \
-                      --vm socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,guest-cid=4,tx_buffer_size=65536 \
-                      --vm guest-cid=5,socket=/tmp/vhost5.socket,uds_path=/tmp/vm5.vsock,tx-buffer-size=32768";
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let socket_paths = [
+            test_dir.path().join("vhost3.socket"),
+            test_dir.path().join("vhost4.socket"),
+            test_dir.path().join("vhost5.socket"),
+        ];
+        let uds_paths = [
+            test_dir.path().join("vm3.vsock"),
+            test_dir.path().join("vm4.vsock"),
+            test_dir.path().join("vm5.vsock"),
+        ];
+        let params = format!(
+            "--vm socket={vhost3_socket},uds_path={vm3_vsock} \
+             --vm socket={vhost4_socket},uds-path={vm4_vsock},guest-cid=4,tx_buffer_size=65536 \
+             --vm guest-cid=5,socket={vhost5_socket},uds_path={vm5_vsock},tx-buffer-size=32768",
+            vhost3_socket = socket_paths[0].display(),
+            vhost4_socket = socket_paths[1].display(),
+            vhost5_socket = socket_paths[2].display(),
+            vm3_vsock = uds_paths[0].display(),
+            vm4_vsock = uds_paths[1].display(),
+            vm5_vsock = uds_paths[2].display(),
+        );
 
         let mut params = params.split_whitespace().collect::<Vec<&str>>();
         params.insert(0, ""); // to make the test binary name agnostic
@@ -324,61 +348,89 @@ mod tests {
 
         let config = configs.get(0).unwrap();
         assert_eq!(config.get_guest_cid(), 3);
-        assert_eq!(config.get_socket_path(), "/tmp/vhost3.socket");
-        assert_eq!(config.get_uds_path(), "/tmp/vm3.vsock");
+        assert_eq!(
+            config.get_socket_path(),
+            socket_paths[0].display().to_string()
+        );
+        assert_eq!(config.get_uds_path(), uds_paths[0].display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 65536);
 
         let config = configs.get(1).unwrap();
         assert_eq!(config.get_guest_cid(), 4);
-        assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
-        assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
+        assert_eq!(
+            config.get_socket_path(),
+            socket_paths[1].display().to_string()
+        );
+        assert_eq!(config.get_uds_path(), uds_paths[1].display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 65536);
 
         let config = configs.get(2).unwrap();
         assert_eq!(config.get_guest_cid(), 5);
-        assert_eq!(config.get_socket_path(), "/tmp/vhost5.socket");
-        assert_eq!(config.get_uds_path(), "/tmp/vm5.vsock");
+        assert_eq!(
+            config.get_socket_path(),
+            socket_paths[2].display().to_string()
+        );
+        assert_eq!(config.get_uds_path(), uds_paths[2].display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 32768);
+
+        test_dir.close().unwrap();
     }
 
     #[test]
-    #[serial]
     fn test_vsock_config_setup_from_file() {
-        let mut yaml = File::create("./config.yaml").unwrap();
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let config_path = test_dir.path().join("config.yaml");
+        let socket_path = test_dir.path().join("vhost4.socket");
+        let uds_path = test_dir.path().join("vm4.vsock");
+
+        let mut yaml = File::create(&config_path).unwrap();
         yaml.write_all(
-            b"vms:
+            format!(
+                "vms:
     - guest_cid: 4
-      socket: /tmp/vhost4.socket
-      uds_path: /tmp/vm4.vsock
+      socket: {}
+      uds_path: {}
       tx_buffer_size: 65536",
+                socket_path.display(),
+                uds_path.display(),
+            )
+            .as_bytes(),
         )
         .unwrap();
-        let args = VsockArgs::from_file("./config.yaml");
+        let args = VsockArgs::from_file(&config_path.display().to_string());
 
         let configs = Vec::<VsockConfig>::try_from(args).unwrap();
         assert_eq!(configs.len(), 1);
 
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), 4);
-        assert_eq!(config.get_socket_path(), "/tmp/vhost4.socket");
-        assert_eq!(config.get_uds_path(), "/tmp/vm4.vsock");
-        std::fs::remove_file("./config.yaml").unwrap();
+        assert_eq!(config.get_socket_path(), socket_path.display().to_string());
+        assert_eq!(config.get_uds_path(), uds_path.display().to_string());
+        std::fs::remove_file(&config_path).unwrap();
+
+        test_dir.close().unwrap();
     }
 
     #[test]
-    #[serial]
     fn test_vsock_server() {
         const CID: u64 = 3;
-        const VHOST_SOCKET_PATH: &str = "test_vsock_server.socket";
-        const VSOCK_SOCKET_PATH: &str = "test_vsock_server.vsock";
         const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
-        let config = VsockConfig::new(
-            CID,
-            VHOST_SOCKET_PATH.to_string(),
-            VSOCK_SOCKET_PATH.to_string(),
-            CONN_TX_BUF_SIZE,
-        );
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_server.socket")
+            .display()
+            .to_string();
+        let vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_server.vsock")
+            .display()
+            .to_string();
+
+        let config = VsockConfig::new(CID, vhost_socket_path, vsock_socket_path, CONN_TX_BUF_SIZE);
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
@@ -398,5 +450,7 @@ mod tests {
         assert_eq!(backend.threads.len(), 1);
 
         assert_eq!(vring_workers.len(), backend.threads.len());
+
+        test_dir.close().unwrap();
     }
 }

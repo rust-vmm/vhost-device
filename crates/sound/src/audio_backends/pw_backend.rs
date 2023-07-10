@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use super::AudioBackend;
-use std::{thread};
-use std::{cell::Cell, rc::Rc};
 use crate::Result;
+use std::ops::Deref;
+use std::ptr;
+use std::ptr::NonNull;
+use std::sync::Arc;
 
-use vm_memory::Le32;
 use pipewire as pw;
-use pw::sys::PW_ID_CORE;
+use pw::sys::{pw_loop, pw_thread_loop_new, pw_thread_loop_signal, PW_ID_CORE};
+use pw::sys::{pw_thread_loop, pw_thread_loop_start, pw_thread_loop_wait};
+use pw::sys::{pw_thread_loop_get_loop, pw_thread_loop_lock, pw_thread_loop_unlock};
+use pw::Core;
+use pw::LoopRef;
+use vm_memory::Le32;
 
 #[derive(Default, Debug)]
 pub struct PCMParams {
@@ -22,61 +28,121 @@ pub struct PCMParams {
     pub rate: u8,
 }
 
+pub struct PwThreadLoop(NonNull<pw_thread_loop>);
+
+impl PwThreadLoop {
+    pub fn new(name: Option<&str>) -> Option<Self> {
+        let inner = unsafe {
+            pw_thread_loop_new(
+                name.map_or(ptr::null(), |p| p.as_ptr() as *const _),
+                std::ptr::null_mut(),
+            )
+        };
+        if inner.is_null() {
+            None
+        } else {
+            Some(Self(
+                NonNull::new(inner).expect("pw_thread_loop can't be null"),
+            ))
+        }
+    }
+
+    pub fn get_loop(&self) -> PwThreadLoopTheLoop {
+        let inner = unsafe { pw_thread_loop_get_loop(self.0.as_ptr()) };
+        PwThreadLoopTheLoop(NonNull::new(inner).unwrap())
+    }
+
+    pub fn unlock(&self) {
+        unsafe { pw_thread_loop_unlock(self.0.as_ptr()) }
+    }
+
+    pub fn lock(&self) {
+        unsafe { pw_thread_loop_lock(self.0.as_ptr()) }
+    }
+
+    pub fn start(&self) {
+        unsafe {
+            pw_thread_loop_start(self.0.as_ptr());
+        }
+    }
+
+    pub fn signal(&self) {
+        unsafe {
+            pw_thread_loop_signal(self.0.as_ptr(), false);
+        }
+    }
+
+    pub fn wait(&self) {
+        unsafe {
+            pw_thread_loop_wait(self.0.as_ptr());
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PwThreadLoopTheLoop(NonNull<pw_loop>);
+
+impl AsRef<LoopRef> for PwThreadLoopTheLoop {
+    fn as_ref(&self) -> &LoopRef {
+        self.deref()
+    }
+}
+
+impl Deref for PwThreadLoopTheLoop {
+    type Target = LoopRef;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.0.as_ptr() as *mut LoopRef) }
+    }
+}
+
 // SAFETY: Safe as the structure can be sent to another thread.
-unsafe impl Send for WrapMainLoop {}
+unsafe impl Send for PwBackend {}
 
 // SAFETY: Safe as the structure can be shared with another thread as the state
 // is protected with a lock.
-unsafe impl Sync for WrapMainLoop {}
+unsafe impl Sync for PwBackend {}
 
-#[derive(Clone, Debug)]
-pub struct WrapMainLoop {
-    mainloop: pipewire::MainLoop,
-}
 pub struct PwBackend {
     //pub streams: Arc<RwLock<Vec<StreamInfo>>>,
+    pub thread_loop: Arc<PwThreadLoop>,
+    pub core: Core,
 }
 
 impl PwBackend {
     pub fn new() -> Self {
         pw::init();
 
-        let wrap_mainloop = WrapMainLoop {
-            mainloop : pw::MainLoop::new().expect("we can't create mainloop")
-        };
-        //let mainloop = pw::MainLoop::new().expect("Failed to create Pipewire Mainloop");
-        let context = pw::Context::new(&wrap_mainloop.mainloop).expect("Failed to create Pipewire Context");
-        let core = context
-            .connect(None)
-            .expect("Failed to connect to Pipewire Core");
+        let thread_loop = Arc::new(PwThreadLoop::new(Some("Pipewire thread loop")).unwrap());
+        let get_loop = thread_loop.get_loop();
 
-        // To comply with Rust's safety rules, we wrap this variable in an `Rc` and  a `Cell`.
-        let done = Rc::new(Cell::new(false));
+        thread_loop.lock();
 
-        // Create new reference for each variable so that they can be moved into the closure.
-        let done_clone = done.clone();
-        let loop_clone = wrap_mainloop.mainloop.clone();
+        let context = pw::Context::new(&get_loop).expect("failed to create context");
+        thread_loop.start();
+        let core = context.connect(None).expect("Failed to connect to core");
 
+        // Create new reference for the variable so that it can be moved into the closure.
+        let thread_clone = thread_loop.clone();
+
+        // Trigger the sync event. The server's answer won't be processed until we start the thread loop,
+        // so we can safely do this before setting up a callback. This lets us avoid using a Cell.
         let pending = core.sync(0).expect("sync failed");
         let _listener_core = core
-        .add_listener_local()
-        .done(move |id, seq| {
-            if id == PW_ID_CORE && seq == pending {
-                done_clone.set(true);
-                loop_clone.quit();
-            }
-        })
-        .register();
+            .add_listener_local()
+            .done(move |id, seq| {
+                if id == PW_ID_CORE && seq == pending {
+                    thread_clone.signal();
+                }
+            })
+            .register();
 
-        thread::spawn(move || {
-            wrap_mainloop.mainloop.run();
-        });
+        thread_loop.wait();
+        thread_loop.unlock();
 
         println!("pipewire backend running");
 
-        Self {
-        }
-
+        Self { thread_loop, core }
     }
 }
 

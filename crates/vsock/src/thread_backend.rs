@@ -329,30 +329,31 @@ impl VsockThreadBackend {
 mod tests {
     use super::*;
     use crate::vhu_vsock::{VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
-    use serial_test::serial;
     use std::os::unix::net::UnixListener;
+    use tempfile::tempdir;
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
     #[test]
-    #[serial]
     fn test_vsock_thread_backend() {
         const CID: u64 = 3;
-        const VSOCK_SOCKET_PATH: &str = "test_vsock_thread_backend.vsock";
         const VSOCK_PEER_PORT: u32 = 1234;
-        const VSOCK_PEER_PATH: &str = "test_vsock_thread_backend.vsock_1234";
 
-        let _ = std::fs::remove_file(VSOCK_PEER_PATH);
-        let _listener = UnixListener::bind(VSOCK_PEER_PATH).unwrap();
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
+        let vsock_peer_path = test_dir.path().join("test_vsock_thread_backend.vsock_1234");
+
+        let _listener = UnixListener::bind(&vsock_peer_path).unwrap();
 
         let epoll_fd = epoll::create(false).unwrap();
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let mut vtp = VsockThreadBackend::new(
-            VSOCK_SOCKET_PATH.to_string(),
+            vsock_socket_path.display().to_string(),
             epoll_fd,
             CID,
             CONN_TX_BUF_SIZE,
@@ -394,26 +395,42 @@ mod tests {
         assert!(vtp.recv_pkt(&mut packet).is_ok());
 
         // cleanup
-        let _ = std::fs::remove_file(VSOCK_PEER_PATH);
+        let _ = std::fs::remove_file(&vsock_peer_path);
+        let _ = std::fs::remove_file(&vsock_socket_path);
+
+        test_dir.close().unwrap();
     }
 
     #[test]
-    #[serial]
     fn test_vsock_thread_backend_sibling_vms() {
         const CID: u64 = 3;
-        const VSOCK_SOCKET_PATH: &str = "test_vsock_thread_backend.vsock";
-
         const SIBLING_CID: u64 = 4;
-        const SIBLING_VHOST_SOCKET_PATH: &str = "test_vsock_thread_backend_sibling.socket";
-        const SIBLING_VSOCK_SOCKET_PATH: &str = "test_vsock_thread_backend_sibling.vsock";
         const SIBLING_LISTENING_PORT: u32 = 1234;
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_thread_backend.vsock")
+            .display()
+            .to_string();
+        let sibling_vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_thread_backend_sibling.socket")
+            .display()
+            .to_string();
+        let sibling_vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_thread_backend_sibling.vsock")
+            .display()
+            .to_string();
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let sibling_config = VsockConfig::new(
             SIBLING_CID,
-            SIBLING_VHOST_SOCKET_PATH.to_string(),
-            SIBLING_VSOCK_SOCKET_PATH.to_string(),
+            sibling_vhost_socket_path,
+            sibling_vsock_socket_path,
             CONN_TX_BUF_SIZE,
         );
 
@@ -425,13 +442,8 @@ mod tests {
             .insert(SIBLING_CID, sibling_backend.clone());
 
         let epoll_fd = epoll::create(false).unwrap();
-        let mut vtp = VsockThreadBackend::new(
-            VSOCK_SOCKET_PATH.to_string(),
-            epoll_fd,
-            CID,
-            CONN_TX_BUF_SIZE,
-            cid_map,
-        );
+        let mut vtp =
+            VsockThreadBackend::new(vsock_socket_path, epoll_fd, CID, CONN_TX_BUF_SIZE, cid_map);
 
         assert!(!vtp.pending_raw_pkts());
 
@@ -489,5 +501,7 @@ mod tests {
         assert_eq!(recvd_data_raw[1], 0xFEu8);
         assert_eq!(recvd_data_raw[2], 0xBAu8);
         assert_eq!(recvd_data_raw[3], 0xBEu8);
+
+        test_dir.close().unwrap();
     }
 }

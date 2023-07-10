@@ -369,7 +369,6 @@ mod tests {
 
     use super::*;
     use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
-    use serial_test::serial;
     use std::io::Result as IoResult;
     use std::ops::Deref;
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
@@ -505,7 +504,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_init() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -554,7 +552,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_credit() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -585,7 +582,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_init_pkt() {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 10);
@@ -622,7 +618,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_recv_pkt() {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
@@ -719,7 +714,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_send_pkt() {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);

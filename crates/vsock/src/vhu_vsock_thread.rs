@@ -665,8 +665,8 @@ impl Drop for VhostUserVsockThread {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::collections::HashMap;
+    use tempfile::tempdir;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -679,12 +679,17 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_thread() {
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
         let t = VhostUserVsockThread::new(
-            "test_vsock_thread.vsock".to_string(),
+            test_dir
+                .path()
+                .join("test_vsock_thread.vsock")
+                .display()
+                .to_string(),
             3,
             CONN_TX_BUF_SIZE,
             cid_map,
@@ -738,12 +743,15 @@ mod tests {
         dummy_fd.write(1).unwrap();
 
         t.process_backend_evt(EventSet::empty());
+
+        test_dir.close().unwrap();
     }
 
     #[test]
-    #[serial]
     fn test_vsock_thread_failures() {
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let t = VhostUserVsockThread::new(
             "/sys/not_allowed.vsock".to_string(),
@@ -753,13 +761,13 @@ mod tests {
         );
         assert!(t.is_err());
 
-        let mut t = VhostUserVsockThread::new(
-            "test_vsock_thread_failures.vsock".to_string(),
-            3,
-            CONN_TX_BUF_SIZE,
-            cid_map,
-        )
-        .unwrap();
+        let vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_thread_failures.vsock")
+            .display()
+            .to_string();
+        let mut t =
+            VhostUserVsockThread::new(vsock_socket_path, 3, CONN_TX_BUF_SIZE, cid_map).unwrap();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());
@@ -780,5 +788,7 @@ mod tests {
             .push_back(ConnMapKey::new(0, 0));
         assert!(t.process_rx(&vring, false).is_err());
         assert!(t.process_rx(&vring, true).is_err());
+
+        test_dir.close().unwrap();
     }
 }

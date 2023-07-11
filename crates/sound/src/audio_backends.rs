@@ -8,9 +8,9 @@ mod pw_backend;
 
 #[cfg(feature = "null-backend")]
 use self::null::NullBackend;
+use self::pw_backend::PwBackend;
 #[cfg(feature = "pw-backend")]
 use crate::PCMParams;
-use self::pw_backend::PwBackend;
 use crate::{Error, Result};
 
 pub trait AudioBackend {

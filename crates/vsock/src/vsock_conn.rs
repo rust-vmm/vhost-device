@@ -52,6 +52,8 @@ pub(crate) struct VsockConnection<S> {
     pub epoll_fd: RawFd,
     /// Local tx buffer.
     pub tx_buf: LocalTxBuf,
+    /// Local tx buffer size
+    tx_buffer_size: u32,
 }
 
 impl<S: AsRawFd + Read + Write> VsockConnection<S> {
@@ -81,6 +83,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             rx_cnt: Wrapping(0),
             epoll_fd,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
+            tx_buffer_size,
         }
     }
 
@@ -114,6 +117,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             rx_cnt: Wrapping(0),
             epoll_fd,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
+            tx_buffer_size,
         }
     }
 
@@ -308,8 +312,18 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
         if written_count > 0 {
             // Increment forwarded count by number of bytes written to the stream
             self.fwd_cnt += Wrapping(written_count as u32);
-            // TODO: https://github.com/torvalds/linux/commit/c69e6eafff5f725bc29dcb8b52b6782dca8ea8a2
-            self.rx_queue.enqueue(RxOps::CreditUpdate);
+
+            // At what point in available credits should we send a credit update.
+            // This is set to 1/4th of the tx buffer size. If we keep it too low,
+            // we will end up sending too many credit updates. If we keep it too
+            // high, we will end up sending too few credit updates and cause stalls.
+            // Stalls are more bad than too many credit updates.
+            let free_space = self
+                .tx_buffer_size
+                .wrapping_sub((self.fwd_cnt - self.last_fwd_cnt).0);
+            if free_space < self.tx_buffer_size / 4 {
+                self.rx_queue.enqueue(RxOps::CreditUpdate);
+            }
         }
 
         if written_count != buf.len() {
@@ -332,7 +346,7 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
             .set_src_port(self.local_port)
             .set_dst_port(self.peer_port)
             .set_type(VSOCK_TYPE_STREAM)
-            .set_buf_alloc(self.tx_buf.get_buf_size())
+            .set_buf_alloc(self.tx_buffer_size)
             .set_fwd_cnt(self.fwd_cnt.0)
     }
 
@@ -355,7 +369,6 @@ mod tests {
 
     use super::*;
     use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
-    use serial_test::serial;
     use std::io::Result as IoResult;
     use std::ops::Deref;
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
@@ -491,7 +504,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_init() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -540,7 +552,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_credit() {
         // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
@@ -571,7 +582,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_init_pkt() {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 10);
@@ -608,7 +618,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_recv_pkt() {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
@@ -705,7 +714,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_vsock_conn_send_pkt() {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);

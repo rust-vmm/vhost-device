@@ -33,4 +33,4 @@ serde_yaml = "0.9"
 
 [dev-dependencies]
 virtio-queue = { version = "0.9", features = ["test-utils"] }
-serial_test = "2.0"
+tempfile = "3.6.0"

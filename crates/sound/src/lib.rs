@@ -11,7 +11,7 @@ use log::{info, warn};
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, VolatileSlice};
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, VolatileSlice, Le32};
 
 use crate::vhu_sound::VhostUserSoundBackend;
 
@@ -56,6 +56,18 @@ impl std::convert::From<Error> for IoError {
     fn from(e: Error) -> Self {
         IoError::new(ErrorKind::Other, e)
     }
+}
+
+#[derive(Default, Clone)]
+pub struct PCMParams {
+    pub features: Le32,
+    /// size of hardware buffer in bytes
+    pub buffer_bytes: Le32,
+    /// size of hardware period in bytes
+    pub period_bytes: Le32,
+    pub channels: u8,
+    pub format: u8,
+    pub rate: u8,
 }
 
 #[derive(Debug, Clone)]

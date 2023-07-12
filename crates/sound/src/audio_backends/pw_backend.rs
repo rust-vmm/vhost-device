@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use super::AudioBackend;
+use crate::vhu_sound::NR_STREAMS;
+use crate::PCMParams;
 use crate::Result;
 use std::ops::Deref;
 use std::ptr;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use crate::vhu_sound::NR_STREAMS;
-use crate::PCMParams;
 use std::sync::RwLock;
 
 use pipewire as pw;
@@ -18,7 +18,7 @@ use pw::sys::{pw_thread_loop_get_loop, pw_thread_loop_lock, pw_thread_loop_unloc
 use pw::Core;
 use pw::LoopRef;
 
-pub struct PwThreadLoop(NonNull<pw_thread_loop>);
+struct PwThreadLoop(NonNull<pw_thread_loop>);
 
 impl PwThreadLoop {
     pub fn new(name: Option<&str>) -> Option<Self> {
@@ -70,7 +70,7 @@ impl PwThreadLoop {
 }
 
 #[derive(Debug, Clone)]
-pub struct PwThreadLoopTheLoop(NonNull<pw_loop>);
+struct PwThreadLoopTheLoop(NonNull<pw_loop>);
 
 impl AsRef<LoopRef> for PwThreadLoopTheLoop {
     fn as_ref(&self) -> &LoopRef {
@@ -94,7 +94,7 @@ unsafe impl Send for PwBackend {}
 unsafe impl Sync for PwBackend {}
 
 pub struct PwBackend {
-    pub thread_loop: Arc<PwThreadLoop>,
+    thread_loop: Arc<PwThreadLoop>,
     pub core: Core,
     pub stream_params: RwLock<Vec<PCMParams>>,
 }
@@ -137,9 +137,8 @@ impl PwBackend {
         Self {
             thread_loop,
             core,
-            stream_params : RwLock::new(streams_param)
+            stream_params: RwLock::new(streams_param),
         }
-
     }
 }
 
@@ -165,4 +164,9 @@ impl AudioBackend for PwBackend {
         Ok(())
     }
 
+    fn prepare(&self, _stream_id: u32) -> Result<()> {
+        self.thread_loop.lock();
+        self.thread_loop.unlock();
+        Ok(())
+    }
 }

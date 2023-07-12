@@ -11,7 +11,7 @@ use log::{info, warn};
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, VolatileSlice, Le32};
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap, Le32, VolatileSlice};
 
 use crate::vhu_sound::VhostUserSoundBackend;
 

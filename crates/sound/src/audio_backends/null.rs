@@ -18,7 +18,6 @@ impl AudioBackend for NullBackend {
     }
 
     fn read(&self, _stream_id: u32) -> Result<()> {
-
         /*
         let buf = req.data_slice().ok_or(Error::SoundReqMissingData)?;
         let zero_mem = vec![0u8; buf.len()];

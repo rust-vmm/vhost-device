@@ -224,7 +224,9 @@ pub(crate) fn start_backend_server(
             Ok(()) => {
                 info!("Stopping cleanly");
             }
-            Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
+            Err(vhost_user_backend::Error::HandleRequest(
+                vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
+            )) => {
                 info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
             }
             Err(e) => {

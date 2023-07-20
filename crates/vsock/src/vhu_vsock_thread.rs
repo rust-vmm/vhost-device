@@ -68,6 +68,9 @@ pub(crate) struct VhostUserVsockThread {
     /// EventFd to notify this thread for custom events. Currently used to notify
     /// this thread to process raw vsock packets sent from a sibling VM.
     pub sibling_event_fd: EventFd,
+    /// Keeps track of which RX queue was processed first in the last iteration.
+    /// Used to alternate between the RX queues to prevent the starvation of one by the other.
+    last_processed: RxQueueType,
 }
 
 impl VhostUserVsockThread {
@@ -92,21 +95,31 @@ impl VhostUserVsockThread {
 
         let sibling_event_fd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
+        let thread_backend = VsockThreadBackend::new(
+            uds_path.clone(),
+            epoll_fd,
+            guest_cid,
+            tx_buffer_size,
+            cid_map.clone(),
+        );
+
+        cid_map.write().unwrap().insert(
+            guest_cid,
+            (
+                thread_backend.raw_pkts_queue.clone(),
+                sibling_event_fd.try_clone().unwrap(),
+            ),
+        );
+
         let thread = VhostUserVsockThread {
             mem: None,
             event_idx: false,
             host_sock: host_sock.as_raw_fd(),
-            host_sock_path: uds_path.clone(),
+            host_sock_path: uds_path,
             host_listener: host_sock,
             vring_worker: None,
             epoll_file,
-            thread_backend: VsockThreadBackend::new(
-                uds_path,
-                epoll_fd,
-                guest_cid,
-                tx_buffer_size,
-                cid_map,
-            ),
+            thread_backend,
             guest_cid,
             pool: ThreadPoolBuilder::new()
                 .pool_size(1)
@@ -115,6 +128,7 @@ impl VhostUserVsockThread {
             local_port: Wrapping(0),
             tx_buffer_size,
             sibling_event_fd,
+            last_processed: RxQueueType::Standard,
         };
 
         VhostUserVsockThread::epoll_register(epoll_fd, host_raw_fd, epoll::Events::EPOLLIN)?;
@@ -517,7 +531,7 @@ impl VhostUserVsockThread {
     }
 
     /// Wrapper to process rx queue based on whether event idx is enabled or not.
-    pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+    fn process_unix_sockets(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -536,6 +550,50 @@ impl VhostUserVsockThread {
             }
         } else {
             self.process_rx_queue(vring, RxQueueType::Standard)?;
+        }
+        Ok(false)
+    }
+
+    /// Wrapper to process raw vsock packets queue based on whether event idx is enabled or not.
+    pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+        if event_idx {
+            loop {
+                if !self.thread_backend.pending_raw_pkts() {
+                    break;
+                }
+                vring.disable_notification().unwrap();
+
+                self.process_rx_queue(vring, RxQueueType::RawPkts)?;
+                if !vring.enable_notification().unwrap() {
+                    break;
+                }
+            }
+        } else {
+            self.process_rx_queue(vring, RxQueueType::RawPkts)?;
+        }
+        Ok(false)
+    }
+
+    pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+        match self.last_processed {
+            RxQueueType::Standard => {
+                if self.thread_backend.pending_raw_pkts() {
+                    self.process_raw_pkts(vring, event_idx)?;
+                    self.last_processed = RxQueueType::RawPkts;
+                }
+                if self.thread_backend.pending_rx() {
+                    self.process_unix_sockets(vring, event_idx)?;
+                }
+            }
+            RxQueueType::RawPkts => {
+                if self.thread_backend.pending_rx() {
+                    self.process_unix_sockets(vring, event_idx)?;
+                    self.last_processed = RxQueueType::Standard;
+                }
+                if self.thread_backend.pending_raw_pkts() {
+                    self.process_raw_pkts(vring, event_idx)?;
+                }
+            }
         }
         Ok(false)
     }
@@ -635,31 +693,16 @@ impl VhostUserVsockThread {
         }
         Ok(false)
     }
-
-    /// Wrapper to process raw vsock packets queue based on whether event idx is enabled or not.
-    pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
-        if event_idx {
-            loop {
-                if !self.thread_backend.pending_raw_pkts() {
-                    break;
-                }
-                vring.disable_notification().unwrap();
-
-                self.process_rx_queue(vring, RxQueueType::RawPkts)?;
-                if !vring.enable_notification().unwrap() {
-                    break;
-                }
-            }
-        } else {
-            self.process_rx_queue(vring, RxQueueType::RawPkts)?;
-        }
-        Ok(false)
-    }
 }
 
 impl Drop for VhostUserVsockThread {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.host_sock_path);
+        self.thread_backend
+            .cid_map
+            .write()
+            .unwrap()
+            .remove(&self.guest_cid);
     }
 }
 #[cfg(test)]

@@ -44,7 +44,7 @@ pub(crate) trait LogicalUnit: Send + Sync {
     ) -> Result<CmdOutput, CmdError>;
 }
 
-/// A SCSI target implemented by emulating a device within vhost-user-scsi.
+/// A SCSI target implemented by emulating a device within vhost-device-scsi.
 pub(crate) struct EmulatedTarget {
     luns: Vec<Box<dyn LogicalUnit>>,
 }

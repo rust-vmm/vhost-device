@@ -1,13 +1,13 @@
-# vhost-user-scsi
+# vhost-device-scsi
 
-This is a Rust implementation of a vhost-user-scsi daemon.
+This is a Rust implementation of a vhost-device-scsi daemon.
 
 ## Usage
 
-Run the vhost-user-scsi daemon:
+Run the vhost-device-scsi daemon:
 
 ```
-vhost-user-scsi -r --socket-path /tmp/vhost-user-scsi.sock /path/to/image.raw /path/to/second-image.raw ...
+vhost-device-scsi -r --socket-path /tmp/vhost-user-scsi.sock /path/to/image.raw /path/to/second-image.raw ...
 ```
 
 Run QEMU:

@@ -21,8 +21,13 @@ log = "0.4"
 rand = "0.8.5"
 tempfile = "3.5"
 thiserror = "1.0"
-vhost = { version = "0.8", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.10"
+# vhost = { version = "0.8", features = ["vhost-user-slave"] }
+# vhost-user-backend = "0.10"
+# vhost = { path = "../../../vhost.git/crates/vhost/" }
+# vhost-user-backend = { path = "../../../vhost.git/crates/vhost-user-backend/" }
+vhost = { git = "https://github.com/stsquad/vhost", branch = "standalone/get-specs" }
+vhost-user-backend = { git = "https://github.com/stsquad/vhost", branch = "standalone/get-specs" }
+
 virtio-bindings = "0.2.1"
 virtio-queue = "0.9"
 vm-memory = "0.12"

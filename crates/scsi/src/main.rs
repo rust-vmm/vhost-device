@@ -94,7 +94,7 @@ fn create_backend(args: &ScsiArgs) -> Result<VhostUserScsiBackend> {
 fn start_backend(backend: VhostUserScsiBackend, args: ScsiArgs) -> Result<()> {
     let backend = Arc::new(RwLock::new(backend));
     let mut daemon = VhostUserDaemon::new(
-        "vhost-user-scsi".into(),
+        "vhost-device-scsi".into(),
         Arc::clone(&backend),
         GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )

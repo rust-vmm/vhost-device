@@ -1,4 +1,4 @@
-# vhost-user-scsi architecture
+# vhost-device-scsi architecture
 
 Rough outline of the different pieces and how they fit together:
 

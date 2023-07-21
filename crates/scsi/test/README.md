@@ -6,7 +6,7 @@ This folder contains some tooling for tests
 
 For running these tests, you need a KVM enabled x86_64 machine and `podman`.
 
-vhost-user-scsi must have been built already.
+vhost-device-scsi must have been built already.
 
 ## Performed tests
 

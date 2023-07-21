@@ -185,7 +185,7 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
 }
 
 /// This is the public API through which an external program starts the
-/// vhost-user-vsock backend server.
+/// vhost-device-vsock backend server.
 pub(crate) fn start_backend_server(
     config: VsockConfig,
     cid_map: Arc<RwLock<CidMap>>,
@@ -199,7 +199,7 @@ pub(crate) fn start_backend_server(
         let listener = Listener::new(config.get_socket_path(), true).unwrap();
 
         let mut daemon = VhostUserDaemon::new(
-            String::from("vhost-user-vsock"),
+            String::from("vhost-device-vsock"),
             backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )
@@ -453,7 +453,7 @@ mod tests {
         let backend = Arc::new(VhostUserVsockBackend::new(config, cid_map).unwrap());
 
         let daemon = VhostUserDaemon::new(
-            String::from("vhost-user-vsock"),
+            String::from("vhost-device-vsock"),
             backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )

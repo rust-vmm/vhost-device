@@ -1,8 +1,8 @@
-# vhost-user-vsock
+# vhost-device-vsock
 
 ## Design
 
-The crate introduces a vhost-user-vsock device that enables communication between an
+The crate introduces a vhost-device-vsock device that enables communication between an
 application running in the guest i.e inside a VM and an application running on the
 host i.e outside the VM. The application running in the guest communicates over VM
 sockets i.e over AF_VSOCK sockets. The application running on the host connects to a
@@ -38,28 +38,28 @@ the crate are split into various files as described below:
 
 ## Usage
 
-Run the vhost-user-vsock device:
+Run the vhost-device-vsock device:
 ```
-vhost-user-vsock --guest-cid=<CID assigned to the guest> \
+vhost-device-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
   --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device> \
   [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
 ```
 or
 ```
-vhost-user-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
+vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
 ```
 
 Specify the `--vm` argument multiple times to specify multiple devices like this:
 ```
-vhost-user-vsock \
+vhost-device-vsock \
 --vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock \
 --vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768
 ```
 
 Or use a configuration file:
 ```
-vhost-user-vsock --config=<path to the local yaml configuration file>
+vhost-device-vsock --config=<path to the local yaml configuration file>
 ```
 
 Configuration file example:
@@ -89,11 +89,11 @@ qemu-system-x86_64 \
 ## Working example
 
 ```sh
-shell1$ vhost-user-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
+shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
 ```
 or if you want to configure the TX buffer size
 ```sh
-shell1$ vhost-user-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536
+shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536
 ```
 
 ```sh
@@ -148,7 +148,7 @@ If you add multiple VMs, they can communicate with each other. For example, if y
 CID 3 and 4, you can run the following commands to make them communicate:
 
 ```sh
-shell1$ vhost-user-vsock --vm guest-cid=3,uds-path=/tmp/vm3.vsock,socket=/tmp/vhost3.socket \
+shell1$ vhost-device-vsock --vm guest-cid=3,uds-path=/tmp/vm3.vsock,socket=/tmp/vhost3.socket \
           --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
 shell2$ qemu-system-x86_64 \
           -drive file=vm1.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \

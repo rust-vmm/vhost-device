@@ -1306,22 +1306,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhost-user-backend"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ea9d5e8ec847cde4df1c04e586698a479706fd6beca37323f9d425b24b4c2f"
-dependencies = [
- "libc",
- "log",
- "vhost",
- "virtio-bindings",
- "virtio-queue",
- "vm-memory",
- "vmm-sys-util",
-]
-
-[[package]]
-name = "vhost-user-vsock"
+name = "vhost-device-vsock"
 version = "0.1.0"
 dependencies = [
  "byteorder",
@@ -1340,6 +1325,21 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "virtio-vsock",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "vhost-user-backend"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3ea9d5e8ec847cde4df1c04e586698a479706fd6beca37323f9d425b24b4c2f"
+dependencies = [
+ "libc",
+ "log",
+ "vhost",
+ "virtio-bindings",
+ "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
 ]

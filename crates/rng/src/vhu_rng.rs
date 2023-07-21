@@ -124,7 +124,7 @@ impl<T: Read> VuRngBackend<T> {
 
             let descriptor = descriptors[0];
             let mut to_read = descriptor.len() as usize;
-            let mut timer = &mut self.timer;
+            let timer = &mut self.timer;
 
             if !descriptor.is_write_only() {
                 return Err(VuRngError::UnexpectedReadDescriptor);

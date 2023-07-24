@@ -43,17 +43,18 @@ Run the vhost-device-vsock device:
 vhost-device-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
   --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device> \
-  [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
+  [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>] \
+  [--groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
 ```
 or
 ```
-vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>]
+vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
 ```
 
 Specify the `--vm` argument multiple times to specify multiple devices like this:
 ```
 vhost-device-vsock \
---vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock \
+--vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,groups=group1+groupA \
 --vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768
 ```
 
@@ -69,10 +70,12 @@ vms:
       socket: /tmp/vhost3.socket
       uds_path: /tmp/vm3.sock
       tx_buffer_size: 65536
+      groups: group1+groupA
     - guest_cid: 4
       socket: /tmp/vhost4.socket
       uds_path: /tmp/vm4.sock
       tx_buffer_size: 32768
+      groups: group2+groupB
 ```
 
 Run VMM (e.g. QEMU):
@@ -144,12 +147,17 @@ guest$ nc --vsock 2 1234
 
 ### Sibling VM communication
 
-If you add multiple VMs, they can communicate with each other. For example, if you have two VMs with
-CID 3 and 4, you can run the following commands to make them communicate:
+If you add multiple VMs with their devices configured with at least one common group name, they can communicate with
+each other. If you don't explicitly specify a group name, a default group will be assigned to the device with name
+`default`, and all such devices will be able to communicate with each other. Or you can choose a different list of
+group names for each device, and only devices with the at least one group in commmon will be able to communicate with
+each other.
+
+For example, if you have two VMs with CID 3 and 4, you can run the following commands to make them communicate:
 
 ```sh
-shell1$ vhost-device-vsock --vm guest-cid=3,uds-path=/tmp/vm3.vsock,socket=/tmp/vhost3.socket \
-          --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
+shell1$ vhost-device-vsock --vm guest-cid=3,uds-path=/tmp/vm3.vsock,socket=/tmp/vhost3.socket,groups=group1+group2 \
+          --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,groups=group1
 shell2$ qemu-system-x86_64 \
           -drive file=vm1.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
           -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages" \
@@ -163,6 +171,10 @@ shell3$ qemu-system-x86_64 \
           -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
           -device vhost-user-vsock-pci,chardev=char0
 ```
+
+Please note that here the `groups` parameter is specified just for clarity, but it is not necessary to specify it if you want
+to use the default group and make all the devices communicate with one another. It is useful to specify a list of groups
+when you want fine-grained control over which devices can communicate with each other.
 
 ```sh
 # nc-vsock patched to set `.svm_flags = VMADDR_FLAG_TO_HOST`

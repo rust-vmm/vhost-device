@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    ops::Deref,
     os::unix::{
         net::UnixStream,
         prelude::{AsRawFd, RawFd},
@@ -70,6 +71,8 @@ pub(crate) struct VsockThreadBackend {
     pub cid_map: Arc<RwLock<CidMap>>,
     /// Queue of raw vsock packets recieved from sibling VMs to be sent to the guest.
     pub raw_pkts_queue: Arc<RwLock<RawPktsQ>>,
+    /// Set of groups assigned to the device which it is allowed to communicate with.
+    groups_set: Arc<RwLock<HashSet<String>>>,
 }
 
 impl VsockThreadBackend {
@@ -79,6 +82,7 @@ impl VsockThreadBackend {
         epoll_fd: i32,
         guest_cid: u64,
         tx_buffer_size: u32,
+        groups_set: Arc<RwLock<HashSet<String>>>,
         cid_map: Arc<RwLock<CidMap>>,
     ) -> Self {
         Self {
@@ -95,6 +99,7 @@ impl VsockThreadBackend {
             tx_buffer_size,
             cid_map,
             raw_pkts_queue: Arc::new(RwLock::new(VecDeque::new())),
+            groups_set,
         }
     }
 
@@ -180,7 +185,21 @@ impl VsockThreadBackend {
         if dst_cid != VSOCK_HOST_CID {
             let cid_map = self.cid_map.read().unwrap();
             if cid_map.contains_key(&dst_cid) {
-                let (sibling_raw_pkts_queue, sibling_event_fd) = cid_map.get(&dst_cid).unwrap();
+                let (sibling_raw_pkts_queue, sibling_groups_set, sibling_event_fd) =
+                    cid_map.get(&dst_cid).unwrap();
+
+                if self
+                    .groups_set
+                    .read()
+                    .unwrap()
+                    .is_disjoint(sibling_groups_set.read().unwrap().deref())
+                {
+                    info!(
+                        "vsock: dropping packet for cid: {:?} due to group mismatch",
+                        dst_cid
+                    );
+                    return Ok(());
+                }
 
                 sibling_raw_pkts_queue
                     .write()
@@ -337,6 +356,7 @@ mod tests {
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+    const GROUP_NAME: &str = "default";
 
     #[test]
     fn test_vsock_thread_backend() {
@@ -352,6 +372,8 @@ mod tests {
 
         let epoll_fd = epoll::create(false).unwrap();
 
+        let groups_set: HashSet<String> = vec![GROUP_NAME.to_string()].into_iter().collect();
+
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let mut vtp = VsockThreadBackend::new(
@@ -359,6 +381,7 @@ mod tests {
             epoll_fd,
             CID,
             CONN_TX_BUF_SIZE,
+            Arc::new(RwLock::new(groups_set)),
             cid_map,
         );
 
@@ -434,14 +457,30 @@ mod tests {
             sibling_vhost_socket_path,
             sibling_vsock_socket_path,
             CONN_TX_BUF_SIZE,
+            vec!["group1", "group2", "group3"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
         );
 
         let sibling_backend =
             Arc::new(VhostUserVsockBackend::new(sibling_config, cid_map.clone()).unwrap());
 
         let epoll_fd = epoll::create(false).unwrap();
-        let mut vtp =
-            VsockThreadBackend::new(vsock_socket_path, epoll_fd, CID, CONN_TX_BUF_SIZE, cid_map);
+
+        let groups_set: HashSet<String> = vec!["groupA", "groupB", "group3"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+
+        let mut vtp = VsockThreadBackend::new(
+            vsock_socket_path,
+            epoll_fd,
+            CID,
+            CONN_TX_BUF_SIZE,
+            Arc::new(RwLock::new(groups_set)),
+            cid_map,
+        );
 
         assert!(!vtp.pending_raw_pkts());
 

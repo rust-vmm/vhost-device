@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
+    collections::HashSet,
     fs::File,
     io,
     io::Read,
+    iter::FromIterator,
     num::Wrapping,
     ops::Deref,
     os::unix::{
@@ -79,6 +81,7 @@ impl VhostUserVsockThread {
         uds_path: String,
         guest_cid: u64,
         tx_buffer_size: u32,
+        groups: Vec<String>,
         cid_map: Arc<RwLock<CidMap>>,
     ) -> Result<Self> {
         // TODO: better error handling, maybe add a param to force the unlink
@@ -93,6 +96,10 @@ impl VhostUserVsockThread {
 
         let host_raw_fd = host_sock.as_raw_fd();
 
+        let mut groups = groups;
+        let groups_set: Arc<RwLock<HashSet<String>>> =
+            Arc::new(RwLock::new(HashSet::from_iter(groups.drain(..))));
+
         let sibling_event_fd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
         let thread_backend = VsockThreadBackend::new(
@@ -100,6 +107,7 @@ impl VhostUserVsockThread {
             epoll_fd,
             guest_cid,
             tx_buffer_size,
+            groups_set.clone(),
             cid_map.clone(),
         );
 
@@ -107,6 +115,7 @@ impl VhostUserVsockThread {
             guest_cid,
             (
                 thread_backend.raw_pkts_queue.clone(),
+                groups_set,
                 sibling_event_fd.try_clone().unwrap(),
             ),
         );
@@ -723,6 +732,8 @@ mod tests {
 
     #[test]
     fn test_vsock_thread() {
+        let groups: Vec<String> = vec![String::from("default")];
+
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
@@ -735,6 +746,7 @@ mod tests {
                 .to_string(),
             3,
             CONN_TX_BUF_SIZE,
+            groups,
             cid_map,
         );
         assert!(t.is_ok());
@@ -792,6 +804,8 @@ mod tests {
 
     #[test]
     fn test_vsock_thread_failures() {
+        let groups: Vec<String> = vec![String::from("default")];
+
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
@@ -800,6 +814,7 @@ mod tests {
             "/sys/not_allowed.vsock".to_string(),
             3,
             CONN_TX_BUF_SIZE,
+            groups.clone(),
             cid_map.clone(),
         );
         assert!(t.is_err());
@@ -810,7 +825,8 @@ mod tests {
             .display()
             .to_string();
         let mut t =
-            VhostUserVsockThread::new(vsock_socket_path, 3, CONN_TX_BUF_SIZE, cid_map).unwrap();
+            VhostUserVsockThread::new(vsock_socket_path, 3, CONN_TX_BUF_SIZE, groups, cid_map)
+                .unwrap();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());

@@ -272,6 +272,7 @@ impl SoundConfig {
 
 pub struct IOMessage {
     status: std::sync::atomic::AtomicU32,
+    pub used_len: std::sync::atomic::AtomicU32,
     pub latency_bytes: std::sync::atomic::AtomicU32,
     desc_chain: SoundDescriptorChain,
     response_descriptor: virtio_queue::Descriptor,
@@ -287,6 +288,7 @@ impl Drop for IOMessage {
                 .load(std::sync::atomic::Ordering::SeqCst)
                 .into(),
         };
+        let used_len: u32 = self.used_len.load(std::sync::atomic::Ordering::SeqCst);
         log::trace!("dropping IOMessage {:?}", resp);
 
         if let Err(err) = self
@@ -297,10 +299,10 @@ impl Drop for IOMessage {
             log::error!("Error::DescriptorWriteFailed: {}", err);
             return;
         }
-        if let Err(err) = self
-            .vring
-            .add_used(self.desc_chain.head_index(), resp.as_slice().len() as u32)
-        {
+        if let Err(err) = self.vring.add_used(
+            self.desc_chain.head_index(),
+            resp.as_slice().len() as u32 + used_len,
+        ) {
             log::error!("Couldn't add used bytes count to vring: {}", err);
         }
         if let Err(err) = self.vring.signal_used_queue() {

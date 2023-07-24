@@ -19,6 +19,7 @@ use virtio_bindings::{
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+    Le32,
 };
 use vmm_sys_util::{
     epoll::EventSet,
@@ -102,8 +103,8 @@ impl VhostUserSoundThread {
                 match queue_idx {
                     CONTROL_QUEUE_IDX => self.process_control(vring, audio_backend),
                     EVENT_QUEUE_IDX => self.process_event(vring),
-                    TX_QUEUE_IDX => self.process_tx(vring, audio_backend),
-                    RX_QUEUE_IDX => self.process_rx(vring, audio_backend),
+                    TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
+                    RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
                     _ => Err(Error::HandleUnknownEvent.into()),
                 }?;
                 if !vring.enable_notification().unwrap() {
@@ -115,8 +116,8 @@ impl VhostUserSoundThread {
             match queue_idx {
                 CONTROL_QUEUE_IDX => self.process_control(vring, audio_backend),
                 EVENT_QUEUE_IDX => self.process_event(vring),
-                TX_QUEUE_IDX => self.process_tx(vring, audio_backend),
-                RX_QUEUE_IDX => self.process_rx(vring, audio_backend),
+                TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
+                RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
                 _ => Err(Error::HandleUnknownEvent.into()),
             }?;
         }
@@ -445,10 +446,11 @@ impl VhostUserSoundThread {
         Ok(false)
     }
 
-    fn process_tx(
+    fn process_io(
         &self,
         vring: &VringRwLock,
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
+        direction: Direction,
     ) -> IoResult<bool> {
         let requests: Vec<SoundDescriptorChain> = vring
             .get_mut()
@@ -483,6 +485,7 @@ impl VhostUserSoundThread {
             let message = Arc::new(IOMessage {
                 vring: vring.clone(),
                 status: VIRTIO_SND_S_OK.into(),
+                used_len: 0.into(),
                 latency_bytes: 0.into(),
                 desc_chain: desc_chain.clone(),
                 response_descriptor: descriptors.last().cloned().ok_or_else(|| {
@@ -495,7 +498,9 @@ impl VhostUserSoundThread {
                     IoState::Done => {
                         return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
                     }
-                    IoState::Ready if descriptor.is_write_only() => {
+                    IoState::Ready
+                        if matches!(direction, Direction::Output) && descriptor.is_write_only() =>
+                    {
                         if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
                             return Err(Error::UnexpectedDescriptorSize(
                                 size_of::<VirtioSoundPcmStatus>(),
@@ -505,14 +510,9 @@ impl VhostUserSoundThread {
                         }
                         state = IoState::Done;
                     }
-                    IoState::WaitingBufferForStreamId(stream_id) if descriptor.is_write_only() => {
-                        if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
-                            return Err(Error::UnexpectedDescriptorSize(
-                                size_of::<VirtioSoundPcmStatus>(),
-                                descriptor.len(),
-                            )
-                            .into());
-                        }
+                    IoState::WaitingBufferForStreamId(stream_id)
+                        if descriptor.len() as usize == size_of::<VirtioSoundPcmStatus>() =>
+                    {
                         let mut streams = self.streams.write().unwrap();
                         for b in std::mem::take(&mut buffers) {
                             streams[stream_id as usize].buffers.push_back(b);
@@ -545,13 +545,13 @@ impl VhostUserSoundThread {
                             u32::from(
                                 self.streams.read().unwrap()[stream_id as usize]
                                     .params
-                                    .buffer_bytes,
+                                    .period_bytes,
                             ) as usize,
                             descriptor.len(),
                         )
                         .into());
                     }
-                    IoState::WaitingBufferForStreamId(_stream_id) => {
+                    IoState::WaitingBufferForStreamId(_) => {
                         // In the case of TX/Playback:
                         //
                         // Rather than copying the content of a descriptor, buffer keeps a pointer
@@ -561,7 +561,7 @@ impl VhostUserSoundThread {
                         // knowing whether the content has been updated. The device only reads the
                         // buffer from guest memory when the audio engine requires it, which is
                         // about after a period thus ensuring that the buffer is up-to-date.
-                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message)));
+                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message), direction));
                     }
                 }
             }
@@ -569,20 +569,20 @@ impl VhostUserSoundThread {
 
         if !stream_ids.is_empty() {
             let b = audio_backend.write().unwrap();
-            for id in stream_ids {
-                b.write(id).unwrap();
+            match direction {
+                Direction::Output => {
+                    for id in stream_ids {
+                        b.write(id).unwrap();
+                    }
+                }
+                Direction::Input => {
+                    for id in stream_ids {
+                        b.read(id).unwrap();
+                    }
+                }
             }
         }
 
-        Ok(false)
-    }
-
-    fn process_rx(
-        &self,
-        _vring: &VringRwLock,
-        _audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
-    ) -> IoResult<bool> {
-        log::trace!("process_rx");
         Ok(false)
     }
 }
@@ -675,7 +675,7 @@ impl VhostUserSoundBackend {
             threads,
             virtio_cfg: VirtioSoundConfig {
                 jacks: 0.into(),
-                streams: 1.into(),
+                streams: Le32::from(streams_no as u32),
                 chmaps: 1.into(),
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,

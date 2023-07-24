@@ -236,6 +236,7 @@ pub struct Buffer {
     data_descriptor: virtio_queue::Descriptor,
     pub message: Arc<IOMessage>,
     populated: bool,
+    direction: Direction,
 }
 
 impl std::fmt::Debug for Buffer {
@@ -244,19 +245,25 @@ impl std::fmt::Debug for Buffer {
             .field("bytes", &self.bytes.len())
             .field("pos", &self.pos)
             .field("populated", &self.populated)
+            .field("direction", &self.direction)
             .field("message", &Arc::as_ptr(&self.message))
             .finish()
     }
 }
 
 impl Buffer {
-    pub fn new(data_descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
+    pub fn new(
+        data_descriptor: virtio_queue::Descriptor,
+        message: Arc<IOMessage>,
+        direction: Direction,
+    ) -> Self {
         Self {
             bytes: vec![],
             pos: 0,
             data_descriptor,
             populated: false,
             message,
+            direction,
         }
     }
 
@@ -276,13 +283,46 @@ impl Buffer {
 
         Ok(())
     }
+
+    pub fn prepare_input(&mut self) {
+        if self.populated {
+            return;
+        }
+        self.bytes = vec![0; self.data_descriptor.len() as usize];
+        self.populated = true;
+    }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        self.message
-            .latency_bytes
-            .fetch_add(self.bytes.len() as u32, std::sync::atomic::Ordering::SeqCst);
-        log::trace!("dropping buffer {:?}", self);
+        match self.direction {
+            Direction::Input => {
+                if let Err(err) = self
+                    .message
+                    .desc_chain
+                    .memory()
+                    .write(&self.bytes[..self.pos], self.data_descriptor.addr())
+                {
+                    log::error!("Could not write {} RX bytes: {}", self.pos, err);
+                }
+                let len = if self.populated {
+                    self.bytes.len() as u32
+                } else {
+                    self.data_descriptor.len()
+                };
+                self.message
+                    .used_len
+                    .fetch_add(len, std::sync::atomic::Ordering::SeqCst);
+                self.message
+                    .latency_bytes
+                    .fetch_add(len, std::sync::atomic::Ordering::SeqCst);
+            }
+            Direction::Output => {
+                self.message
+                    .latency_bytes
+                    .fetch_add(self.bytes.len() as u32, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        log::trace!("dropping {:?} buffer {:?}", self.direction, self);
     }
 }

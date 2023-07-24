@@ -56,7 +56,7 @@ enum BackendError {
     CouldNotCreateDaemon(vhost_user_backend::Error),
 }
 
-#[derive(Args, Clone, Debug, Deserialize)]
+#[derive(Args, Clone, Debug)]
 struct VsockParam {
     /// Context identifier of the guest which uniquely identifies the device for its lifetime.
     #[arg(
@@ -78,6 +78,14 @@ struct VsockParam {
     /// The size of the buffer used for the TX virtqueue
     #[clap(long, default_value_t = DEFAULT_TX_BUFFER_SIZE, conflicts_with = "config", conflicts_with = "vm")]
     tx_buffer_size: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ConfigFileVsockParam {
+    guest_cid: Option<u64>,
+    socket: String,
+    uds_path: String,
+    tx_buffer_size: Option<u32>,
 }
 
 #[derive(Parser, Debug)]
@@ -137,16 +145,16 @@ impl VsockArgs {
                 .add_source(config::File::new(c.as_str(), config::FileFormat::Yaml))
                 .build();
             if let Ok(s) = b {
-                let mut v = s.get::<Vec<VsockParam>>("vms").unwrap();
+                let mut v = s.get::<Vec<ConfigFileVsockParam>>("vms").unwrap();
                 if !v.is_empty() {
                     let parsed: Vec<VsockConfig> = v
                         .drain(..)
                         .map(|p| {
                             VsockConfig::new(
-                                p.guest_cid,
+                                p.guest_cid.unwrap_or(DEFAULT_GUEST_CID),
                                 p.socket.trim().to_string(),
                                 p.uds_path.trim().to_string(),
-                                p.tx_buffer_size,
+                                p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
                             )
                         })
                         .collect();
@@ -407,7 +415,7 @@ mod tests {
     - guest_cid: 4
       socket: {}
       uds_path: {}
-      tx_buffer_size: 65536",
+      tx_buffer_size: 32768",
                 socket_path.display(),
                 uds_path.display(),
             )
@@ -423,8 +431,33 @@ mod tests {
         assert_eq!(config.get_guest_cid(), 4);
         assert_eq!(config.get_socket_path(), socket_path.display().to_string());
         assert_eq!(config.get_uds_path(), uds_path.display().to_string());
-        std::fs::remove_file(&config_path).unwrap();
+        assert_eq!(config.get_tx_buffer_size(), 32768);
 
+        // Now test that optional parameters are correctly set to their default values.
+        let mut yaml = File::create(&config_path).unwrap();
+        yaml.write_all(
+            format!(
+                "vms:
+    - socket: {}
+      uds_path: {}",
+                socket_path.display(),
+                uds_path.display(),
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let args = VsockArgs::from_file(&config_path.display().to_string());
+
+        let configs = Vec::<VsockConfig>::try_from(args).unwrap();
+        assert_eq!(configs.len(), 1);
+
+        let config = &configs[0];
+        assert_eq!(config.get_guest_cid(), DEFAULT_GUEST_CID);
+        assert_eq!(config.get_socket_path(), socket_path.display().to_string());
+        assert_eq!(config.get_uds_path(), uds_path.display().to_string());
+        assert_eq!(config.get_tx_buffer_size(), DEFAULT_TX_BUFFER_SIZE);
+
+        std::fs::remove_file(&config_path).unwrap();
         test_dir.close().unwrap();
     }
 

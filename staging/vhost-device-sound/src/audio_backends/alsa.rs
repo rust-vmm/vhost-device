@@ -49,8 +49,7 @@ enum AlsaAction {
     Prepare(usize),
     Release(usize, ControlMessage),
     Start(usize),
-    Write(usize),
-    Read(usize),
+    DoWork(usize),
 }
 
 fn update_pcm(
@@ -237,6 +236,52 @@ fn write_samples_direct(
 }
 
 // Returns `Ok(true)` if the function should be called again, because there are
+// are more data left to read.
+fn read_samples_direct(
+    _pcm: &alsa::PCM,
+    stream: &mut Stream,
+    mmap: &mut alsa::direct::pcm::MmapCapture<u8>,
+) -> AResult<bool> {
+    while mmap.avail() > 0 {
+        let Some(buffer) = stream.buffers.front_mut() else {
+            return Ok(false);
+        };
+
+        // Read samples from DMA area with an iterator
+        let mut iter = mmap.iter();
+
+        let mut n_bytes = 0;
+        // We can't access the descriptor memory region as a slice (see
+        // [`vm_memory::volatile_memory::VolatileSlice`]) and we can't use alsa's readi
+        // without a slice: use an intermediate buffer and copy it to the
+        // descriptor.
+        let mut intermediate_buf = vec![0; buffer.desc_len() as usize - buffer.pos];
+        for (sample, byte) in intermediate_buf.iter_mut().zip(&mut iter) {
+            *sample = byte;
+            n_bytes += 1;
+        }
+        if buffer
+            .write_input(&intermediate_buf[0..n_bytes])
+            .expect("Could not write data to guest memory")
+            == 0
+        {
+            break;
+        }
+
+        drop(iter);
+        if buffer.pos as u32 >= buffer.desc_len() || mmap.avail() == 0 {
+            stream.buffers.pop_front();
+        }
+    }
+
+    match mmap.status().state() {
+        State::Suspended | State::Running | State::Prepared => Ok(false),
+        State::XRun => Ok(true), // Recover from this in next round
+        n => panic!("Unexpected pcm state {:?}", n),
+    }
+}
+
+// Returns `Ok(true)` if the function should be called again, because there are
 // are more data left to write.
 fn write_samples_io(
     p: &alsa::PCM,
@@ -283,7 +328,7 @@ fn write_samples_io(
             };
 
             buffer.pos += read_bytes as usize;
-            if buffer.pos >= buffer.desc_len() as usize {
+            if buffer.pos as u32 >= buffer.desc_len() {
                 stream.buffers.pop_front();
             }
             p.bytes_to_frames(read_bytes as isize)
@@ -301,19 +346,90 @@ fn write_samples_io(
     }
 }
 
+// Returns `Ok(true)` if the function should be called again, because there are
+// are more data left to read.
+fn read_samples_io(
+    p: &alsa::PCM,
+    streams: &Arc<RwLock<Vec<Stream>>>,
+    stream_id: usize,
+    io: &mut alsa::pcm::IO<u8>,
+) -> AResult<bool> {
+    let avail = match p.avail_update() {
+        Ok(n) => n,
+        Err(err) => {
+            log::trace!("Recovering from {}", err);
+            p.recover(err.errno() as std::os::raw::c_int, true)?;
+            if let Err(err) = p.start() {
+                log::error!(
+                    "Could not restart stream {}; ALSA returned: {}",
+                    stream_id,
+                    err
+                );
+                return Err(err);
+            }
+            p.avail_update()?
+        }
+    };
+    if avail == 0 {
+        return Ok(false);
+    }
+    let stream = &mut streams.write().unwrap()[stream_id];
+    let Some(buffer) = stream.buffers.front_mut() else {
+        return Ok(false);
+    };
+    if !matches!(stream.state, PCMState::Start) {
+        stream.buffers.pop_front();
+        return Ok(false);
+    }
+    let mut frames_read = 0;
+
+    // We can't access the descriptor memory region as a slice (see
+    // [`vm_memory::volatile_memory::VolatileSlice`]) and we can't use alsa's readi
+    // without a slice: use an intermediate buffer and copy it to the
+    // descriptor.
+    let mut intermediate_buf = vec![0; buffer.desc_len() as usize - buffer.pos];
+    while let Some(frames) = io
+        .readi(&mut intermediate_buf[0..(buffer.desc_len() as usize - buffer.pos)])
+        .map(std::num::NonZeroUsize::new)?
+        .map(std::num::NonZeroUsize::get)
+    {
+        frames_read += frames;
+        let n_bytes = usize::try_from(p.frames_to_bytes(frames as i64)).unwrap_or_default();
+        if buffer
+            .write_input(&intermediate_buf[0..n_bytes])
+            .expect("Could not write data to guest memory")
+            == 0
+        {
+            break;
+        }
+    }
+
+    let bytes_read = p.frames_to_bytes(frames_read as i64);
+    if buffer.pos as u32 >= buffer.desc_len() || bytes_read == 0 {
+        stream.buffers.pop_front();
+    }
+
+    match p.state() {
+        State::Suspended | State::Running | State::Prepared => Ok(false),
+        State::XRun => Ok(true), // Recover from this in next round
+        n => panic!("Unexpected pcm state {:?}", n),
+    }
+}
+
 fn alsa_worker(
     pcm: Arc<Mutex<PCM>>,
     streams: Arc<RwLock<Vec<Stream>>>,
     receiver: &Receiver<bool>,
     stream_id: usize,
 ) -> AResult<()> {
+    let direction = streams.write().unwrap()[stream_id].direction;
     loop {
         // We get a `true` every time a new I/O message is received from the guest.
         // If the recv() returns `Ok(false)` or an error, terminate this worker thread.
-        let Ok(do_write) = receiver.recv() else {
+        let Ok(do_work) = receiver.recv() else {
             return Ok(());
         };
-        if do_write {
+        if do_work {
             let has_buffers = || -> bool {
                 // Hold `streams` lock as short as possible.
                 let lck = streams.read().unwrap();
@@ -322,26 +438,48 @@ fn alsa_worker(
             };
             // Run this loop till the stream's buffer vector is empty:
             'empty_buffers: while has_buffers() {
-                // When we return from a write attempt and there is still space in the
+                // When we return from a read/write attempt and there is still space in the
                 // stream's buffers, get the ALSA file descriptors and poll them till the host
                 // sound device tells us there is more available data.
                 let mut fds = {
                     let lck = pcm.lock().unwrap();
-                    let mut mmap = lck.direct_mmap_playback::<u8>().ok();
+                    match direction {
+                        Direction::Output => {
+                            let mut mmap = lck.direct_mmap_playback::<u8>().ok();
 
-                    if let Some(ref mut mmap) = mmap {
-                        if write_samples_direct(
-                            &lck,
-                            &mut streams.write().unwrap()[stream_id],
-                            mmap,
-                        )? {
-                            continue 'empty_buffers;
+                            if let Some(ref mut mmap) = mmap {
+                                if write_samples_direct(
+                                    &lck,
+                                    &mut streams.write().unwrap()[stream_id],
+                                    mmap,
+                                )? {
+                                    continue 'empty_buffers;
+                                }
+                            } else {
+                                let mut io = lck.io_bytes();
+                                // Direct mode unavailable, use alsa-lib's mmap emulation instead
+                                if write_samples_io(&lck, &streams, stream_id, &mut io)? {
+                                    continue 'empty_buffers;
+                                }
+                            }
                         }
-                    } else {
-                        let mut io = lck.io_bytes();
-                        // Direct mode unavailable, use alsa-lib's mmap emulation instead
-                        if write_samples_io(&lck, &streams, stream_id, &mut io)? {
-                            continue 'empty_buffers;
+                        Direction::Input => {
+                            let mut mmap = lck.direct_mmap_capture::<u8>().ok();
+
+                            if let Some(ref mut mmap) = mmap {
+                                if read_samples_direct(
+                                    &lck,
+                                    &mut streams.write().unwrap()[stream_id],
+                                    mmap,
+                                )? {
+                                    continue 'empty_buffers;
+                                }
+                            } else {
+                                let mut io = lck.io_bytes();
+                                if read_samples_io(&lck, &streams, stream_id, &mut io)? {
+                                    continue 'empty_buffers;
+                                }
+                            }
                         }
                     }
                     lck.get()?
@@ -412,11 +550,10 @@ impl AlsaBackend {
 
         while let Ok(action) = receiver.recv() {
             match action {
-                AlsaAction::Read(_) => {}
-                AlsaAction::Write(stream_id) => {
+                AlsaAction::DoWork(stream_id) => {
                     if stream_id >= streams_no {
                         log::error!(
-                            "Received Write action for stream id {} but there are only {} PCM \
+                            "Received DoWork action for stream id {} but there are only {} PCM \
                              streams.",
                             stream_id,
                             pcms.len()
@@ -589,8 +726,8 @@ macro_rules! send_action {
 
 impl AudioBackend for AlsaBackend {
     send_action! {
-        write Write,
-        read Read,
+        write DoWork,
+        read DoWork,
         prepare Prepare,
         start Start,
     }

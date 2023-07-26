@@ -1,0 +1,55 @@
+Commit 813665564b3d ("iio: core: Convert to use firmware node handle
+instead of OF node") switched the kind of nodes to use for label
+retrieval in device registration.  Probably an unwanted change in that
+commit was that if the device has no parent then NULL pointer is
+accessed.  This is what happens in the stock IIO dummy driver when a
+new entry is created in configfs:
+
+  # mkdir /sys/kernel/config/iio/devices/dummy/foo
+  BUG: kernel NULL pointer dereference, address: ...
+  ...
+  Call Trace:
+  __iio_device_register
+  iio_dummy_probe
+
+Since there seems to be no reason to make a parent device of an IIO
+dummy device mandatory, let’s prevent the invalid memory access in
+__iio_device_register when the parent device is NULL.  With this
+change, the IIO dummy driver works fine with configfs.
+
+Fixes: 813665564b3d ("iio: core: Convert to use firmware node handle instead of OF node")
+Reviewed-by: Andy Shevchenko <andriy.shevchenko-VuQAYsv1563Yd54FQh9/CA@public.gmane.org>
+Signed-off-by: Milan Zamazal <mzamazal-H+wXaHxf7aLQT0dZR+AlfA@public.gmane.org>
+---
+ drivers/iio/industrialio-core.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/iio/industrialio-core.c b/drivers/iio/industrialio-core.c
+index c117f50d0cf3..adcba832e6fa 100644
+--- a/drivers/iio/industrialio-core.c
++++ b/drivers/iio/industrialio-core.c
+@@ -1888,7 +1888,7 @@ static const struct iio_buffer_setup_ops noop_ring_setup_ops;
+ int __iio_device_register(struct iio_dev *indio_dev, struct module *this_mod)
+ {
+ 	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(indio_dev);
+-	struct fwnode_handle *fwnode;
++	struct fwnode_handle *fwnode = NULL;
+ 	int ret;
+ 
+ 	if (!indio_dev->info)
+@@ -1899,7 +1899,8 @@ int __iio_device_register(struct iio_dev *indio_dev, struct module *this_mod)
+ 	/* If the calling driver did not initialize firmware node, do it here */
+ 	if (dev_fwnode(&indio_dev->dev))
+ 		fwnode = dev_fwnode(&indio_dev->dev);
+-	else
++	/* The default dummy IIO device has no parent */
++	else if (indio_dev->dev.parent)
+ 		fwnode = dev_fwnode(indio_dev->dev.parent);
+ 	device_set_node(&indio_dev->dev, fwnode);
+ 
+-- 
+
+2.40.1
+
+
+

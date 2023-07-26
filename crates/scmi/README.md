@@ -65,9 +65,17 @@ The currently supported SCMI protocols are:
 Basically only the mandatory and necessary parts of the protocols are
 implemented.
 
+## Kernel support for testing
+
+`kernel` subdirectory contains
+[instructions](kernel/iio-dummy/README.md) how to create emulated
+industrial I/O devices for testing.
+
 ## License
 
 This project is licensed under either of
 
 - [Apache License](http://www.apache.org/licenses/LICENSE-2.0), Version 2.0
 - [BSD-3-Clause License](https://opensource.org/licenses/BSD-3-Clause)
+
+unless specified in particular files otherwise.

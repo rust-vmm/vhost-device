@@ -290,10 +290,6 @@ impl VsockThreadBackend {
         stream: UnixStream,
         pkt: &VsockPacket<B>,
     ) -> Result<()> {
-        let stream_fd = stream.as_raw_fd();
-        self.listener_map
-            .insert(stream_fd, ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
-
         let conn = VsockConnection::new_peer_init(
             stream.try_clone().map_err(Error::UnixConnect)?,
             pkt.dst_cid(),
@@ -304,6 +300,9 @@ impl VsockThreadBackend {
             pkt.buf_alloc(),
             self.tx_buffer_size,
         );
+        let stream_fd = conn.stream.as_raw_fd();
+        self.listener_map
+            .insert(stream_fd, ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
 
         self.conn_map
             .insert(ConnMapKey::new(pkt.dst_port(), pkt.src_port()), conn);

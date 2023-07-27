@@ -297,7 +297,9 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
             TX_QUEUE_EVENT => {
                 thread.process_tx(vring_tx, evt_idx)?;
             }
-            EVT_QUEUE_EVENT => {}
+            EVT_QUEUE_EVENT => {
+                warn!("Received an unexpected EVT_QUEUE_EVENT");
+            }
             BACKEND_EVENT => {
                 thread.process_backend_evt(evset);
                 if let Err(e) = thread.process_tx(vring_tx, evt_idx) {

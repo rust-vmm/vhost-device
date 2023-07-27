@@ -37,10 +37,12 @@ const TX_QUEUE_EVENT: u16 = 1;
 const EVT_QUEUE_EVENT: u16 = 2;
 
 /// Notification coming from the backend.
-pub(crate) const BACKEND_EVENT: u16 = 3;
+/// Event range [0...num_queues] is reserved for queues and exit event.
+/// So NUM_QUEUES + 1 is used.
+pub(crate) const BACKEND_EVENT: u16 = (NUM_QUEUES + 1) as u16;
 
 /// Notification coming from the sibling VM.
-pub(crate) const SIBLING_VM_EVENT: u16 = 4;
+pub(crate) const SIBLING_VM_EVENT: u16 = BACKEND_EVENT + 1;
 
 /// CID of the host
 pub(crate) const VSOCK_HOST_CID: u64 = 2;

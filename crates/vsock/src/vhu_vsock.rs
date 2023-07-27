@@ -26,7 +26,7 @@ use crate::vhu_vsock_thread::*;
 
 pub(crate) type CidMap = HashMap<u64, (Arc<RwLock<RawPktsQ>>, EventFd)>;
 
-const NUM_QUEUES: usize = 2;
+const NUM_QUEUES: usize = 3;
 const QUEUE_SIZE: usize = 256;
 
 // New descriptors pending on the rx queue

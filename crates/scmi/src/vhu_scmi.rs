@@ -20,9 +20,7 @@ use vm_memory::{
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-use crate::devices::available_devices;
-use crate::devices::print_devices_help;
-use crate::scmi::ScmiDevice;
+use crate::devices::{available_devices, print_devices_help, DeviceError};
 use crate::scmi::{MessageHeader, ScmiHandler, ScmiRequest};
 use crate::VuScmiConfig;
 
@@ -45,7 +43,7 @@ pub enum VuScmiError {
     #[error("Descriptor write failed")]
     DescriptorWriteFailed,
     #[error("Error when configuring device {0}: {1}")]
-    DeviceConfigurationError(String, String),
+    DeviceConfigurationError(String, DeviceError),
     #[error("Failed to create new EventFd")]
     EventFdFailed,
     #[error("Failed to handle event, didn't match EPOLLIN")]
@@ -103,17 +101,16 @@ impl VuScmiBackend {
             if name == "help" {
                 print_devices_help();
             }
-            match device_mapping.get(name) {
-                Some(constructor) => {
-                    let mut device: Box<dyn ScmiDevice> = constructor();
-                    if let Err(message) = device.configure(properties) {
+            match device_mapping.get(name.as_str()) {
+                Some(specification) => match (specification.constructor)(properties) {
+                    Ok(device) => handler.register_device(device),
+                    Err(error) => {
                         return Result::Err(VuScmiError::DeviceConfigurationError(
                             name.clone(),
-                            message,
-                        ));
+                            error,
+                        ))
                     }
-                    handler.register_device(device);
-                }
+                },
                 None => return Result::Err(VuScmiError::UnknownDeviceRequested(name.clone())),
             };
         }

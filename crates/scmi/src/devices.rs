@@ -1,42 +1,147 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use log::debug;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::process::exit;
 
-use crate::{
-    scmi::{
-        DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice,
-        ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET,
-        SENSOR_CONFIG_SET, SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET,
-        SENSOR_PROTOCOL_ID, SENSOR_READING_GET, SENSOR_UNIT_METERS_PER_SECOND_SQUARED,
-    },
-    DeviceProperties,
+use itertools::Itertools;
+use log::debug;
+use thiserror::Error as ThisError;
+
+use crate::scmi::{
+    DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice, ScmiDeviceError,
+    MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET, SENSOR_CONFIG_SET,
+    SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
+    SENSOR_READING_GET, SENSOR_UNIT_METERS_PER_SECOND_SQUARED,
 };
 
 enum ExitCodes {
     Help = 1,
 }
 
-type DeviceSpecification = fn() -> Box<dyn ScmiDevice>;
-type NameDeviceMapping = HashMap<String, DeviceSpecification>;
+#[derive(Debug, PartialEq, Eq, ThisError)]
+pub enum DeviceError {
+    #[error("Invalid device parameter: {0}")]
+    InvalidProperty(String),
+    #[error("Missing device parameters: {}", .0.join(", "))]
+    MissingDeviceProperties(Vec<String>),
+    #[error("Unexpected device parameters: {}", .0.join(", "))]
+    UnexpectedDeviceProperties(Vec<String>),
+}
+
+// [(NAME, [(PROPERTY, VALUE), ...]), ...]
+pub type DeviceDescription = Vec<(String, DeviceProperties)>;
+type PropertyPairs = Vec<(String, String)>;
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub struct DeviceProperties(PropertyPairs);
+
+impl DeviceProperties {
+    pub(crate) fn new(properties: PropertyPairs) -> Self {
+        Self(properties)
+    }
+
+    fn get(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    fn names(&self) -> HashSet<&str> {
+        self.0.iter().map(|(n, _)| -> &str { n.as_str() }).collect()
+    }
+
+    fn extra<'a>(&'a self, allowed: &[&'a str]) -> HashSet<&str> {
+        let allowed_set: HashSet<&str> = HashSet::from_iter(allowed.iter().copied());
+        self.names().difference(&allowed_set).copied().collect()
+    }
+
+    fn missing<'a>(&'a self, required: &[&'a str]) -> HashSet<&str> {
+        let required_set: HashSet<&str> = HashSet::from_iter(required.iter().copied());
+        required_set.difference(&self.names()).copied().collect()
+    }
+
+    fn check(&self, required: &[&str], optional: &[&str]) -> Result<(), DeviceError> {
+        let missing = self.missing(required);
+        if !missing.is_empty() {
+            return Err(DeviceError::MissingDeviceProperties(
+                missing
+                    .iter()
+                    .sorted()
+                    .map(|s| (*s).to_owned())
+                    .collect::<Vec<String>>(),
+            ));
+        }
+        let mut all_allowed = Vec::from(required);
+        all_allowed.extend(optional.iter());
+        let extra = self.extra(&all_allowed);
+        if !extra.is_empty() {
+            return Err(DeviceError::UnexpectedDeviceProperties(
+                extra
+                    .iter()
+                    .sorted()
+                    .map(|s| (*s).to_owned())
+                    .collect::<Vec<String>>(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+type MaybeDevice = Result<Box<dyn ScmiDevice>, DeviceError>;
+type DeviceConstructor = fn(&DeviceProperties) -> MaybeDevice;
+
+pub struct DeviceSpecification {
+    pub(crate) constructor: DeviceConstructor,
+    short_help: String,
+    long_help: String,
+    parameters_help: Vec<String>,
+}
+
+impl DeviceSpecification {
+    fn new(
+        constructor: DeviceConstructor,
+        short_help: &str,
+        long_help: &str,
+        parameters_help: &[&str],
+    ) -> Self {
+        Self {
+            constructor,
+            short_help: short_help.to_owned(),
+            long_help: long_help.to_owned(),
+            parameters_help: parameters_help
+                .iter()
+                .map(|s| String::from(*s))
+                .collect::<Vec<String>>(),
+        }
+    }
+}
+
+type NameDeviceMapping = HashMap<&'static str, DeviceSpecification>;
 
 pub fn available_devices() -> NameDeviceMapping {
     let mut devices: NameDeviceMapping = HashMap::new();
-    devices.insert("fake".to_owned(), FakeSensor::new);
+    devices.insert(
+        "fake",
+        DeviceSpecification::new(
+            FakeSensor::new,
+            "fake accelerometer",
+            "A simple 3-axes sensor providing fake pre-defined values.",
+            &["name: an optional name of the sensor, max. 15 characters"],
+        ),
+    );
     devices
 }
 
 fn devices_help() -> String {
     let mut help = String::new();
     writeln!(help, "Available devices:").unwrap();
-    for (name, constructor) in available_devices().iter() {
-        let device = constructor();
-        let short_help = device.short_help();
-        let long_help = device.long_help();
-        let parameters_help = device.parameters_help();
+    for (name, specification) in available_devices().iter() {
+        let short_help = &specification.short_help;
+        let long_help = &specification.long_help;
+        let parameters_help = &specification.parameters_help;
         writeln!(help, "\n- {name}: {short_help}").unwrap();
         for line in long_help.lines() {
             writeln!(help, "  {line}").unwrap();
@@ -57,7 +162,7 @@ fn devices_help() -> String {
     help
 }
 
-pub(crate) fn print_devices_help() {
+pub fn print_devices_help() {
     let help = devices_help();
     println!("{}", help);
     exit(ExitCodes::Help as i32);
@@ -71,9 +176,10 @@ pub struct Sensor {
 }
 
 impl Sensor {
-    const fn new(default_name: String) -> Self {
+    fn new(properties: &DeviceProperties, default_name: &str) -> Self {
+        let name = properties.get("name").unwrap_or(default_name);
         Self {
-            name: default_name,
+            name: name.to_owned(),
             enabled: false,
         }
     }
@@ -83,40 +189,16 @@ trait SensorT: Send {
     fn sensor(&self) -> &Sensor;
     fn sensor_mut(&mut self) -> &mut Sensor;
 
-    fn short_help(&self) -> String {
-        "sensor".to_owned()
-    }
-
-    fn long_help(&self) -> String {
-        "".to_owned()
-    }
-
-    fn parameters_help(&self) -> Vec<String> {
-        vec!["name: an optional name of the sensor, max. 15 characters".to_owned()]
-    }
-
     fn protocol(&self) -> ProtocolId {
         SENSOR_PROTOCOL_ID
     }
 
-    fn invalid_property(&self, name: &String) -> Result<(), String> {
-        Result::Err(format!("Invalid device option: {name}"))
+    fn invalid_property(&self, name: &str) -> Result<(), DeviceError> {
+        Result::Err(DeviceError::InvalidProperty(name.to_owned()))
     }
 
-    fn process_property(&mut self, name: &String, _value: &str) -> Result<(), String> {
+    fn process_property(&mut self, name: &str, _value: &str) -> Result<(), DeviceError> {
         self.invalid_property(name)
-    }
-
-    fn configure(&mut self, properties: &DeviceProperties) -> Result<(), String> {
-        for (name, value) in properties {
-            if name == "name" {
-                // TODO: Check for duplicate names
-                self.sensor_mut().name = String::from(value);
-            } else {
-                self.process_property(name, value)?;
-            }
-        }
-        Ok(())
     }
 
     fn number_of_axes(&self) -> u32 {
@@ -229,22 +311,6 @@ trait SensorT: Send {
 struct SensorDevice(Box<dyn SensorT>);
 
 impl ScmiDevice for SensorDevice {
-    fn configure(&mut self, properties: &DeviceProperties) -> Result<(), String> {
-        self.0.configure(properties)
-    }
-
-    fn short_help(&self) -> String {
-        self.0.short_help()
-    }
-
-    fn long_help(&self) -> String {
-        self.0.long_help()
-    }
-
-    fn parameters_help(&self) -> Vec<String> {
-        self.0.parameters_help()
-    }
-
     fn protocol(&self) -> ProtocolId {
         self.0.protocol()
     }
@@ -268,14 +334,6 @@ impl SensorT for FakeSensor {
     }
     fn sensor_mut(&mut self) -> &mut Sensor {
         &mut self.sensor
-    }
-
-    fn short_help(&self) -> String {
-        "fake accelerometer".to_owned()
-    }
-
-    fn long_help(&self) -> String {
-        "A simple 3-axes sensor providing fake pre-defined values.".to_owned()
     }
 
     fn number_of_axes(&self) -> u32 {
@@ -309,16 +367,19 @@ impl SensorT for FakeSensor {
 
 impl FakeSensor {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> Box<dyn ScmiDevice> {
-        let sensor = Sensor::new("fake".to_owned());
+    pub fn new(properties: &DeviceProperties) -> MaybeDevice {
+        properties.check(&[], &["name"])?;
+        let sensor = Sensor::new(properties, "fake");
         let fake_sensor = Self { sensor, value: 0 };
         let sensor_device = SensorDevice(Box::new(fake_sensor));
-        Box::new(sensor_device)
+        Ok(Box::new(sensor_device))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::assert_eq;
+
     use super::*;
 
     #[test]
@@ -336,5 +397,48 @@ mod tests {
         assert!(help.contains("3-axes sensor"), "long description missing");
         assert!(help.contains("Parameters:\n"), "parameter label missing");
         assert!(help.contains("- name:"), "parameter `name' missing");
+    }
+
+    fn device_properties() -> DeviceProperties {
+        DeviceProperties::new(vec![
+            ("foo".to_owned(), "val1".to_owned()),
+            ("def".to_owned(), "val2".to_owned()),
+            ("bar".to_owned(), "val3".to_owned()),
+        ])
+    }
+
+    #[test]
+    fn test_device_properties() {
+        let properties = device_properties();
+        assert_eq!(properties.get("bar"), Some("val3"));
+        assert_eq!(properties.get("baz"), None);
+        assert_eq!(properties.names(), HashSet::from(["foo", "def", "bar"]));
+        let expected = ["abc", "def", "ghi"];
+        let missing = properties.missing(&expected);
+        assert_eq!(missing, HashSet::from(["abc", "ghi"]));
+        let extra = properties.extra(&expected);
+        assert_eq!(extra, HashSet::from(["foo", "bar"]));
+    }
+
+    #[test]
+    fn test_check_device_properties() {
+        let properties = device_properties();
+        let result = properties.check(&["abc", "def", "ghi"], &["foo", "baz"]);
+        assert_eq!(
+            result,
+            Err(DeviceError::MissingDeviceProperties(vec![
+                "abc".to_owned(),
+                "ghi".to_owned()
+            ]))
+        );
+        let result = properties.check(&["def"], &["foo", "baz"]);
+        assert_eq!(
+            result,
+            Err(DeviceError::UnexpectedDeviceProperties(vec![
+                "bar".to_owned()
+            ]))
+        );
+        let result = properties.check(&["def"], &["foo", "bar"]);
+        assert_eq!(result, Ok(()));
     }
 }

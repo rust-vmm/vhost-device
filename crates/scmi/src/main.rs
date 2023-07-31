@@ -6,6 +6,8 @@ mod devices;
 mod scmi;
 mod vhu_scmi;
 
+use devices::{DeviceDescription, DeviceProperties};
+
 use std::{
     process::exit,
     sync::{Arc, RwLock},
@@ -38,10 +40,6 @@ struct ScmiArgs {
     device: Vec<String>,
 }
 
-// [(NAME, [(PROPERTY, VALUE), ...]), ...]
-type DeviceDescription = Vec<(String, DeviceProperties)>;
-type DeviceProperties = Vec<(String, String)>;
-
 pub struct VuScmiConfig {
     socket_path: String,
     devices: DeviceDescription,
@@ -57,7 +55,7 @@ impl TryFrom<ScmiArgs> for VuScmiConfig {
         for d in device_iterator {
             let mut split = d.split(',');
             let name = split.next().unwrap().to_owned();
-            let mut properties: DeviceProperties = vec![];
+            let mut properties = vec![];
             for s in split {
                 if let Some((key, value)) = s.split('=').collect_tuple() {
                     properties.push((key.to_owned(), value.to_owned()));
@@ -65,7 +63,7 @@ impl TryFrom<ScmiArgs> for VuScmiConfig {
                     return Result::Err(format!("Invalid device {name} property format: {s}"));
                 }
             }
-            devices.push((name, properties));
+            devices.push((name, DeviceProperties::new(properties)));
         }
         Ok(Self {
             socket_path,
@@ -146,17 +144,17 @@ mod tests {
         let config = VuScmiConfig::try_from(args).unwrap();
         assert_eq!(config.socket_path, path);
         let devices = vec![
-            ("dummy".to_owned(), vec![]),
+            ("dummy".to_owned(), DeviceProperties::new(vec![])),
             (
                 "fake".to_owned(),
-                vec![
+                DeviceProperties::new(vec![
                     ("name".to_owned(), "foo".to_owned()),
                     ("prop".to_owned(), "value".to_owned()),
-                ],
+                ]),
             ),
             (
                 "fake".to_owned(),
-                vec![("name".to_owned(), "bar".to_owned())],
+                DeviceProperties::new(vec![("name".to_owned(), "bar".to_owned())]),
             ),
         ];
         assert_eq!(config.devices, devices);

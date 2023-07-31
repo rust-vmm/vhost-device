@@ -30,6 +30,7 @@ the Examples section below.
   Can be used multiple times for multiple exposed devices.
   If no device is specified then no device will be provided to the
   guest OS but VirtIO SCMI will be still available there.
+  Use `help` as the device ID to list help on all the available devices.
 
 You can set `RUST_LOG` environment variable to `debug` to get maximum
 messages on the standard error output.

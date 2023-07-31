@@ -29,7 +29,11 @@ struct ScmiArgs {
     #[clap(short, long, help = "vhost-user socket to use")]
     socket_path: String,
     // Specification of SCMI devices to create.
-    #[clap(short, long)]
+    #[clap(
+        short,
+        long,
+        help = "Devices to expose (use `help' device for more info)"
+    )]
     #[arg(num_args(1..))]
     device: Vec<String>,
 }

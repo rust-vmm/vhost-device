@@ -21,6 +21,7 @@ use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 use crate::devices::available_devices;
+use crate::devices::print_devices_help;
 use crate::scmi::ScmiDevice;
 use crate::scmi::{MessageHeader, ScmiHandler, ScmiRequest};
 use crate::VuScmiConfig;
@@ -99,6 +100,9 @@ impl VuScmiBackend {
         let mut handler = ScmiHandler::new();
         let device_mapping = available_devices();
         for (name, properties) in config.devices.iter() {
+            if name == "help" {
+                print_devices_help();
+            }
             match device_mapping.get(name) {
                 Some(constructor) => {
                     let mut device: Box<dyn ScmiDevice> = constructor();

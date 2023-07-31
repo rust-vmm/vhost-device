@@ -480,6 +480,9 @@ pub enum ScmiDeviceError {
 }
 
 pub trait ScmiDevice: Send {
+    fn short_help(&self) -> String;
+    fn long_help(&self) -> String;
+    fn parameters_help(&self) -> Vec<String>;
     fn configure(&mut self, properties: &DeviceProperties) -> Result<(), String>;
     fn protocol(&self) -> ProtocolId;
     fn handle(

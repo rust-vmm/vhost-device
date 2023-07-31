@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
-
 use log::debug;
+use std::collections::HashMap;
+use std::fmt::Write;
+use std::process::exit;
 
 use crate::{
     scmi::{
@@ -15,6 +16,10 @@ use crate::{
     DeviceProperties,
 };
 
+enum ExitCodes {
+    Help = 1,
+}
+
 type DeviceSpecification = fn() -> Box<dyn ScmiDevice>;
 type NameDeviceMapping = HashMap<String, DeviceSpecification>;
 
@@ -22,6 +27,40 @@ pub fn available_devices() -> NameDeviceMapping {
     let mut devices: NameDeviceMapping = HashMap::new();
     devices.insert("fake".to_owned(), FakeSensor::new);
     devices
+}
+
+fn devices_help() -> String {
+    let mut help = String::new();
+    writeln!(help, "Available devices:").unwrap();
+    for (name, constructor) in available_devices().iter() {
+        let device = constructor();
+        let short_help = device.short_help();
+        let long_help = device.long_help();
+        let parameters_help = device.parameters_help();
+        writeln!(help, "\n- {name}: {short_help}").unwrap();
+        for line in long_help.lines() {
+            writeln!(help, "  {line}").unwrap();
+        }
+        if !parameters_help.is_empty() {
+            writeln!(help, "  Parameters:").unwrap();
+            for parameter in parameters_help {
+                writeln!(help, "  - {parameter}").unwrap();
+            }
+        }
+    }
+    writeln!(help, "\nDevice specification example:").unwrap();
+    writeln!(
+        help,
+        "--device iio,path=/sys/bus/iio/devices/iio:device0,channel=in_accel"
+    )
+    .unwrap();
+    help
+}
+
+pub(crate) fn print_devices_help() {
+    let help = devices_help();
+    println!("{}", help);
+    exit(ExitCodes::Help as i32);
 }
 
 // Common sensor infrastructure
@@ -43,6 +82,18 @@ impl Sensor {
 trait SensorT: Send {
     fn sensor(&self) -> &Sensor;
     fn sensor_mut(&mut self) -> &mut Sensor;
+
+    fn short_help(&self) -> String {
+        "sensor".to_owned()
+    }
+
+    fn long_help(&self) -> String {
+        "".to_owned()
+    }
+
+    fn parameters_help(&self) -> Vec<String> {
+        vec!["name: an optional name of the sensor, max. 15 characters".to_owned()]
+    }
 
     fn protocol(&self) -> ProtocolId {
         SENSOR_PROTOCOL_ID
@@ -182,6 +233,18 @@ impl ScmiDevice for SensorDevice {
         self.0.configure(properties)
     }
 
+    fn short_help(&self) -> String {
+        self.0.short_help()
+    }
+
+    fn long_help(&self) -> String {
+        self.0.long_help()
+    }
+
+    fn parameters_help(&self) -> Vec<String> {
+        self.0.parameters_help()
+    }
+
     fn protocol(&self) -> ProtocolId {
         self.0.protocol()
     }
@@ -205,6 +268,14 @@ impl SensorT for FakeSensor {
     }
     fn sensor_mut(&mut self) -> &mut Sensor {
         &mut self.sensor
+    }
+
+    fn short_help(&self) -> String {
+        "fake accelerometer".to_owned()
+    }
+
+    fn long_help(&self) -> String {
+        "A simple 3-axes sensor providing fake pre-defined values.".to_owned()
     }
 
     fn number_of_axes(&self) -> u32 {
@@ -243,5 +314,27 @@ impl FakeSensor {
         let fake_sensor = Self { sensor, value: 0 };
         let sensor_device = SensorDevice(Box::new(fake_sensor));
         Box::new(sensor_device)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_help() {
+        let help = devices_help();
+        assert!(
+            help.contains("Available devices:\n"),
+            "global label missing"
+        );
+        assert!(help.contains("fake:"), "sensor name missing");
+        assert!(
+            help.contains("fake accelerometer"),
+            "short description missing"
+        );
+        assert!(help.contains("3-axes sensor"), "long description missing");
+        assert!(help.contains("Parameters:\n"), "parameter label missing");
+        assert!(help.contains("- name:"), "parameter `name' missing");
     }
 }

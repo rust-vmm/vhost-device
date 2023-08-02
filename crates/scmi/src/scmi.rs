@@ -716,7 +716,7 @@ impl ScmiHandler {
 
 #[cfg(test)]
 mod tests {
-    use crate::devices::{DeviceProperties, FakeSensor};
+    use crate::devices::{common::DeviceProperties, fake::FakeSensor};
 
     use super::*;
 

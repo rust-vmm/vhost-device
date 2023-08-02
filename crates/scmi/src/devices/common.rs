@@ -13,8 +13,10 @@ use crate::scmi::{
     DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice, ScmiDeviceError,
     MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET, SENSOR_CONFIG_SET,
     SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
-    SENSOR_READING_GET, SENSOR_UNIT_METERS_PER_SECOND_SQUARED,
+    SENSOR_READING_GET,
 };
+
+use super::fake;
 
 enum ExitCodes {
     Help = 1,
@@ -42,7 +44,7 @@ impl DeviceProperties {
         Self(properties)
     }
 
-    fn get(&self, name: &str) -> Option<&str> {
+    pub(crate) fn get(&self, name: &str) -> Option<&str> {
         self.0
             .iter()
             .find(|(n, _)| n == name)
@@ -63,7 +65,7 @@ impl DeviceProperties {
         required_set.difference(&self.names()).copied().collect()
     }
 
-    fn check(&self, required: &[&str], optional: &[&str]) -> Result<(), DeviceError> {
+    pub(crate) fn check(&self, required: &[&str], optional: &[&str]) -> Result<(), DeviceError> {
         let missing = self.missing(required);
         if !missing.is_empty() {
             return Err(DeviceError::MissingDeviceProperties(
@@ -90,7 +92,7 @@ impl DeviceProperties {
     }
 }
 
-type MaybeDevice = Result<Box<dyn ScmiDevice>, DeviceError>;
+pub type MaybeDevice = Result<Box<dyn ScmiDevice>, DeviceError>;
 type DeviceConstructor = fn(&DeviceProperties) -> MaybeDevice;
 
 pub struct DeviceSpecification {
@@ -126,7 +128,7 @@ pub fn available_devices() -> NameDeviceMapping {
     devices.insert(
         "fake",
         DeviceSpecification::new(
-            FakeSensor::new,
+            fake::FakeSensor::new,
             "fake accelerometer",
             "A simple 3-axes sensor providing fake pre-defined values.",
             &["name: an optional name of the sensor, max. 15 characters"],
@@ -171,12 +173,12 @@ pub fn print_devices_help() {
 // Common sensor infrastructure
 
 pub struct Sensor {
-    name: String,
+    pub name: String,
     enabled: bool,
 }
 
 impl Sensor {
-    fn new(properties: &DeviceProperties, default_name: &str) -> Self {
+    pub fn new(properties: &DeviceProperties, default_name: &str) -> Self {
         let name = properties.get("name").unwrap_or(default_name);
         Self {
             name: name.to_owned(),
@@ -185,7 +187,7 @@ impl Sensor {
     }
 }
 
-trait SensorT: Send {
+pub trait SensorT: Send {
     fn sensor(&self) -> &Sensor;
     fn sensor_mut(&mut self) -> &mut Sensor;
 
@@ -308,7 +310,7 @@ trait SensorT: Send {
 // It's possible to impl ScmiDevice for SensorT but it is not very useful
 // because it doesn't allow to pass SensorT as ScmiDevice directly.
 // Hence this wrapper.
-struct SensorDevice(Box<dyn SensorT>);
+pub struct SensorDevice(pub(crate) Box<dyn SensorT>);
 
 impl ScmiDevice for SensorDevice {
     fn protocol(&self) -> ProtocolId {
@@ -317,62 +319,6 @@ impl ScmiDevice for SensorDevice {
 
     fn handle(&mut self, message_id: MessageId, parameters: &[MessageValue]) -> DeviceResult {
         self.0.handle(message_id, parameters)
-    }
-}
-
-// Particular sensor implementations
-
-pub struct FakeSensor {
-    sensor: Sensor,
-    value: u8,
-}
-
-impl SensorT for FakeSensor {
-    // TODO: Define a macro for this boilerplate?
-    fn sensor(&self) -> &Sensor {
-        &self.sensor
-    }
-    fn sensor_mut(&mut self) -> &mut Sensor {
-        &mut self.sensor
-    }
-
-    fn number_of_axes(&self) -> u32 {
-        3
-    }
-
-    fn axis_unit(&self) -> u32 {
-        // The sensor type is "Meters per second squared", since this is the
-        // only, together with "Radians per second", what Google Linux IIO
-        // supports (accelerometers and gyroscopes only).
-        SENSOR_UNIT_METERS_PER_SECOND_SQUARED
-    }
-
-    fn axis_name_prefix(&self) -> String {
-        "acc".to_owned()
-    }
-
-    fn reading_get(&mut self) -> DeviceResult {
-        let value = self.value;
-        self.value = self.value.overflowing_add(1).0;
-        let mut result = vec![];
-        for i in 0..3 {
-            result.push(MessageValue::Unsigned(u32::from(value) + 100 * i));
-            result.push(MessageValue::Unsigned(0));
-            result.push(MessageValue::Unsigned(0));
-            result.push(MessageValue::Unsigned(0));
-        }
-        Ok(result)
-    }
-}
-
-impl FakeSensor {
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(properties: &DeviceProperties) -> MaybeDevice {
-        properties.check(&[], &["name"])?;
-        let sensor = Sensor::new(properties, "fake");
-        let fake_sensor = Self { sensor, value: 0 };
-        let sensor_device = SensorDevice(Box::new(fake_sensor));
-        Ok(Box::new(sensor_device))
     }
 }
 

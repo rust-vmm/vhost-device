@@ -20,7 +20,7 @@ use vm_memory::{
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-use crate::devices::{available_devices, print_devices_help, DeviceError};
+use crate::devices::common::{available_devices, print_devices_help, DeviceError};
 use crate::scmi::{MessageHeader, ScmiHandler, ScmiRequest};
 use crate::VuScmiConfig;
 
@@ -108,7 +108,7 @@ impl VuScmiBackend {
                         return Result::Err(VuScmiError::DeviceConfigurationError(
                             name.clone(),
                             error,
-                        ))
+                        ));
                     }
                 },
                 None => return Result::Err(VuScmiError::UnknownDeviceRequested(name.clone())),

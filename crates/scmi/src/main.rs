@@ -6,7 +6,7 @@ mod devices;
 mod scmi;
 mod vhu_scmi;
 
-use devices::{DeviceDescription, DeviceProperties};
+use devices::common::{DeviceDescription, DeviceProperties};
 
 use std::{
     process::exit,

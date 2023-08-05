@@ -10,9 +10,9 @@ use log::debug;
 use thiserror::Error as ThisError;
 
 use crate::scmi::{
-    DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice, ScmiDeviceError,
-    MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET, SENSOR_CONFIG_SET,
-    SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
+    self, DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice,
+    ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET,
+    SENSOR_CONFIG_SET, SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
     SENSOR_READING_GET,
 };
 
@@ -204,13 +204,22 @@ pub trait SensorT: Send {
     }
 
     fn number_of_axes(&self) -> u32 {
-        1
+        0
+    }
+
+    fn format_unit(&self, axis: u32) -> u32 {
+        (self.unit_exponent(axis) as u32 & 0x1F) << 11 | u32::from(self.unit())
     }
 
     fn description_get(&self) -> DeviceResult {
         // Continuous update required by Linux SCMI IIO driver
         let low = 1 << 30;
-        let high = self.number_of_axes() << 16 | 1 << 8;
+        let n_axes = self.number_of_axes();
+        let high = if n_axes > 0 {
+            n_axes << 16 | 1 << 8
+        } else {
+            self.format_unit(0)
+        };
         let name = self.sensor().name.clone();
         let values: MessageValues = vec![
             // attributes low
@@ -223,7 +232,13 @@ pub trait SensorT: Send {
         Ok(values)
     }
 
-    fn axis_unit(&self) -> u32;
+    fn unit(&self) -> u8 {
+        scmi::SENSOR_UNIT_UNSPECIFIED
+    }
+
+    fn unit_exponent(&self, _axis: u32) -> i8 {
+        0
+    }
 
     fn axis_name_prefix(&self) -> String {
         "axis".to_owned()
@@ -242,7 +257,7 @@ pub trait SensorT: Send {
         let mut values = vec![];
         values.push(MessageValue::Unsigned(axis)); // axis id
         values.push(MessageValue::Unsigned(0)); // attributes low
-        values.push(MessageValue::Unsigned(self.axis_unit())); // attributes high
+        values.push(MessageValue::Unsigned(self.format_unit(axis))); // attributes high
 
         // Name in the recommended format, 16 bytes:
         let prefix = self.axis_name_prefix();

@@ -216,7 +216,8 @@ pub const SENSOR_CONFIG_GET: MessageId = 0x9;
 pub const SENSOR_CONFIG_SET: MessageId = 0xA;
 pub const SENSOR_CONTINUOUS_UPDATE_NOTIFY: MessageId = 0xB;
 
-pub const SENSOR_UNIT_METERS_PER_SECOND_SQUARED: u32 = 89;
+pub const SENSOR_UNIT_UNSPECIFIED: u8 = 1;
+pub const SENSOR_UNIT_METERS_PER_SECOND_SQUARED: u8 = 89;
 
 enum ParameterType {
     _SignedInt32,
@@ -309,7 +310,12 @@ impl HandlerMap {
             BASE_DISCOVER_VENDOR,
             "base/discover_vendor",
             vec![],
-            |_, _| -> Response { Response::from(MessageValue::String("rust-vmm".to_string(), 16)) },
+            |_, _| -> Response {
+                Response::from(MessageValue::String(
+                    "rust-vmm".to_string(),
+                    MAX_SIMPLE_STRING_LENGTH,
+                ))
+            },
         );
         self.bind(
             BASE_PROTOCOL_ID,
@@ -1144,7 +1150,7 @@ mod tests {
             let mut description = vec![
                 MessageValue::Unsigned(i),
                 MessageValue::Unsigned(0),
-                MessageValue::Unsigned(SENSOR_UNIT_METERS_PER_SECOND_SQUARED),
+                MessageValue::Unsigned(u32::from(SENSOR_UNIT_METERS_PER_SECOND_SQUARED)),
                 MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
             ];
             result.append(&mut description);

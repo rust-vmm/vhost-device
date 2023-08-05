@@ -3,7 +3,7 @@
 
 // Fake sensor
 
-use crate::scmi::{DeviceResult, MessageValue, SENSOR_UNIT_METERS_PER_SECOND_SQUARED};
+use crate::scmi::{self, DeviceResult, MessageValue};
 
 use super::common::{DeviceProperties, MaybeDevice, Sensor, SensorDevice, SensorT};
 
@@ -25,11 +25,11 @@ impl SensorT for FakeSensor {
         3
     }
 
-    fn axis_unit(&self) -> u32 {
+    fn unit(&self) -> u8 {
         // The sensor type is "Meters per second squared", since this is the
         // only, together with "Radians per second", what Google Linux IIO
         // supports (accelerometers and gyroscopes only).
-        SENSOR_UNIT_METERS_PER_SECOND_SQUARED
+        scmi::SENSOR_UNIT_METERS_PER_SECOND_SQUARED
     }
 
     fn axis_name_prefix(&self) -> String {

@@ -11,6 +11,8 @@ use itertools::Itertools;
 use log::{debug, error, info};
 use thiserror::Error as ThisError;
 
+use crate::devices::common::DeviceError;
+
 pub type MessageHeader = u32;
 
 pub const MAX_SIMPLE_STRING_LENGTH: usize = 16; // incl. NULL terminator
@@ -484,6 +486,7 @@ pub enum ScmiDeviceError {
 }
 
 pub trait ScmiDevice: Send {
+    fn initialize(&mut self) -> Result<(), DeviceError>;
     fn protocol(&self) -> ProtocolId;
     fn handle(
         &mut self,

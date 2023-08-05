@@ -103,7 +103,15 @@ impl VuScmiBackend {
             }
             match device_mapping.get(name.as_str()) {
                 Some(specification) => match (specification.constructor)(properties) {
-                    Ok(device) => handler.register_device(device),
+                    Ok(mut device) => {
+                        if let Err(error) = device.initialize() {
+                            return Result::Err(VuScmiError::DeviceConfigurationError(
+                                name.clone(),
+                                error,
+                            ));
+                        }
+                        handler.register_device(device);
+                    }
                     Err(error) => {
                         return Result::Err(VuScmiError::DeviceConfigurationError(
                             name.clone(),

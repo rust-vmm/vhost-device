@@ -191,6 +191,10 @@ pub trait SensorT: Send {
     fn sensor(&self) -> &Sensor;
     fn sensor_mut(&mut self) -> &mut Sensor;
 
+    fn initialize(&mut self) -> Result<(), DeviceError> {
+        Ok(())
+    }
+
     fn protocol(&self) -> ProtocolId {
         SENSOR_PROTOCOL_ID
     }
@@ -328,6 +332,10 @@ pub trait SensorT: Send {
 pub struct SensorDevice(pub(crate) Box<dyn SensorT>);
 
 impl ScmiDevice for SensorDevice {
+    fn initialize(&mut self) -> Result<(), DeviceError> {
+        self.0.initialize()
+    }
+
     fn protocol(&self) -> ProtocolId {
         self.0.protocol()
     }

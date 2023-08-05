@@ -26,7 +26,8 @@ the Examples section below.
 
 .. option:: -d, --device=SPEC
 
-  SCMI device specification in the format `ID,PROPERTY=VALUE,...`.
+  SCMI device specification in the format `ID,PROPERTY=VALUE,...`.  
+  For example: `-d iio,path=/sys/bus/iio/devices/iio:device0,channel=in_accel`.  
   Can be used multiple times for multiple exposed devices.
   If no device is specified then no device will be provided to the
   guest OS but VirtIO SCMI will be still available there.

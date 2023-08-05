@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt::Write;
 use std::process::exit;
 
@@ -16,16 +17,20 @@ use crate::scmi::{
     SENSOR_READING_GET,
 };
 
-use super::fake;
+use super::{fake, iio};
 
 enum ExitCodes {
     Help = 1,
 }
 
-#[derive(Debug, PartialEq, Eq, ThisError)]
+#[derive(Debug, ThisError)]
 pub enum DeviceError {
+    #[error("{0}")]
+    GenericError(String),
     #[error("Invalid device parameter: {0}")]
     InvalidProperty(String),
+    #[error("I/O error on {0:?}: {1}")]
+    IOError(OsString, std::io::Error),
     #[error("Missing device parameters: {}", .0.join(", "))]
     MissingDeviceProperties(Vec<String>),
     #[error("Unexpected device parameters: {}", .0.join(", "))]
@@ -134,6 +139,19 @@ pub fn available_devices() -> NameDeviceMapping {
             &["name: an optional name of the sensor, max. 15 characters"],
         ),
     );
+    devices.insert(
+        "iio",
+        DeviceSpecification::new(
+            iio::IIOSensor::new_device,
+            "industrial I/O sensor",
+            "",
+            &[
+                "path: path to the device directory (e.g. /sys/bus/iio/devices/iio:device0)",
+                "channel: prefix of the device type (e.g. in_accel)",
+                "name: an optional name of the sensor, max. 15 characters",
+            ],
+        ),
+    );
     devices
 }
 
@@ -172,6 +190,7 @@ pub fn print_devices_help() {
 
 // Common sensor infrastructure
 
+#[derive(Debug)]
 pub struct Sensor {
     pub name: String,
     enabled: bool,
@@ -392,22 +411,21 @@ mod tests {
     #[test]
     fn test_check_device_properties() {
         let properties = device_properties();
-        let result = properties.check(&["abc", "def", "ghi"], &["foo", "baz"]);
-        assert_eq!(
-            result,
-            Err(DeviceError::MissingDeviceProperties(vec![
-                "abc".to_owned(),
-                "ghi".to_owned()
-            ]))
-        );
-        let result = properties.check(&["def"], &["foo", "baz"]);
-        assert_eq!(
-            result,
-            Err(DeviceError::UnexpectedDeviceProperties(vec![
-                "bar".to_owned()
-            ]))
-        );
-        let result = properties.check(&["def"], &["foo", "bar"]);
-        assert_eq!(result, Ok(()));
+        match properties.check(&["abc", "def", "ghi"], &["foo", "baz"]) {
+            Err(DeviceError::MissingDeviceProperties(missing)) => {
+                assert_eq!(missing, vec!["abc".to_owned(), "ghi".to_owned()])
+            }
+            other => panic!("Unexpected result: {:?}", other),
+        }
+        match properties.check(&["def"], &["foo", "baz"]) {
+            Err(DeviceError::UnexpectedDeviceProperties(unexpected)) => {
+                assert_eq!(unexpected, vec!["bar".to_owned()])
+            }
+            other => panic!("Unexpected result: {:?}", other),
+        }
+        match properties.check(&["def"], &["foo", "bar"]) {
+            Ok(()) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
     }
 }

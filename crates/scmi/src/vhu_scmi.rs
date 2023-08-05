@@ -34,7 +34,7 @@ const EVENT_QUEUE: u16 = 1;
 
 const VIRTIO_SCMI_F_P2A_CHANNELS: u16 = 0;
 
-#[derive(Debug, PartialEq, Eq, ThisError)]
+#[derive(Debug, ThisError)]
 pub enum VuScmiError {
     #[error("Descriptor not found")]
     DescriptorNotFound,
@@ -638,22 +638,24 @@ mod tests {
         // Have only one descriptor, expected two.
         let parameters = vec![&default];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedDescriptorCount(1)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedDescriptorCount(1) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Have three descriptors, expected two.
         let parameters = vec![&default, &default, &default];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedDescriptorCount(3)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedDescriptorCount(3) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Write only descriptors.
         let p = DescParameters {
@@ -663,12 +665,13 @@ mod tests {
         };
         let parameters = vec![&p, &p];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedWriteOnlyDescriptor(0)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedWriteOnlyDescriptor(0) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Invalid request address.
         let parameters = vec![
@@ -684,12 +687,13 @@ mod tests {
             },
         ];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::DescriptorReadFailed
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::DescriptorReadFailed => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Invalid request length (very small).
         let parameters = vec![
@@ -705,30 +709,33 @@ mod tests {
             },
         ];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedMinimumDescriptorSize(4, 2)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedMinimumDescriptorSize(4, 2) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Invalid request length (too small).
         let desc_chain = build_cmd_desc_chain(0x10, 0x2, vec![]);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedDescriptorSize(8, 4)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedDescriptorSize(8, 4) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Invalid request length (too large).
         let desc_chain = build_cmd_desc_chain(0x10, 0x0, vec![0]);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedDescriptorSize(4, 8)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedDescriptorSize(4, 8) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Read only descriptors.
         let p = DescParameters {
@@ -738,12 +745,13 @@ mod tests {
         };
         let parameters = vec![&p, &p];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedReadableDescriptor(1)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedReadableDescriptor(1) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Invalid response address.
         let parameters = vec![
@@ -759,12 +767,13 @@ mod tests {
             },
         ];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::DescriptorWriteFailed
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::DescriptorWriteFailed => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Invalid response length.
         let parameters = vec![
@@ -780,12 +789,13 @@ mod tests {
             },
         ];
         let desc_chain = build_dummy_desc_chain(parameters);
-        assert_eq!(
-            backend
-                .process_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::InsufficientDescriptorSize(8, 6)
-        );
+        match backend
+            .process_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::InsufficientDescriptorSize(8, 6) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
     }
 
     #[test]
@@ -832,12 +842,13 @@ mod tests {
             len: 0,
         };
         let desc_chain = build_dummy_desc_chain(vec![&p, &p]);
-        assert_eq!(
-            backend
-                .process_event_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedDescriptorCount(2)
-        );
+        match backend
+            .process_event_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedDescriptorCount(2) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
 
         // Read only descriptor
         let p = DescParameters {
@@ -846,12 +857,13 @@ mod tests {
             len: 0,
         };
         let desc_chain = build_dummy_desc_chain(vec![&p]);
-        assert_eq!(
-            backend
-                .process_event_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            VuScmiError::UnexpectedReadableDescriptor(0)
-        );
+        match backend
+            .process_event_requests(vec![desc_chain], &vring)
+            .unwrap_err()
+        {
+            VuScmiError::UnexpectedReadableDescriptor(0) => (),
+            other => panic!("Unexpected result: {:?}", other),
+        }
     }
 
     #[test]

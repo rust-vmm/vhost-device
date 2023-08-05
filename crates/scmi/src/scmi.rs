@@ -8,7 +8,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use thiserror::Error as ThisError;
 
 use crate::devices::common::DeviceError;
@@ -218,7 +218,25 @@ pub const SENSOR_CONFIG_GET: MessageId = 0x9;
 pub const SENSOR_CONFIG_SET: MessageId = 0xA;
 pub const SENSOR_CONTINUOUS_UPDATE_NOTIFY: MessageId = 0xB;
 
+#[allow(dead_code)]
+pub const SENSOR_UNIT_NONE: u8 = 0;
 pub const SENSOR_UNIT_UNSPECIFIED: u8 = 1;
+pub const SENSOR_UNIT_DEGREES_C: u8 = 2;
+pub const SENSOR_UNIT_VOLTS: u8 = 5;
+pub const SENSOR_UNIT_AMPS: u8 = 6;
+pub const SENSOR_UNIT_WATTS: u8 = 7;
+pub const SENSOR_UNIT_JOULS: u8 = 8;
+pub const SENSOR_UNIT_LUX: u8 = 13;
+pub const SENSOR_UNIT_METERS: u8 = 31;
+pub const SENSOR_UNIT_RADIANS: u8 = 36;
+pub const SENSOR_UNIT_GAUSS: u8 = 45;
+pub const SENSOR_UNIT_FARADS: u8 = 48;
+pub const SENSOR_UNIT_OHMS: u8 = 49;
+pub const SENSOR_UNIT_SIEMENS: u8 = 50;
+pub const SENSOR_UNIT_PERCENTAGE: u8 = 65;
+pub const SENSOR_UNIT_PASCALS: u8 = 66;
+pub const SENSOR_UNIT_RADIANS_PER_SECOND: u8 = 87;
+pub const SENSOR_UNIT_METERS_PER_SECOND: u8 = 90;
 pub const SENSOR_UNIT_METERS_PER_SECOND_SQUARED: u8 = 89;
 
 enum ParameterType {
@@ -475,6 +493,8 @@ impl HandlerMap {
 
 #[derive(Debug, PartialEq, Eq, ThisError)]
 pub enum ScmiDeviceError {
+    #[error("Generic error")]
+    GenericError,
     #[error("Invalid parameters")]
     InvalidParameters,
     #[error("No such device")]
@@ -658,6 +678,10 @@ impl ScmiHandler {
                 ScmiDeviceError::UnsupportedRequest => {
                     info!("Unsupported request for {}", device_index);
                     Response::from(ReturnStatus::NotSupported)
+                }
+                ScmiDeviceError::GenericError => {
+                    warn!("Device error in {}", device_index);
+                    Response::from(ReturnStatus::GenericError)
                 }
             },
         }

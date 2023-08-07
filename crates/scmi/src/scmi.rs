@@ -870,7 +870,7 @@ mod tests {
         let mut handler = ScmiHandler::new();
         for i in 0..2 {
             let properties = DeviceProperties::new(vec![("name".to_owned(), format!("fake{i}"))]);
-            let fake_sensor = FakeSensor::new(&properties).unwrap();
+            let fake_sensor = FakeSensor::new_device(&properties).unwrap();
             handler.register_device(fake_sensor);
         }
         handler

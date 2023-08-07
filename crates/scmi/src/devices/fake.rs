@@ -51,8 +51,7 @@ impl SensorT for FakeSensor {
 }
 
 impl FakeSensor {
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(properties: &DeviceProperties) -> MaybeDevice {
+    pub fn new_device(properties: &DeviceProperties) -> MaybeDevice {
         properties.check(&[], &["name"])?;
         let sensor = Sensor::new(properties, "fake");
         let fake_sensor = Self { sensor, value: 0 };

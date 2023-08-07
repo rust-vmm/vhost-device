@@ -128,7 +128,7 @@ pub fn available_devices() -> NameDeviceMapping {
     devices.insert(
         "fake",
         DeviceSpecification::new(
-            fake::FakeSensor::new,
+            fake::FakeSensor::new_device,
             "fake accelerometer",
             "A simple 3-axes sensor providing fake pre-defined values.",
             &["name: an optional name of the sensor, max. 15 characters"],

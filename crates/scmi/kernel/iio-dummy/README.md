@@ -14,6 +14,7 @@ Otherwise, this alternative is provided with the following changes:
 
 - Simplified Makefile for out of tree compilation.
 - The accelerometer has three axes instead of just one.
+- The Y axis of the accelerometer has offset and scale.
 
 Of course, you can modified it further for your liking if needed.
 

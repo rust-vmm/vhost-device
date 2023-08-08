@@ -16,6 +16,7 @@
  *
  * - Dropped conditional parts.
  * - Use 3 axes in the accelerometer device.
+ * - Define offset and scale for some of the accelerometer axes.
  */
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -184,6 +185,9 @@ static const struct iio_chan_spec iio_dummy_channels[] = {
 		/* Channel 2 is use for modifiers */
 		.channel2 = IIO_MOD_Y,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
+		BIT(IIO_CHAN_INFO_RAW) |
+		BIT(IIO_CHAN_INFO_OFFSET) |
+		BIT(IIO_CHAN_INFO_SCALE) |
 		BIT(IIO_CHAN_INFO_CALIBSCALE) |
 		BIT(IIO_CHAN_INFO_CALIBBIAS),
 		.info_mask_shared_by_dir = BIT(IIO_CHAN_INFO_SAMP_FREQ),
@@ -352,6 +356,15 @@ static int iio_dummy_read_raw(struct iio_dev *indio_dev,
 				*val2 = 1344;
 				ret = IIO_VAL_INT_PLUS_NANO;
 			}
+                        break;
+		case IIO_ACCEL:
+			switch(chan->scan_index) {
+			case DUMMY_INDEX_ACCEL_Y:
+                        	*val = 0;
+				*val2 = 1344;
+				break;
+			}
+			ret = IIO_VAL_INT_PLUS_MICRO;
 			break;
 		default:
 			break;

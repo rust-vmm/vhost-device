@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Based on https://github.com/rust-vmm/vhost-device, Copyright by Linaro Ltd.
 
+//! General part of the vhost-user SCMI backend.  Nothing very different from
+//! the other rust-vmm backends.
+
 use log::{debug, error, warn};
 use std::io;
 use std::io::Result as IoResult;
@@ -82,14 +85,14 @@ pub struct VuScmiBackend {
     event_idx: bool,
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    // Event vring and descriptors serve for asynchronous responses and notifications.
-    // They are obtained from the driver and we store them here for later use.
-    // (We currently don't implement asynchronous responses or notifications but we support
-    // the event queue because the Linux VIRTIO SCMI driver seems to be unhappy if it is not
-    // present. And it doesn't harm to be ready for possible event queue use in future.)
+    /// Event vring and descriptors serve for asynchronous responses and notifications.
+    /// They are obtained from the driver and we store them here for later use.
+    /// (We currently don't implement asynchronous responses or notifications but we support
+    /// the event queue because the Linux VIRTIO SCMI driver seems to be unhappy if it is not
+    /// present. And it doesn't harm to be ready for possible event queue use in future.)
     event_vring: Option<VringRwLock>,
     event_descriptors: Vec<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
-    // The abstraction of request handling, with all the needed information stored inside.
+    /// The abstraction of request handling, with all the needed information stored inside.
     scmi_handler: ScmiHandler,
 }
 

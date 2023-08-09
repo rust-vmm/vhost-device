@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-// Industrial I/O sensors
+//! Industrial I/O (IIO) sensors bindings.
+//!
+//! Basic functionality for exposing `/sys/bus/iio/devices/` stuff as guest
+//! SCMI devices.  Only some typical cases are supported.  If you want more
+//! functionality, you must enhance the implementation here.
+//!
+//! For some entry points, see [IIOSensor] and [Axis].
 
 use std::cmp::{max, min};
 use std::ffi::{OsStr, OsString};
@@ -16,14 +22,30 @@ use crate::scmi::{self, DeviceResult, MessageValue, ScmiDeviceError, MAX_SIMPLE_
 
 use super::common::{DeviceError, DeviceProperties, MaybeDevice, Sensor, SensorDevice, SensorT};
 
+/// Information about units used by the given Linux IIO channel.
 struct UnitMapping<'a> {
+    /// IIO sysfs channel prefix, e.g. "in_accel".
     channel: &'a str,
+    /// One of the SCMI unit constants from [crate::scmi] (enum is not used to
+    /// avoid type conversions everywhere).
     unit: u8,
+    /// Decadic exponent to be used to convert the given unit to the SCMI unit.
+    /// For example, the exponent is 0 for no conversion, -3 to convert
+    /// milliamps here to amps in SCMI, or 3 to convert kilopascals here to
+    /// pascals in SCMI.
     unit_exponent: i8, // max. 5 bits actually
 }
 
-// Incomplete, just a sample.
-// TODO: Make some macro(s) for this.
+/// Specification of IIO channel units.
+///
+/// Based on
+/// <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/Documentation/ABI/testing/sysfs-bus-iio>.
+/// Not everything from there is present -- channels here with more complicated
+/// unit transformations (beyond using a decadic exponent; e.g. degrees to
+/// radians or units not defined in SCMI) are omitted.  If an IIO channel
+/// doesn't have unit specification here, it can be still used by the unit
+/// reported in SCMI will be [crate::scmi::SENSOR_UNIT_UNSPECIFIED].
+// TODO: Make some macro(s) for this?
 const UNIT_MAPPING: &[UnitMapping] = &[
     UnitMapping {
         channel: "in_accel",
@@ -137,23 +159,46 @@ const UNIT_MAPPING: &[UnitMapping] = &[
     },
 ];
 
+/// Representation of an IIO channel axis.
+///
+/// Used also for scalar values.
 #[derive(PartialEq, Debug)]
 struct Axis {
+    /// Full sysfs path to the axis value file stripped of "_raw".
     path: OsString, // without "_raw" suffix
+    /// Axis unit exponent, see [UnitMapping::unit_exponent] and [UNIT_MAPPING].
     unit_exponent: i8,
+    /// Additional exponent to apply to the axis values.  It is computed from
+    /// the axis value scaling (see [IIOSensor::custom_exponent] to provide a
+    /// sufficiently accurate SCMI value that is represented by an integer (not
+    /// a float) + decadic exponent.
     custom_exponent: i8,
 }
 
+/// Particular IIO sensor specification.
+///
+/// An IIO sensor is specified by an IIO sysfs device directory and a channel
+/// prefix within the directory (i.e. more devices can be defined for a single
+/// IIO device directory).  All other information about the sensor is retrieved
+/// from the device directory and from [UNIT_MAPPING].
 #[derive(Debug)]
-pub(crate) struct IIOSensor {
+pub struct IIOSensor {
+    /// Common sensor instance.
     sensor: Sensor,
-    // Full /sys path to the device directory
+    /// Full sysfs path to the device directory.
+    ///
+    /// Provided by the user.
     path: OsString,
-    // Prefix of the device type in the device directory, e.g. "in_accel"
+    /// Prefix of the device type in the device directory, e.g. "in_accel".
+    ///
+    /// Provided by the user.
     channel: OsString,
-    // Whether the sensor is scalar or has one or more axes
+    /// Whether the sensor is scalar or has one or more axes.
+    ///
+    /// Determined automatically by looking for presence of `*_[xyz]_raw` files
+    /// with the given channel prefix.
     scalar: bool,
-    // Paths to "_raw" files
+    /// Axes descriptions, see [Axis] for more details.
     axes: Vec<Axis>,
 }
 
@@ -282,10 +327,10 @@ fn read_number_from_file<F: FromStr>(path: &Path) -> Result<Option<F>, ScmiDevic
 
 impl IIOSensor {
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(properties: &DeviceProperties) -> Result<IIOSensor, DeviceError> {
+    pub fn new(properties: &DeviceProperties) -> Result<Self, DeviceError> {
         properties.check(&["path", "channel"], &["name"])?;
         let sensor = Sensor::new(properties, "iio");
-        Ok(IIOSensor {
+        Ok(Self {
             sensor,
             path: OsString::from(properties.get("path").unwrap()),
             channel: OsString::from(properties.get("channel").unwrap()),
@@ -295,7 +340,7 @@ impl IIOSensor {
     }
 
     pub fn new_device(properties: &DeviceProperties) -> MaybeDevice {
-        let iio_sensor = IIOSensor::new(properties)?;
+        let iio_sensor = Self::new(properties)?;
         let sensor_device = SensorDevice(Box::new(iio_sensor));
         Ok(Box::new(sensor_device))
     }

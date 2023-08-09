@@ -1,6 +1,14 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+//! Common functionality for SCMI bindings to host devices.
+//!
+//! A new kind of devices can be added in [available_devices] using
+//! [DeviceSpecification::new] calls.
+//!
+//! The module also defines common infrastructure to provide sensor devices to
+//! SCMI, see [SensorT].
+
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write;
@@ -19,6 +27,8 @@ use crate::scmi::{
 
 use super::{fake, iio};
 
+/// Enumeration of vhost-device-scmi exit codes.
+// TODO: It should be better placed elsewhere but it's currently used only here.
 enum ExitCodes {
     Help = 1,
 }
@@ -100,14 +110,36 @@ impl DeviceProperties {
 pub type MaybeDevice = Result<Box<dyn ScmiDevice>, DeviceError>;
 type DeviceConstructor = fn(&DeviceProperties) -> MaybeDevice;
 
+/// Definition of a device kind.
+///
+/// Use [DeviceSpecification::new] to create it.
 pub struct DeviceSpecification {
+    /// Function to call to create the device.
+    ///
+    /// The device properties are those provided on the command line by the
+    /// user.
     pub(crate) constructor: DeviceConstructor,
+    /// Short description of the device.
+    ///
+    /// Single line, not a complete sentence.
     short_help: String,
+    /// Long description of the device.
+    ///
+    /// Complete sentences, can span multiple lines.
     long_help: String,
+    /// Description of the device parameters available to the user.
+    ///
+    /// Each item in the vector corresponds to a single parameter description
+    /// and should start with the parameter name and a followup colon.
     parameters_help: Vec<String>,
 }
 
 impl DeviceSpecification {
+    /// Creates a new device specification.
+    ///
+    /// See [DeviceSpecification] for the meaning of the arguments.
+    /// The device specification must be used in [available_devices] to
+    /// actually add the device.
     fn new(
         constructor: DeviceConstructor,
         short_help: &str,
@@ -126,8 +158,16 @@ impl DeviceSpecification {
     }
 }
 
+/// Mapping of device identifiers (names) to device specifications.
+///
+/// The string keys correspond to device identifiers specified on the command
+/// line.
 type NameDeviceMapping = HashMap<&'static str, DeviceSpecification>;
 
+/// Creates device mapping and adds all the supported devices to it.
+///
+/// If you want to introduce a new kind of host device bindings, insert a
+/// device identifier + [DeviceSpecification] to [NameDeviceMapping] here.
 pub fn available_devices() -> NameDeviceMapping {
     let mut devices: NameDeviceMapping = HashMap::new();
     devices.insert(
@@ -190,9 +230,17 @@ pub fn print_devices_help() {
 
 // Common sensor infrastructure
 
+/// Basic information about the sensor.
+///
+/// It is typically used as a field in structs implementing sensor devices.
 #[derive(Debug)]
 pub struct Sensor {
+    /// The sensor name (possibly truncated) as reported to the guest.
     pub name: String,
+    /// Whether the sensor is enabled.
+    ///
+    /// Sensors can be enabled and disabled using SCMI.  [Sensor]s created
+    /// using [Sensor::new] are disabled initially.
     enabled: bool,
 }
 
@@ -206,34 +254,92 @@ impl Sensor {
     }
 }
 
+/// Common base that sensor devices can use to simplify their implementation.
+///
+/// To add a new kind of sensor bindings, you must implement
+/// [crate::scmi::ScmiDevice], define [DeviceSpecification] and add it to
+/// [NameDeviceMapping] created in [available_devices].  You can do it fully
+/// yourself or use this trait to simplify the implementation.
+///
+/// The trait is typically used as follows:
+///
+/// ```rust
+/// struct MySensor {
+///     sensor: Sensor,
+///     // other fields as needed
+/// }
+///
+/// impl SensorT for MySensor {
+///     // provide trait functions implementation as needed
+/// }
+///
+/// impl MySensor {
+///     pub fn new_device(properties: &DeviceProperties) -> MaybeDevice {
+///         check_device_properties(properties, &[], &["name"])?;
+///         let sensor = Sensor::new(properties, "mydevice");
+///         let my_sensor = MySensor { sensor };
+///         let sensor_device = SensorDevice(Box::new(my_sensor));
+///         Ok(Box::new(sensor_device))
+///     }
+/// }
+/// ```
+///
+/// See [crate::devices::fake::FakeSensor] implementation for an example.
 pub trait SensorT: Send {
+    /// Returns the inner [Sensor] instance, immutable.
     fn sensor(&self) -> &Sensor;
+    /// Returns the inner [Sensor] instance, mutable.
     fn sensor_mut(&mut self) -> &mut Sensor;
 
+    /// Performs any non-default initialization on the sensor.
+    ///
+    /// If the initialization fails, a corresponding error message is
+    /// returned.
     fn initialize(&mut self) -> Result<(), DeviceError> {
         Ok(())
     }
 
+    /// Returns the id of the SCMI protocol used to communicate with the
+    /// sensor.
+    ///
+    /// Usually no need to redefine this.
     fn protocol(&self) -> ProtocolId {
         SENSOR_PROTOCOL_ID
     }
 
+    /// Returns an error message about invalid property `name`.
+    ///
+    /// Usually no need to redefine this.
     fn invalid_property(&self, name: &str) -> Result<(), DeviceError> {
         Result::Err(DeviceError::InvalidProperty(name.to_owned()))
     }
 
+    /// Processes a device property specified on the command line.
+    ///
+    /// The function is called on all the device properties from the command line.
     fn process_property(&mut self, name: &str, _value: &str) -> Result<(), DeviceError> {
         self.invalid_property(name)
     }
 
+    /// Returns the number of axes of the given sensor.
+    ///
+    /// If the sensor provides just a scalar value, 0 must be returned (the
+    /// default return value here).  Otherwise a non-zero value must be
+    /// returned, even for vector sensors with a single access.
     fn number_of_axes(&self) -> u32 {
         0
     }
 
+    /// Formats the unit of the given `axis` for SCMI protocol.
+    ///
+    /// Usually no need to redefine this.
     fn format_unit(&self, axis: u32) -> u32 {
         (self.unit_exponent(axis) as u32 & 0x1F) << 11 | u32::from(self.unit())
     }
 
+    /// Returns SCMI description of the sensor.
+    ///
+    /// Usually no need to redefine this.
     fn description_get(&self) -> DeviceResult {
         // Continuous update required by Linux SCMI IIO driver
         let low = 1 << 30;
@@ -255,18 +361,26 @@ pub trait SensorT: Send {
         Ok(values)
     }
 
+    /// Returns the SCMI unit of the sensor.
     fn unit(&self) -> u8 {
         scmi::SENSOR_UNIT_UNSPECIFIED
     }
 
+    /// Returns the decadic exponent to apply to the sensor values.
     fn unit_exponent(&self, _axis: u32) -> i8 {
         0
     }
 
+    /// Returns the prefix of axes names.
+    ///
+    /// Usually no need to redefine this.
     fn axis_name_prefix(&self) -> String {
         "axis".to_owned()
     }
 
+    /// Returns the suffix of the given axis.
+    ///
+    /// Usually no need to redefine this.
     fn axis_name_suffix(&self, axis: u32) -> char {
         match axis {
             0 => 'X',
@@ -276,6 +390,9 @@ pub trait SensorT: Send {
         }
     }
 
+    /// Returns the SCMI description of the given axis.
+    ///
+    /// Usually no need to redefine this.
     fn axis_description(&self, axis: u32) -> Vec<MessageValue> {
         let mut values = vec![];
         values.push(MessageValue::Unsigned(axis)); // axis id
@@ -292,11 +409,19 @@ pub trait SensorT: Send {
         values
     }
 
+    /// Returns the SCMI configuration of the sensor.
+    ///
+    /// The default implementation here returns just whether the sensor is
+    /// enabled or not.
     fn config_get(&self) -> DeviceResult {
         let config = u32::from(self.sensor().enabled);
         Ok(vec![MessageValue::Unsigned(config)])
     }
 
+    /// Processes the SCMI configuration of the sensor.
+    ///
+    /// The default implementation here permits and implements only enabling
+    /// and disabling the sensor.
     fn config_set(&mut self, config: u32) -> DeviceResult {
         if config & 0xFFFFFFFE != 0 {
             return Result::Err(ScmiDeviceError::UnsupportedRequest);
@@ -306,8 +431,19 @@ pub trait SensorT: Send {
         Ok(vec![])
     }
 
+    /// Returns SCMI reading of the sensor values.
+    ///
+    /// It is a sequence of [MessageValue::Unsigned] values, 4 of them for each
+    /// sensor axis.  See the SCMI standard for the exact specification of the
+    /// result.
     fn reading_get(&mut self) -> DeviceResult;
 
+    /// Handles the given protocol message with the given parameters.
+    ///
+    /// Usually no need to redefine this, unless more than the basic
+    /// functionality is needed, in which case it would be probably better to
+    /// enhance this trait with additional functions and improved
+    /// implementation.
     fn handle(&mut self, message_id: MessageId, parameters: &[MessageValue]) -> DeviceResult {
         match message_id {
             SENSOR_DESCRIPTION_GET => self.description_get(),

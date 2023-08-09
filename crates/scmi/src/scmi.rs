@@ -1,6 +1,15 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+//! Implementation of SCMI and some of its protocols.
+//!
+//! This module implements SCMI infrastructure and some of the SCMI protocols.
+//! See [HandlerMap::new] how to add support for another SCMI protocol or to add
+//! more functionality to an already implemented SCMI protocol.
+//!
+//! If you want to add new devices (e.g. SCMI bindings to some kinds of host
+//! devices), see [crate::devices] modules.
+
 use std::{
     cmp::min,
     collections::HashMap,
@@ -17,6 +26,9 @@ pub type MessageHeader = u32;
 
 pub const MAX_SIMPLE_STRING_LENGTH: usize = 16; // incl. NULL terminator
 
+/// Wrapper around SCMI values of the basic types SCMI defines.
+///
+/// Everything communicating to/from SCMI must be composed of them.
 // SCMI specification talks about Le32 parameter and return values.
 // VirtIO SCMI specification talks about u8 SCMI values.
 // Let's stick with SCMI specification for implementation simplicity.
@@ -38,6 +50,9 @@ impl MessageValue {
 
 pub type MessageValues = Vec<MessageValue>;
 
+/// Enumeration of SCMI message types, mapped to the corresponding SCMI codes.
+///
+/// The only one we currently support is [MessageType::Command].
 #[derive(Debug, PartialEq)]
 enum MessageType {
     // 4-bit unsigned integer
@@ -48,6 +63,7 @@ pub type MessageId = u8;
 pub type ProtocolId = u8;
 type NParameters = u8;
 
+/// Mapping of return values to SCMI return status codes.
 #[derive(Clone, Copy)]
 // Not all the codes are currently used but let's have a complete return status
 // enumeration from the SCMI specification here.
@@ -75,6 +91,11 @@ impl ReturnStatus {
     }
 }
 
+/// Representation of [MessageValue] sequence used to construct [ScmiResponse].
+///
+/// The sequence includes the response code (see the helper constructors for
+/// adding them) but it doesn't include the SCMI message header.  The header is
+/// added in [ScmiResponse].
 struct Response {
     values: MessageValues,
 }
@@ -105,6 +126,9 @@ impl From<&MessageValues> for Response {
     }
 }
 
+/// SCMI response in SCMI representation byte.
+///
+/// Use [ScmiResponse::from] function to construct it.
 #[derive(Debug)]
 pub struct ScmiResponse {
     header: MessageHeader,
@@ -112,6 +136,8 @@ pub struct ScmiResponse {
 }
 
 impl ScmiResponse {
+    /// Creates [ScmiResponse] instance from the (unchanged) SCMI request
+    /// `header` and a [Response] composed of [MessageValue]s.
     fn from(header: MessageHeader, response: Response) -> Self {
         debug!("response arguments: {:?}", response.values);
         let mut ret_bytes: Vec<u8> = vec![];
@@ -155,6 +181,10 @@ impl ScmiResponse {
     }
 }
 
+/// Representation of a parsed SCMI request.
+///
+/// Use [ScmiRequest::get_unsigned] and [ScmiRequest::get_usize] functions to
+/// retrieve its parameters as `u32` and `usize` values respectively.
 pub struct ScmiRequest {
     header: MessageHeader,     // 32-bit unsigned integer, split below:
     message_id: MessageId,     // bits 7:0
@@ -246,12 +276,20 @@ enum ParameterType {
 type ParameterSpecification = Vec<ParameterType>;
 
 type HandlerFunction = fn(&ScmiHandler, &ScmiRequest) -> Response;
+
+/// Specification of an SCMI message handler.
+///
+/// No need to create this directly, use [HandlerMap::bind] to add message
+/// handlers.
 struct HandlerInfo {
     name: String,
     parameters: ParameterSpecification,
     function: HandlerFunction,
 }
 
+/// Mapping of SCMI protocols and messages to handlers.
+///
+/// See [HandlerMap::new] and [HandlerMap::bind] how to add new handlers.
 // HandlerMap layout is suboptimal but let's prefer simplicity for now.
 struct HandlerMap(HashMap<(ProtocolId, MessageId), HandlerInfo>);
 
@@ -271,6 +309,13 @@ impl HandlerMap {
         self.0.get(&(protocol_id, message_id))
     }
 
+    /// Add a handler for a SCMI protocol message.
+    ///
+    /// `protocol_id` & `message_id` specify the corresponding SCMI protocol
+    /// and message codes identifying the request to handle using `function`.
+    /// Expected SCMI parameters (unsigned or signed 32-bit integers) are
+    /// specified in `parameters`.  `name` serves just for identifying the
+    /// handlers easily in logs and error messages.
     fn bind(
         &mut self,
         protocol_id: ProtocolId,
@@ -295,6 +340,7 @@ impl HandlerMap {
         );
     }
 
+    /// Adds SCMI base protocol handlers.
     fn make_base_handlers(&mut self) {
         self.bind(
             BASE_PROTOCOL_ID,
@@ -353,6 +399,7 @@ impl HandlerMap {
         );
     }
 
+    /// Adds SCMI sensor protocol handlers.
     fn make_sensor_handlers(&mut self) {
         self.bind(
             SENSOR_PROTOCOL_ID,
@@ -505,9 +552,24 @@ pub enum ScmiDeviceError {
     UnsupportedRequest,
 }
 
+/// The highest representation of an SCMI device.
+///
+/// A device is an entity bound to a SCMI protocol that can take an SCMI
+/// message id and parameters and respond with [MessageValue]s.  See
+/// [crate::devices] how devices are defined and created.
 pub trait ScmiDevice: Send {
+    /// Initializes the device (if needed).
+    ///
+    /// If any error occurs preventing the operation of the device, a
+    /// corresponding error message must be returned.
     fn initialize(&mut self) -> Result<(), DeviceError>;
+    /// Returns the SCMI protocol id that the device is attached to.
     fn protocol(&self) -> ProtocolId;
+    /// Handles an SCMI request.
+    ///
+    /// `message_id` is an SCMI message id from the
+    /// given SCMI protocol and `parameters` are the SCMI request parameters
+    /// already represented as [MessageValue]s.
     fn handle(
         &mut self,
         message_id: MessageId,
@@ -517,6 +579,7 @@ pub trait ScmiDevice: Send {
 
 type DeviceList = Vec<Box<dyn ScmiDevice>>;
 
+/// Mapping of SCMI protocols to devices that can handle them.
 struct DeviceMap(Arc<Mutex<HashMap<ProtocolId, DeviceList>>>);
 
 impl DeviceMap {
@@ -572,6 +635,13 @@ pub struct ScmiHandler {
 }
 
 impl ScmiHandler {
+    /// Creates an instance for handling SCMI requests.
+    ///
+    /// The function also defines handlers for particular SCMI protocols.
+    /// It creates a [HandlerMap] and then adds SCMI message handlers to
+    /// it using [HandlerMap::bind] function.  This is the place (i.e. the
+    /// functions called from here) where to add bindings for SCMI protocols and
+    /// messages.
     pub fn new() -> Self {
         Self {
             handlers: HandlerMap::new(),

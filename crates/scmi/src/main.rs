@@ -2,6 +2,36 @@
 // SPDX-License-Identifier: Apache-2.0
 // Based on implementation of other devices here, Copyright by Linaro Ltd.
 
+//! vhost-user daemon implementation for
+//! [System Control and Management Interface](https://developer.arm.com/Architectures/System%20Control%20and%20Management%20Interface)
+//! (SCMI).
+//!
+//! Currently, the mandatory parts of the following SCMI protocols are implemented:
+//!
+//! - base
+//! - sensor management
+//!
+//! As for sensor management, support for industrial I/O (IIO) Linux devices
+//! and a fake sensor device is implemented.
+//!
+//! The daemon listens on a socket that is specified using `--socket-path`
+//! command line option.  Usually at least one exposed device is specified,
+//! which is done using `--device` command line option.  It can be used more
+//! than once, for different devices.  `--device help` lists the available
+//! devices and their options.
+//!
+//! The daemon normally logs info and higher messages to the standard error
+//! output.  To log more messages, you can set `RUST_LOG` environment variable,
+//! e.g. to `debug`.
+//!
+//! Here is an example command line invocation of the daemon:
+//!
+//! ```sh
+//! RUST_LOG=debug vhost-device-scmi \
+//!   --socket ~/tmp/scmi.sock \
+//!   --device iio,path=/sys/bus/iio/devices/iio:device0,channel=in_accel
+//! ```
+
 mod devices;
 mod scmi;
 mod vhu_scmi;

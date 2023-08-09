@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: Red Hat, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-// Fake sensor
+//! Fake sensor implementation.
+//!
+//! The fake sensor is completely implemented here rather than bound to a host
+//! device.  It emulates a dummy accelerometer device that increments an axis
+//! reading value on each its retrieval.  Useful for initial testing and
+//! arranging SCMI virtualization setup without the need to bind real host
+//! devices.
 
 use crate::scmi::{self, DeviceResult, MessageValue};
 

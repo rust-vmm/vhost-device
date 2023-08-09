@@ -67,6 +67,9 @@ The currently supported SCMI protocols are:
 Basically only the mandatory and necessary parts of the protocols are
 implemented.
 
+See source code (`scmi` crate) documentation for details and how to
+add more protocols, host device bindings or other functionality.
+
 ## Kernel support for testing
 
 `kernel` subdirectory contains

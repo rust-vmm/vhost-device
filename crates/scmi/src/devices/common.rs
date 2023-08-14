@@ -12,7 +12,6 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write;
-use std::process::exit;
 
 use itertools::Itertools;
 use log::debug;
@@ -27,12 +26,7 @@ use crate::scmi::{
 
 use super::{fake, iio};
 
-/// Enumeration of vhost-device-scmi exit codes.
-// TODO: It should be better placed elsewhere but it's currently used only here.
-enum ExitCodes {
-    Help = 1,
-}
-
+/// Non-SCMI related device errors.
 #[derive(Debug, ThisError)]
 pub enum DeviceError {
     #[error("{0}")]
@@ -225,7 +219,6 @@ fn devices_help() -> String {
 pub fn print_devices_help() {
     let help = devices_help();
     println!("{}", help);
-    exit(ExitCodes::Help as i32);
 }
 
 // Common sensor infrastructure

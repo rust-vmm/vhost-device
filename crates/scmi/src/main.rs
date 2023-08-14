@@ -17,7 +17,7 @@
 //! The daemon listens on a socket that is specified using `--socket-path`
 //! command line option.  Usually at least one exposed device is specified,
 //! which is done using `--device` command line option.  It can be used more
-//! than once, for different devices.  `--device help` lists the available
+//! than once, for different devices.  `--help-devices` lists the available
 //! devices and their options.
 //!
 //! The daemon normally logs info and higher messages to the standard error
@@ -36,14 +36,14 @@ mod devices;
 mod scmi;
 mod vhu_scmi;
 
-use devices::common::{DeviceDescription, DeviceProperties};
+use devices::common::{print_devices_help, DeviceDescription, DeviceProperties};
 
 use std::{
     process::exit,
     sync::{Arc, RwLock},
 };
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 
@@ -58,16 +58,15 @@ type Result<T> = std::result::Result<T, String>;
 #[derive(Parser)]
 struct ScmiArgs {
     // Location of vhost-user Unix domain socket.
-    #[clap(short, long, help = "vhost-user socket to use")]
-    socket_path: String,
+    // Required, unless one of the --help options is used.
+    #[clap(short, long, help = "vhost-user socket to use (required)")]
+    socket_path: Option<String>,
     // Specification of SCMI devices to create.
-    #[clap(
-        short,
-        long,
-        help = "Devices to expose (use `help' device for more info)"
-    )]
+    #[clap(short, long, help = "Devices to expose")]
     #[arg(num_args(1..))]
     device: Vec<String>,
+    #[clap(long, help = "Print help on available devices")]
+    help_devices: bool,
 }
 
 pub struct VuScmiConfig {
@@ -79,9 +78,12 @@ impl TryFrom<ScmiArgs> for VuScmiConfig {
     type Error = String;
 
     fn try_from(cmd_args: ScmiArgs) -> Result<Self> {
-        let socket_path = cmd_args.socket_path.trim().to_string();
-        let device_iterator = cmd_args.device.iter();
+        if cmd_args.socket_path.is_none() {
+            return Result::Err("Required argument socket-path was not provided".to_string());
+        }
+        let socket_path = cmd_args.socket_path.unwrap().trim().to_string();
         let mut devices: DeviceDescription = vec![];
+        let device_iterator = cmd_args.device.iter();
         for d in device_iterator {
             let mut split = d.split(',');
             let name = split.next().unwrap().to_owned();
@@ -139,18 +141,32 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
     }
 }
 
+fn process_args(args: ScmiArgs) -> Option<ScmiArgs> {
+    if args.help_devices {
+        print_devices_help();
+        None
+    } else {
+        Some(args)
+    }
+}
+
+fn print_help(message: &String) {
+    println!("{message}\n");
+    let mut command = ScmiArgs::command();
+    command.print_help().unwrap();
+}
+
 fn main() {
     env_logger::init();
-    match VuScmiConfig::try_from(ScmiArgs::parse()) {
-        Ok(config) => {
-            if let Err(error) = start_backend(config) {
-                error!("{error}");
-                exit(1);
+    if let Some(args) = process_args(ScmiArgs::parse()) {
+        match VuScmiConfig::try_from(args) {
+            Ok(config) => {
+                if let Err(error) = start_backend(config) {
+                    error!("{error}");
+                    exit(1);
+                }
             }
-        }
-        Err(message) => {
-            println!("{message}");
-            // TODO: print help
+            Err(message) => print_help(&message),
         }
     }
 }
@@ -170,7 +186,7 @@ mod tests {
                      -d fake,name=bar"
         );
         let params: Vec<&str> = params_string.split_whitespace().collect();
-        let args: ScmiArgs = Parser::parse_from(params);
+        let args: ScmiArgs = process_args(Parser::parse_from(params)).unwrap();
         let config = VuScmiConfig::try_from(args).unwrap();
         assert_eq!(config.socket_path, path);
         let devices = vec![
@@ -188,5 +204,20 @@ mod tests {
             ),
         ];
         assert_eq!(config.devices, devices);
+    }
+
+    #[test]
+    fn test_device_help_processing() {
+        let params_string = "binary --help-devices".to_string();
+        let params: Vec<&str> = params_string.split_whitespace().collect();
+        let args: ScmiArgs = Parser::parse_from(params);
+        let processed = process_args(args);
+        assert!(processed.is_none());
+    }
+
+    #[test]
+    fn test_help() {
+        // No way known to me to capture print_help() output from clap.
+        print_help(&String::from("test"));
     }
 }

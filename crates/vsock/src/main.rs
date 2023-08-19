@@ -9,21 +9,25 @@ mod vhu_vsock_thread;
 mod vsock_conn;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     convert::TryFrom,
+    path::Path,
     process::exit,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
     thread,
 };
 
 use crate::vhu_vsock::{CidMap, VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
+use inotify::{EventMask, Inotify, WatchMask};
 use log::{error, info, warn};
 use serde::Deserialize;
 use thiserror::Error as ThisError;
 use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+type JoinHandle = thread::JoinHandle<Result<(), BackendError>>;
 
 const DEFAULT_GUEST_CID: u64 = 3;
 const DEFAULT_TX_BUFFER_SIZE: u32 = 64 * 1024;
@@ -55,6 +59,14 @@ enum BackendError {
     CouldNotCreateBackend(vhu_vsock::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Failed to start config watcher")]
+    FailedToStartConfigWatcher,
+}
+
+#[derive(Debug, ThisError)]
+enum UpdateError {
+    #[error("Could not parse updated config file")]
+    ConfigParse,
 }
 
 #[derive(Args, Clone, Debug)]
@@ -101,6 +113,12 @@ struct ConfigFileVsockParam {
     groups: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CliVsockConfig {
+    vsock_configs: Vec<VsockConfig>,
+    watched_config: Option<String>,
+}
+
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct VsockArgs {
@@ -118,6 +136,11 @@ struct VsockArgs {
     /// Load from a given configuration file
     #[arg(long)]
     config: Option<String>,
+
+    /// Watch the configuration file for changes and update the configuration accordingly at runtime.
+    /// This option is only valid when used with the `config` option.
+    #[arg(long, requires = "config")]
+    watch: bool,
 }
 
 fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
@@ -155,58 +178,74 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
     ))
 }
 
-impl VsockArgs {
-    pub fn parse_config(&self) -> Option<Result<Vec<VsockConfig>, CliError>> {
-        if let Some(c) = &self.config {
-            let b = config::Config::builder()
-                .add_source(config::File::new(c.as_str(), config::FileFormat::Yaml))
-                .build();
-            if let Ok(s) = b {
-                let mut v = s.get::<Vec<ConfigFileVsockParam>>("vms").unwrap();
-                if !v.is_empty() {
-                    let parsed: Vec<VsockConfig> = v
-                        .drain(..)
-                        .map(|p| {
-                            VsockConfig::new(
-                                p.guest_cid.unwrap_or(DEFAULT_GUEST_CID),
-                                p.socket.trim().to_string(),
-                                p.uds_path.trim().to_string(),
-                                p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
-                                p.groups.map_or(vec![DEFAULT_GROUP_NAME.to_string()], |g| {
-                                    g.trim().split('+').map(String::from).collect()
-                                }),
-                            )
-                        })
-                        .collect();
-                    return Some(Ok(parsed));
-                } else {
-                    return Some(Err(CliError::ConfigParse));
-                }
-            } else {
-                return Some(Err(CliError::ConfigParse));
-            }
+pub(crate) fn parse_config(config: &str) -> Result<Vec<VsockConfig>, CliError> {
+    let b = config::Config::builder()
+        .add_source(config::File::new(config, config::FileFormat::Yaml))
+        .build();
+    if let Ok(s) = b {
+        let mut v = s.get::<Vec<ConfigFileVsockParam>>("vms").unwrap();
+        if !v.is_empty() {
+            let parsed: Vec<VsockConfig> = v
+                .drain(..)
+                .map(|p| {
+                    VsockConfig::new(
+                        p.guest_cid.unwrap_or(DEFAULT_GUEST_CID),
+                        p.socket.trim().to_string(),
+                        p.uds_path.trim().to_string(),
+                        p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
+                        p.groups.map_or(vec![DEFAULT_GROUP_NAME.to_string()], |g| {
+                            g.trim().split('+').map(String::from).collect()
+                        }),
+                    )
+                })
+                .collect();
+            Ok(parsed)
+        } else {
+            Err(CliError::ConfigParse)
         }
-        None
+    } else {
+        Err(CliError::ConfigParse)
     }
 }
 
-impl TryFrom<VsockArgs> for Vec<VsockConfig> {
+impl CliVsockConfig {
+    pub fn new(vsock_configs: Vec<VsockConfig>, watched_config: Option<String>) -> Self {
+        Self {
+            vsock_configs,
+            watched_config,
+        }
+    }
+}
+
+impl TryFrom<VsockArgs> for CliVsockConfig {
     type Error = CliError;
 
     fn try_from(cmd_args: VsockArgs) -> Result<Self, CliError> {
         // we try to use the configuration first, if failed,  then fall back to the manual settings.
-        match cmd_args.parse_config() {
-            Some(c) => c,
+        match &cmd_args.config {
+            Some(c) => parse_config(c).map(|v| {
+                Self::new(
+                    v,
+                    if cmd_args.watch {
+                        cmd_args.config
+                    } else {
+                        None
+                    },
+                )
+            }),
             _ => match cmd_args.vm {
-                Some(v) => Ok(v),
+                Some(v) => Ok(Self::new(v, None)),
                 _ => cmd_args.param.map_or(Err(CliError::NoArgsProvided), |p| {
-                    Ok(vec![VsockConfig::new(
-                        p.guest_cid,
-                        p.socket.trim().to_string(),
-                        p.uds_path.trim().to_string(),
-                        p.tx_buffer_size,
-                        p.groups.trim().split('+').map(String::from).collect(),
-                    )])
+                    Ok(CliVsockConfig::new(
+                        vec![VsockConfig::new(
+                            p.guest_cid,
+                            p.socket.trim().to_string(),
+                            p.uds_path.trim().to_string(),
+                            p.tx_buffer_size,
+                            p.groups.trim().split('+').map(String::from).collect(),
+                        )],
+                        None,
+                    ))
                 }),
             },
         }
@@ -215,11 +254,13 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
 
 /// This is the public API through which an external program starts the
 /// vhost-device-vsock backend server.
-pub(crate) fn start_backend_server(
-    config: VsockConfig,
+pub(crate) fn start_backend_server_thread(
+    config: Arc<RwLock<VsockConfig>>,
     cid_map: Arc<RwLock<CidMap>>,
 ) -> Result<(), BackendError> {
     loop {
+        let config = config.read().unwrap().clone();
+
         let backend = Arc::new(
             VhostUserVsockBackend::new(config.clone(), cid_map.clone())
                 .map_err(BackendError::CouldNotCreateBackend)?,
@@ -264,21 +305,93 @@ pub(crate) fn start_backend_server(
     }
 }
 
-pub(crate) fn start_backend_servers(configs: &[VsockConfig]) -> Result<(), BackendError> {
-    let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
-    let mut handles = Vec::new();
+pub(crate) fn start_backend_server(
+    config: &VsockConfig,
+    cid_map: Arc<RwLock<CidMap>>,
+    handles: Arc<Mutex<VecDeque<JoinHandle>>>,
+) {
+    let c = Arc::new(RwLock::new(config.clone()));
+    let guest_cid = config.get_guest_cid();
 
-    for c in configs.iter() {
-        let config = c.clone();
-        let cid_map = cid_map.clone();
-        let handle = thread::Builder::new()
-            .name(format!("vhu-vsock-cid-{}", c.get_guest_cid()))
-            .spawn(move || start_backend_server(config, cid_map))
-            .unwrap();
-        handles.push(handle);
+    let handle = thread::Builder::new()
+        .name(format!("vhu-vsock-cid-{}", guest_cid))
+        .spawn(move || start_backend_server_thread(c, cid_map))
+        .unwrap();
+    handles.lock().unwrap().push_back(handle);
+}
+
+pub(crate) fn update_config(
+    config: &str,
+    cid_map: &Arc<RwLock<CidMap>>,
+    handles: &Arc<Mutex<VecDeque<JoinHandle>>>,
+) -> Result<(), UpdateError> {
+    let vsock_configs = parse_config(config).map_err(|_| UpdateError::ConfigParse)?;
+    for c in vsock_configs.iter() {
+        let guest_cid = c.get_guest_cid();
+        if !cid_map.read().unwrap().contains_key(&guest_cid) {
+            start_backend_server(c, cid_map.clone(), handles.clone());
+        }
     }
 
-    for handle in handles {
+    Ok(())
+}
+
+pub(crate) fn start_config_watcher(
+    cid_map: Arc<RwLock<CidMap>>,
+    handles: Arc<Mutex<VecDeque<JoinHandle>>>,
+    watched_config: String,
+) -> Result<(), BackendError> {
+    let mut inotify = Inotify::init().map_err(|_| BackendError::FailedToStartConfigWatcher)?;
+
+    let watched_config_path = Path::new(&watched_config);
+    let watched_config_file_name = watched_config_path.file_name().unwrap();
+    let watched_config_dir = watched_config_path.parent().unwrap();
+
+    inotify
+        .watches()
+        .add(watched_config_dir, WatchMask::MOVED_TO)
+        .map_err(|_| BackendError::FailedToStartConfigWatcher)?;
+
+    let mut buffer = [0u8; 4096];
+    loop {
+        let events = inotify.read_events_blocking(&mut buffer).unwrap();
+
+        for event in events {
+            if event.mask.contains(EventMask::MOVED_TO) {
+                let dest_file_name = event.name.unwrap();
+                if dest_file_name == watched_config_file_name {
+                    if let Err(e) = update_config(&watched_config, &cid_map, &handles) {
+                        error!("Error updating config: {:?}", e);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn start_backend_servers(cli_vsock_config: &CliVsockConfig) -> Result<(), BackendError> {
+    let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+    let handles = Arc::new(Mutex::new(VecDeque::new()));
+
+    for c in cli_vsock_config.vsock_configs.iter() {
+        start_backend_server(c, cid_map.clone(), handles.clone());
+    }
+
+    if let Some(watched_config) = cli_vsock_config.watched_config.clone() {
+        let handles2 = handles.clone();
+        let handle = thread::Builder::new()
+            .name("vhu-vsock-config-watcher".to_string())
+            .spawn(move || start_config_watcher(cid_map, handles2, watched_config))
+            .unwrap();
+        handles.lock().unwrap().push_back(handle);
+    }
+
+    loop {
+        if handles.lock().unwrap().is_empty() {
+            break;
+        }
+
+        let handle = handles.lock().unwrap().pop_front().unwrap();
         handle.join().unwrap()?;
     }
 
@@ -288,7 +401,7 @@ pub(crate) fn start_backend_servers(configs: &[VsockConfig]) -> Result<(), Backe
 fn main() {
     env_logger::init();
 
-    let configs = match Vec::<VsockConfig>::try_from(VsockArgs::parse()) {
+    let cli_vsock_config = match CliVsockConfig::try_from(VsockArgs::parse()) {
         Ok(c) => c,
         Err(e) => {
             println!("Error parsing arguments: {}", e);
@@ -296,7 +409,7 @@ fn main() {
         }
     };
 
-    if let Err(e) = start_backend_servers(&configs) {
+    if let Err(e) = start_backend_servers(&cli_vsock_config) {
         error!("{e}");
         exit(1);
     }
@@ -327,6 +440,7 @@ mod tests {
                 }),
                 vm: None,
                 config: None,
+                watch: false,
             }
         }
         fn from_file(config: &str) -> Self {
@@ -334,6 +448,7 @@ mod tests {
                 param: None,
                 vm: None,
                 config: Some(config.to_string()),
+                watch: false,
             }
         }
     }
@@ -346,10 +461,10 @@ mod tests {
         let uds_path = test_dir.path().join("vm4.vsock").display().to_string();
         let args = VsockArgs::from_args(3, &socket_path, &uds_path, 64 * 1024, "group1");
 
-        let configs = Vec::<VsockConfig>::try_from(args);
-        assert!(configs.is_ok());
+        let cli_vsock_config = CliVsockConfig::try_from(args);
+        assert!(cli_vsock_config.is_ok());
 
-        let configs = configs.unwrap();
+        let configs = cli_vsock_config.unwrap().vsock_configs;
         assert_eq!(configs.len(), 1);
 
         let config = &configs[0];
@@ -393,10 +508,10 @@ mod tests {
 
         let args = VsockArgs::parse_from(params);
 
-        let configs = Vec::<VsockConfig>::try_from(args);
-        assert!(configs.is_ok());
+        let cli_vsock_config = CliVsockConfig::try_from(args);
+        assert!(cli_vsock_config.is_ok());
 
-        let configs = configs.unwrap();
+        let configs = cli_vsock_config.unwrap().vsock_configs;
         assert_eq!(configs.len(), 3);
 
         let config = configs.get(0).unwrap();
@@ -460,7 +575,7 @@ mod tests {
         .unwrap();
         let args = VsockArgs::from_file(&config_path.display().to_string());
 
-        let configs = Vec::<VsockConfig>::try_from(args).unwrap();
+        let configs = CliVsockConfig::try_from(args).unwrap().vsock_configs;
         assert_eq!(configs.len(), 1);
 
         let config = &configs[0];
@@ -488,7 +603,7 @@ mod tests {
         .unwrap();
         let args = VsockArgs::from_file(&config_path.display().to_string());
 
-        let configs = Vec::<VsockConfig>::try_from(args).unwrap();
+        let configs = CliVsockConfig::try_from(args).unwrap().vsock_configs;
         assert_eq!(configs.len(), 1);
 
         let config = &configs[0];

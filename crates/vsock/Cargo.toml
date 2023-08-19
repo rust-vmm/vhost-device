@@ -30,6 +30,7 @@ vmm-sys-util = "0.11"
 config = "0.13"
 serde = "1"
 serde_yaml = "0.9"
+inotify = "0.10.2"
 
 [dev-dependencies]
 virtio-queue = { version = "0.9", features = ["test-utils"] }

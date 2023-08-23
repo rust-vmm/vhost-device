@@ -19,7 +19,7 @@ clap = { version = "4.3",  features = ["derive"] }
 env_logger = "0.10"
 epoll = "4.3"
 log = "0.4"
-num_enum = "0.6"
+num_enum = "0.7"
 thiserror = "1.0"
 vhost = { version = "0.8", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.10"

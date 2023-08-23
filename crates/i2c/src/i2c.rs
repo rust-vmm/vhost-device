@@ -183,7 +183,7 @@ impl SmbusMsg {
     ///
     /// These smbus related functions try to reverse what Linux does, only
     /// support basic modes (up to word transfer).
-    fn new(reqs: &mut [I2cReq]) -> Result<SmbusMsg> {
+    fn new(reqs: &[I2cReq]) -> Result<SmbusMsg> {
         let mut data = I2cSmbusData {
             block: [0; I2C_SMBUS_BLOCK_MAX + 2],
         };

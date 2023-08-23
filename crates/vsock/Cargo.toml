@@ -7,7 +7,7 @@ repository = "https://github.com/rust-vmm/vhost-device"
 readme = "README.md"
 keywords = ["vhost", "vsock"]
 license = "Apache-2.0 OR BSD-3-Clause"
-edition = "2018"
+edition = "2021"
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]

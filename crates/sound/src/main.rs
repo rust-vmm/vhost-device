@@ -43,6 +43,7 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
+    use rstest::*;
 
     impl SoundArgs {
         fn from_args(socket: &str) -> Self {
@@ -65,21 +66,24 @@ mod tests {
         assert_eq!(config.get_socket_path(), "/tmp/vhost-sound.socket");
     }
 
-    #[test]
+    #[rstest]
     #[serial]
-    fn test_cli_backend_arg() {
+    #[case::null_backend("null", BackendType::Null)]
+    #[case::pipewire("pipewire", BackendType::Pipewire)]
+    #[case::alsa("alsa", BackendType::Alsa)]
+    fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
         let args: SoundArgs = Parser::parse_from([
             "",
             "--socket",
             "/tmp/vhost-sound.socket ",
             "--backend",
-            "null",
+            backend_name,
         ]);
 
         let config = SoundConfig::try_from(args);
         assert!(config.is_ok());
 
         let config = config.unwrap();
-        assert_eq!(config.get_audio_backend(), BackendType::Null);
+        assert_eq!(config.get_audio_backend(), backend);
     }
 }

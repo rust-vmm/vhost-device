@@ -799,3 +799,245 @@ impl V4L2Decoder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use assert_matches::assert_matches;
+    use rstest::*;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::vhu_video::tests::{test_dir, VideoDeviceMock};
+
+    #[rstest]
+    fn test_backend_trait(test_dir: TempDir) {
+        use video::{CmdResponse::*, CmdResponseType::*};
+        // Mock video device, will not answer to requests
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let mut decoder = V4L2Decoder::new(Path::new(&v4l2_device.path)).unwrap();
+        let stream_id = 1;
+        let invalid_stream_id = 2;
+        let resource_id = 1;
+        let queue_type = video::QueueType::OutputQueue;
+        // Create stream
+        assert_matches!(decoder.create_stream(stream_id, 0, 1, 1), Sync(OkNoData));
+        // Only stream_id 1 is retrievable
+        assert_matches!(decoder.stream(&stream_id), Some(stream::Stream { .. }));
+        assert_matches!(decoder.stream_mut(&stream_id), Some(stream::Stream { .. }));
+        assert_matches!(decoder.stream(&invalid_stream_id), None);
+        assert_matches!(decoder.stream_mut(&invalid_stream_id), None);
+        // Check capabilities, control, params
+        assert_matches!(
+            decoder.query_capability(queue_type),
+            Sync(QueryCapability(_))
+        );
+        assert_matches!(
+            decoder.query_control(video::ControlType::Bitrate),
+            Sync(Error(video::CmdError::UnsupportedControl))
+        );
+        let params = video::virtio_video_params {
+            queue_type: <u32 as Into<Le32>>::into(queue_type as u32),
+            ..Default::default()
+        };
+        assert_matches!(
+            decoder.set_params(stream_id, params),
+            Sync(Error(video::CmdError::InvalidParameter))
+        );
+        assert_matches!(
+            decoder.get_params(stream_id, queue_type),
+            Sync(Error(video::CmdError::InvalidParameter))
+        );
+        // Create resource, queue, and dequeue it
+        assert_matches!(
+            decoder.create_resource(stream_id, resource_id, 1, Vec::new(), queue_type),
+            Sync(OkNoData)
+        );
+        assert_matches!(
+            decoder.queue_resource(stream_id, queue_type, resource_id, 0, vec![0]),
+            Sync(Error(video::CmdError::InvalidParameter))
+        );
+        assert_matches!(decoder.dequeue_resource(stream_id, queue_type), None);
+        // End of stream
+        assert_matches!(
+            decoder.clear_queue(stream_id, queue_type),
+            Sync(Error(video::CmdError::InvalidParameter))
+        );
+        assert_matches!(
+            decoder.drain_stream(stream_id),
+            Sync(Error(video::CmdError::InvalidParameter))
+        );
+        assert_matches!(
+            decoder.destroy_resources(stream_id, queue_type),
+            Sync(OkNoData)
+        );
+        // Destroying empty resources list shall not fail
+        assert_matches!(
+            decoder.destroy_resources(stream_id, video::QueueType::InputQueue),
+            Sync(OkNoData)
+        );
+        assert_matches!(decoder.destroy_stream(stream_id), Sync(OkNoData));
+    }
+
+    #[rstest]
+    fn test_backend_trait_errors(test_dir: TempDir) {
+        use video::{CmdResponse::*, CmdResponseType::*};
+        let stream_id = 1;
+        let resource_id = 1;
+        let queue_type = video::QueueType::OutputQueue;
+        let params = video::virtio_video_params {
+            queue_type: <u32 as Into<Le32>>::into(queue_type as u32),
+            ..Default::default()
+        };
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let mut decoder = V4L2Decoder::new(Path::new(&v4l2_device.path)).unwrap();
+        // Invalid memory type, stream not created, other operations shall also fail
+        assert_matches!(
+            decoder.create_stream(stream_id, 2, 2, 1),
+            Sync(Error(video::CmdError::InvalidParameter))
+        );
+        assert_matches!(
+            decoder.set_params(stream_id, params),
+            Sync(Error(video::CmdError::InvalidStreamId))
+        );
+        assert_matches!(
+            decoder.create_resource(stream_id, resource_id, 1, Vec::new(), queue_type),
+            Sync(Error(video::CmdError::InvalidStreamId))
+        );
+        assert_matches!(
+            decoder.queue_resource(stream_id, queue_type, resource_id, 0, vec![0]),
+            Sync(Error(video::CmdError::InvalidStreamId))
+        );
+        assert_matches!(decoder.dequeue_resource(stream_id, queue_type), None);
+        assert_matches!(
+            decoder.clear_queue(stream_id, queue_type),
+            Sync(Error(video::CmdError::InvalidStreamId))
+        );
+        assert_matches!(
+            decoder.drain_stream(stream_id),
+            Sync(Error(video::CmdError::InvalidStreamId))
+        );
+        assert_matches!(
+            decoder.destroy_resources(stream_id, queue_type),
+            Sync(Error(video::CmdError::InvalidStreamId))
+        );
+    }
+
+    #[rstest]
+    fn test_v4l2_backend_helpers(test_dir: TempDir) {
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let decoder = V4L2Decoder::new(Path::new(&v4l2_device.path)).unwrap();
+        let queue_type = v4l2r::QueueType::VideoOutputMplane;
+        let nv12 = u32::from_le(0x3231564e);
+        assert_matches!(
+            V4L2Decoder::get_selection(&decoder.video_device, queue_type),
+            None
+        );
+        let frames = decoder.video_enum_frame_sizes(nv12);
+        assert_eq!(frames.len(), 0);
+        let intervals = decoder.video_enum_frame_intervals(nv12, 640, 640);
+        assert_eq!(intervals.len(), 0);
+    }
+
+    #[rstest]
+    #[case::abgr(PixelFormat::from(b"ABGR"), video::Format::Argb8888)]
+    #[case::nv12(PixelFormat::from(b"NV12"), video::Format::Nv12)]
+    #[case::yu12(PixelFormat::from(b"YU12"), video::Format::Yuv420)]
+    #[case::yv12(PixelFormat::from(b"YV12"), video::Format::Yvu420)]
+    #[case::mpg2(PixelFormat::from(b"MPG2"), video::Format::Mpeg2)]
+    #[case::mpg4(PixelFormat::from(b"MPG4"), video::Format::Mpeg4)]
+    #[case::h264(PixelFormat::from(b"H264"), video::Format::H264)]
+    #[case::hevc(PixelFormat::from(b"HEVC"), video::Format::Hevc)]
+    #[case::vp8(PixelFormat::from(b"VP80"), video::Format::Vp8)]
+    #[case::vp9(PixelFormat::from(b"VP90"), video::Format::Vp9)]
+    #[case::fwht(PixelFormat::from(b"FWHT"), video::Format::Fwht)]
+    fn test_v4l2r_pixelformat_trait(
+        #[case] pixformat: PixelFormat,
+        #[case] video_format: video::Format,
+    ) {
+        let expected: Le32 = (video_format as u32).into();
+        assert_eq!(pixformat.to_virtio(), expected);
+    }
+
+    #[rstest]
+    #[case::output_queue(
+        v4l2r::QueueType::VideoOutputMplane,
+        video::VIRTIO_VIDEO_QUEUE_TYPE_INPUT
+    )]
+    #[case::capture_queue(
+        v4l2r::QueueType::VideoCaptureMplane,
+        video::VIRTIO_VIDEO_QUEUE_TYPE_OUTPUT
+    )]
+    #[case::capture_queue(v4l2r::QueueType::VideoOverlay, 0)]
+    fn test_v4l2r_queuetype_trait(#[case] v4l2r_queue: v4l2r::QueueType, #[case] video_queue: u32) {
+        let expected: Le32 = video_queue.into();
+        assert_eq!(v4l2r_queue.to_virtio(), expected);
+    }
+
+    #[rstest]
+    #[case::output_queue(video::QueueType::InputQueue, v4l2r::QueueType::VideoOutputMplane)]
+    #[case::capture_queue(video::QueueType::OutputQueue, v4l2r::QueueType::VideoCaptureMplane)]
+    fn test_video_queuetype_trait(
+        #[case] video_queue: video::QueueType,
+        #[case] v4l2r_queue: v4l2r::QueueType,
+    ) {
+        assert_eq!(video_queue.to_v4l2(), v4l2r_queue as u32);
+    }
+
+    #[rstest]
+    #[case::bitrate(
+        video::ControlType::Bitrate,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_BITRATE
+    )]
+    #[case::bitrate_peak(
+        video::ControlType::BitratePeak,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_BITRATE_PEAK
+    )]
+    #[case::bitrate_mode(
+        video::ControlType::BitrateMode,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_BITRATE_MODE
+    )]
+    #[case::profile(
+        video::ControlType::Profile,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_H264_PROFILE
+    )]
+    #[case::level(
+        video::ControlType::Level,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_H264_LEVEL
+    )]
+    #[case::force_key_frame(
+        video::ControlType::ForceKeyframe,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME
+    )]
+    #[case::prepend_spspps_to_ids(
+        video::ControlType::PrependSpsPpsToIdr,
+        v4l2r::bindings::V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR
+    )]
+    fn test_video_controltype_trait(
+        #[case] control: video::ControlType,
+        #[case] v4l2r_control: u32,
+    ) {
+        assert_eq!(control.to_v4l2(), v4l2r_control);
+    }
+
+    #[rstest]
+    #[case::error(v4l2r::ioctl::BufferFlags::ERROR, video::BufferFlags::ERR)]
+    #[case::eos(v4l2r::ioctl::BufferFlags::LAST, video::BufferFlags::EOS)]
+    fn test_v4l2r_bufferflags_trait(
+        #[case] v4l2r_flag: v4l2r::ioctl::BufferFlags,
+        #[case] video_flag: video::BufferFlags,
+    ) {
+        let expected: Le32 = video_flag.into();
+        assert_eq!(v4l2r_flag.to_virtio(), expected);
+    }
+
+    #[rstest]
+    #[case(1000, (0, 1))]
+    #[case(367000, (0, 367))]
+    #[case(1000000000, (1, 0))]
+    #[case(1200459000, (1, 200459))]
+    #[case(12000972234, (12, 972))]
+    fn test_timestamp_parser(#[case] timestamp: u64, #[case] result: (i64, i64)) {
+        assert_eq!(process_timestamp(timestamp), result)
+    }
+}

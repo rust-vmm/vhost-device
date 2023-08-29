@@ -371,3 +371,118 @@ impl Stream {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use rstest::*;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::vhu_video::tests::{test_dir, VideoDeviceMock};
+
+    const TEST_PLANES: [ResourcePlane; 1] = [ResourcePlane {
+        offset: 0,
+        address: 0x100,
+        length: 1024,
+    }];
+    const INVALID_MEM_TYPE: u32 = (MemoryType::VirtioObject as u32) + 1;
+    const INVALID_FORMAT: u32 = (Format::Fwht as u32) + 1;
+
+    #[rstest]
+    fn test_video_stream(test_dir: TempDir) {
+        let stream_id: u32 = 1;
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let resource_id: u32 = 1;
+        let mut stream = Stream::new(
+            stream_id,
+            Path::new(&v4l2_device.path),
+            MemoryType::GuestPages as u32,
+            MemoryType::VirtioObject as u32,
+            Format::Fwht as u32,
+        )
+        .expect("Failed to create stream");
+        assert_matches!(stream.memory(QueueType::InputQueue), MemoryType::GuestPages);
+        assert_matches!(
+            stream.memory(QueueType::OutputQueue),
+            MemoryType::VirtioObject
+        );
+
+        // Add resource
+        let planes_layout = 0;
+        let res = stream.add_resource(
+            resource_id,
+            planes_layout,
+            Vec::from(TEST_PLANES),
+            QueueType::InputQueue,
+        );
+        assert!(res.is_none());
+        // Resource is retrievable
+        {
+            let res = stream.find_resource_mut(resource_id, QueueType::InputQueue);
+            assert!(res.is_some());
+            let res = res.unwrap();
+            assert_eq!(res.planes_layout, planes_layout);
+            assert_eq!(res.queue_type, QueueType::InputQueue);
+            assert_eq!(res.state(), ResourceState::Created);
+            // Query resource
+            res.set_queried();
+        }
+        assert!(stream.all_resources_state(QueueType::InputQueue, ResourceState::Queried));
+        {
+            let res = stream
+                .find_resource_mut(resource_id, QueueType::InputQueue)
+                .unwrap();
+            // Queue resource
+            res.set_queued();
+        }
+        // Start streaming
+        assert!(!stream.is_queue_streaming(QueueType::InputQueue));
+        stream.set_queue_streaming(QueueType::InputQueue);
+        assert!(stream.is_queue_streaming(QueueType::InputQueue));
+        assert!(stream.all_resources_state(QueueType::InputQueue, ResourceState::Queued));
+        // Resource can be found by index
+        assert!(stream
+            .find_resource_mut_by_index(0, QueueType::InputQueue)
+            .is_some());
+        {
+            let res = stream
+                .find_resource_mut(resource_id, QueueType::InputQueue)
+                .unwrap();
+            // Ready up resource
+            res.set_ready();
+        }
+        assert!(stream.all_resources_state(QueueType::InputQueue, ResourceState::Ready));
+        // Clean resources
+        stream.empty_resources(QueueType::InputQueue);
+        assert!(stream.resources_mut(QueueType::InputQueue).is_empty());
+    }
+
+    #[rstest]
+    #[case::invalid_in_mem(
+        INVALID_MEM_TYPE, MemoryType::GuestPages as u32, Format::Fwht as u32)]
+    #[case::invalid_out_mem(
+        MemoryType::VirtioObject as u32, INVALID_MEM_TYPE, Format::Nv12 as u32)]
+    #[case::invalid_format(
+        MemoryType::VirtioObject as u32, MemoryType::VirtioObject as u32, INVALID_FORMAT)]
+    fn test_video_stream_failures(
+        test_dir: TempDir,
+        #[case] in_mem: u32,
+        #[case] out_mem: u32,
+        #[case] format: u32,
+    ) {
+        let stream_id: u32 = 1;
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        assert_matches!(
+            Stream::new(
+                stream_id,
+                Path::new(&v4l2_device.path),
+                in_mem,
+                out_mem,
+                format
+            )
+            .unwrap_err(),
+            VuVideoError::VideoStreamCreate
+        );
+    }
+}

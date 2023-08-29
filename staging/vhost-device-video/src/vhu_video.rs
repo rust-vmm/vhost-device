@@ -260,3 +260,123 @@ impl VhostUserBackendMut<VringRwLock, ()> for VuVideoBackend {
         self.exit_event.try_clone().ok()
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::{fs::File, path::PathBuf};
+
+    use rstest::*;
+    use tempfile::{tempdir, TempDir};
+    use vm_memory::GuestAddress;
+
+    use super::*;
+
+    pub struct VideoDeviceMock {
+        pub path: PathBuf,
+        _dev: File,
+    }
+
+    impl VideoDeviceMock {
+        pub fn new(test_dir: &TempDir) -> Self {
+            let v4l2_device = test_dir.path().join("video.dev");
+            Self {
+                path: v4l2_device.to_owned(),
+                _dev: File::create(v4l2_device.as_path())
+                    .expect("Could not create a test device file."),
+            }
+        }
+    }
+
+    impl Drop for VideoDeviceMock {
+        fn drop(&mut self) {
+            std::fs::remove_file(&self.path).expect("Failed to clean up test device file.");
+        }
+    }
+
+    fn setup_backend_memory(backend: &mut VuVideoBackend) -> [VringRwLock; 2] {
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        let vrings = [
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x2000).unwrap(),
+        ];
+        vrings[0].set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vrings[0].set_queue_ready(true);
+        vrings[1].set_queue_info(0x1100, 0x1200, 0x1300).unwrap();
+        vrings[1].set_queue_ready(true);
+
+        assert!(backend.update_memory(mem).is_ok());
+
+        vrings
+    }
+
+    /// Creates a new test dir. There is no need to clean it after, since Drop
+    /// is implemented for TempDir.
+    #[fixture]
+    pub fn test_dir() -> TempDir {
+        tempdir().expect("Could not create a temp test directory.")
+    }
+
+    #[rstest]
+    fn test_video_backend(test_dir: TempDir) {
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let backend = VuVideoBackend::new(Path::new(&v4l2_device.path), BackendType::Null);
+
+        assert!(backend.is_ok());
+        let mut backend = backend.unwrap();
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_ne!(backend.features(), 0);
+        assert!(!backend.protocol_features().is_empty());
+        backend.set_event_idx(false);
+
+        let vrings = setup_backend_memory(&mut backend);
+
+        let config = backend.get_config(0, 4);
+        assert_eq!(config.len(), 4);
+        let version = u32::from_le_bytes(config.try_into().unwrap());
+        assert_eq!(version, 0);
+
+        let exit = backend.exit_event(0);
+        assert!(exit.is_some());
+        exit.unwrap().write(1).unwrap();
+        for queue in COMMAND_Q..VIDEO_EVENT {
+            // Skip exit event
+            if queue == NUM_QUEUES as u16 {
+                continue;
+            }
+            let ret = backend.handle_event(queue, EventSet::IN, &vrings, 0);
+            assert!(ret.is_ok());
+            assert!(!ret.unwrap());
+        }
+    }
+
+    #[rstest]
+    fn test_video_backend_failures(test_dir: TempDir) {
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let mut backend = VuVideoBackend::new(Path::new(&v4l2_device.path), BackendType::Null)
+            .expect("Could not create backend");
+        let vrings = setup_backend_memory(&mut backend);
+
+        // reading out of the config space, expecting empty config
+        let config = backend.get_config(44, 1);
+        assert_eq!(config.len(), 0);
+
+        assert_eq!(
+            backend
+                .handle_event(COMMAND_Q, EventSet::OUT, &vrings, 0)
+                .unwrap_err()
+                .to_string(),
+            VuVideoError::HandleEventNotEpollIn.to_string()
+        );
+        assert_eq!(
+            backend
+                .handle_event(VIDEO_EVENT + 1, EventSet::IN, &vrings, 0)
+                .unwrap_err()
+                .to_string(),
+            VuVideoError::HandleUnknownEvent.to_string()
+        );
+    }
+}

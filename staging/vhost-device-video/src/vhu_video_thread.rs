@@ -571,3 +571,261 @@ impl VhostUserVideoThread {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use assert_matches::assert_matches;
+    use rstest::*;
+    use tempfile::TempDir;
+    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Queue};
+    use vm_memory::{Address, GuestAddress};
+    use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+    use crate::{
+        vhu_video::{
+            tests::{test_dir, VideoDeviceMock},
+            BackendType,
+        },
+        video::*,
+        video_backends::alloc_video_backend,
+    };
+
+    #[fixture]
+    fn dummy_fd() -> EventFd {
+        EventFd::new(0).expect("Could not create an EventFd.")
+    }
+
+    fn build_cmd_desc_chain(request: &[u8]) -> VideoDescriptorChain {
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
+        let mut next_addr = vq.desc_table().total_size() + 0x100;
+        let mut index = 0;
+        let request_size: u32 = request.len() as u32;
+
+        // Descriptor for the video request
+        let desc_request =
+            Descriptor::new(next_addr, request_size, VRING_DESC_F_NEXT as u16, index + 1);
+        mem.write_slice(request, desc_request.addr()).unwrap();
+        vq.desc_table().store(index, desc_request).unwrap();
+        next_addr += u64::from(desc_request.len());
+        index += 1;
+        // Descriptor for the video response
+        let desc_response = Descriptor::new(next_addr, 0x100, VRING_DESC_F_WRITE as u16, 0);
+        vq.desc_table().store(index, desc_response).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+        // Create descriptor chain
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    #[rstest]
+    fn test_video_poller(dummy_fd: EventFd) {
+        let poller = VideoPoller::new().unwrap();
+        assert!(poller
+            .add(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Write, 1))
+            .is_ok());
+        assert!(poller
+            .modify(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Read, 1))
+            .is_ok());
+
+        // Poller captures a read event.
+        dummy_fd.write(1).unwrap();
+        let mut epoll_events = vec![PollerEvent::default(); 1];
+        let events = poller.wait(epoll_events.as_mut_slice(), 0);
+        assert!(events.is_ok());
+        let events = events.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].have_read);
+
+        assert!(poller.remove(dummy_fd.as_raw_fd()).is_ok());
+        // Poller captures no event, since there is no listener.
+        dummy_fd.write(1).unwrap();
+        let events = poller.wait(epoll_events.as_mut_slice(), 0);
+        assert!(events.is_ok());
+        let events = events.unwrap();
+        assert_eq!(events.len(), 0);
+    }
+
+    #[test]
+    fn test_video_poller_failures() {
+        let poller = VideoPoller::new().unwrap();
+        let invalid_fd: i32 = -1;
+        let mut epoll_events: Vec<PollerEvent> = Vec::new();
+        assert_matches!(
+            poller
+                .add(invalid_fd, PollerEvent::new(EventType::Write, 1))
+                .unwrap_err(),
+            VuVideoError::EpollAdd(_)
+        );
+        assert_matches!(
+            poller
+                .modify(invalid_fd, PollerEvent::new(EventType::Read, 1))
+                .unwrap_err(),
+            VuVideoError::EpollModify(_)
+        );
+        assert_matches!(
+            poller.remove(invalid_fd).unwrap_err(),
+            VuVideoError::EpollRemove(_)
+        );
+        assert_matches!(
+            poller.wait(epoll_events.as_mut_slice(), 1).unwrap_err(),
+            VuVideoError::EpollWait(_)
+        );
+    }
+
+    #[rstest]
+    #[case::get_params(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_GET_PARAMS_EXT.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        ..Default::default()
+    })]
+    #[case::resource_destroy_all(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_DESTROY_ALL.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        ..Default::default()
+    })]
+    #[case::queue_clear(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUEUE_CLEAR.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        ..Default::default()
+    })]
+    #[case::query_capability(virtio_video_query_capability {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CAPABILITY.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        ..Default::default()
+    })]
+    #[case::set_params(virtio_video_set_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_SET_PARAMS_EXT.into(),
+            stream_id: 1.into()
+        },
+        params: virtio_video_params {
+            queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+            ..Default::default()
+        }
+    })]
+    #[case::query_control(virtio_video_query_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: (ControlType::Bitrate as u32).into(),
+        padding: 0.into(),
+        fmt: virtio_video_query_control_format {
+            format: (Format::H264 as u32).into(),
+            padding: 0.into(),
+        },
+    })]
+    #[case::stream_create(virtio_video_stream_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_STREAM_CREATE.into(),
+            stream_id: 1.into()
+        },
+        coded_format: (Format::H264 as u32).into(),
+        ..Default::default()
+    })]
+    #[case::get_control(virtio_video_get_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_GET_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: (ControlType::ForceKeyframe as u32).into(),
+        ..Default::default()
+    })]
+    #[case::stream_destroy(virtio_video_cmd_hdr {
+        type_: VIRTIO_VIDEO_CMD_STREAM_DESTROY.into(),
+        stream_id: 2.into()
+    })]
+    #[case::stream_drain(virtio_video_cmd_hdr {
+        type_: VIRTIO_VIDEO_CMD_STREAM_DRAIN.into(),
+        stream_id: 1.into()
+    })]
+    #[case::resource_queue(virtio_video_resource_queue {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_QUEUE.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        resource_id: 1.into(),
+        ..Default::default()
+    })]
+    fn test_video_thread<T: ByteValued>(test_dir: TempDir, dummy_fd: EventFd, #[case] request: T) {
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let backend = Arc::new(RwLock::new(
+            alloc_video_backend(BackendType::Null, Path::new(&v4l2_device.path)).unwrap(),
+        ));
+        let thread = VhostUserVideoThread::new(backend);
+        assert!(thread.is_ok());
+        let mut thread = thread.unwrap();
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        thread.mem = Some(mem.clone());
+
+        assert!(thread
+            .poller
+            .add(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Read, 1))
+            .is_ok());
+
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        let desc_chains = vec![build_cmd_desc_chain(request.as_slice())];
+        let result = thread.process_requests(desc_chains.clone(), &vring);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        dummy_fd.write(1).unwrap();
+        assert!(thread.process_video_event(&vring).is_ok());
+    }
+
+    #[rstest]
+    fn test_video_thread_mem_fail(test_dir: TempDir) {
+        assert!(alloc_video_backend(BackendType::Null, test_dir.path()).is_err());
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let backend = Arc::new(RwLock::new(
+            alloc_video_backend(BackendType::Null, Path::new(&v4l2_device.path)).unwrap(),
+        ));
+        let thread = VhostUserVideoThread::new(backend);
+        assert!(thread.is_ok());
+        let mut thread = thread.unwrap();
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // Memory is not configured, so processing command queue should fail
+        assert_matches!(
+            thread.process_command_queue(&vring).unwrap_err(),
+            VuVideoError::NoMemoryConfigured
+        );
+    }
+}

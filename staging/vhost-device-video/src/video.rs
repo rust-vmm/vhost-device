@@ -941,3 +941,360 @@ impl ToBytes for virtio_video_event {
         [self.event_type.as_slice(), self.stream_id.as_slice()].concat()
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use assert_matches::assert_matches;
+    use rstest::*;
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
+    use vm_memory::{
+        Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    };
+
+    use super::*;
+    use crate::vhu_video::VideoDescriptorChain;
+
+    fn prepare_video_desc_chain<T: ByteValued>(request: &T) -> VideoDescriptorChain {
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let virt_queue = MockSplitQueue::new(&mem, 16);
+        let addr = virt_queue.desc_table().total_size() + 0x100;
+        let flags = 0;
+
+        let request = request.as_slice();
+        let desc = Descriptor::new(addr, request.len() as u32, flags as u16, 1);
+        mem.write(request, desc.addr()).unwrap();
+        assert!(virt_queue.desc_table().store(0, desc).is_ok());
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, virt_queue.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, virt_queue.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        virt_queue
+            .create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    #[rstest]
+    #[case::query_capability(virtio_video_query_capability {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CAPABILITY.into(),
+            stream_id: 1.into()
+        },
+        queue_type: (QueueType::InputQueue as u32).into(),
+        padding: 0.into()
+    }, VideoCmd::QueryCapability { queue_type: QueueType::InputQueue })]
+    #[case::query_control(virtio_video_query_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: (ControlType::Bitrate as u32).into(),
+        padding: 0.into(),
+        fmt: virtio_video_query_control_format {
+            format: (Format::H264 as u32).into(),
+            padding: 0.into(),
+        },
+    }, VideoCmd::QueryControl { control: ControlType::Bitrate, format: Format::H264 })]
+    #[case::stream_create(virtio_video_stream_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_STREAM_CREATE.into(),
+            stream_id: 1.into()
+        },
+        coded_format: (Format::H264 as u32).into(),
+        ..Default::default()
+    }, VideoCmd::StreamCreate {
+        stream_id: 1,
+        in_memory_type: MemoryType::GuestPages,
+        out_memory_type: MemoryType::GuestPages,
+        coded_format: Format::H264})]
+    #[case::stream_destroy(virtio_video_cmd_hdr {
+        type_: VIRTIO_VIDEO_CMD_STREAM_DESTROY.into(),
+        stream_id: 2.into()
+    }, VideoCmd::StreamDestroy { stream_id: 2 })]
+    #[case::stream_drain(virtio_video_cmd_hdr {
+        type_: VIRTIO_VIDEO_CMD_STREAM_DRAIN.into(),
+        stream_id: 1.into()
+    }, VideoCmd::StreamDrain { stream_id: 1 })]
+    #[case::resource_create(virtio_video_resource_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_CREATE.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        resource_id: 1.into(),
+        ..Default::default()
+    }, VideoCmd::ResourceCreate {
+        stream_id: 1,
+        queue_type: QueueType::InputQueue,
+        resource_id: 1,
+        planes_layout: 0,
+        plane_offsets: Vec::new()})]
+    #[case::resource_queue(virtio_video_resource_queue {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_QUEUE.into(),
+            stream_id: 1.into()
+        },
+        queue_type: VIRTIO_VIDEO_QUEUE_TYPE_INPUT.into(),
+        resource_id: 1.into(),
+        ..Default::default()
+    }, VideoCmd::ResourceQueue {
+        stream_id: 1,
+        queue_type: QueueType::InputQueue,
+        resource_id: 1,
+        timestamp: 0,
+        data_sizes: Vec::new()})]
+    #[case::resource_destroy_all(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_DESTROY_ALL.into(),
+            stream_id: 1.into()
+        },
+        queue_type: (QueueType::InputQueue as u32).into(),
+        padding: 0.into()
+    }, VideoCmd::ResourceDestroyAll { stream_id: 1, queue_type: QueueType::InputQueue })]
+    #[case::queue_clear(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUEUE_CLEAR.into(),
+            stream_id: 1.into()
+        },
+        queue_type: (QueueType::InputQueue as u32).into(),
+        padding: 0.into()
+    }, VideoCmd::QueueClear { stream_id: 1, queue_type: QueueType::InputQueue })]
+    #[case::get_params(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_GET_PARAMS_EXT.into(),
+            stream_id: 1.into()
+        },
+        queue_type: (QueueType::InputQueue as u32).into(),
+        padding: 0.into()
+    }, VideoCmd::GetParams { stream_id: 1, queue_type: QueueType::InputQueue })]
+    #[case::set_params(virtio_video_set_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_SET_PARAMS_EXT.into(),
+            stream_id: 1.into()
+        },
+        params: virtio_video_params {
+            queue_type: (QueueType::InputQueue as u32).into(),
+            ..Default::default()
+        }
+    }, VideoCmd::SetParams {
+        stream_id: 1,
+        queue_type: QueueType::InputQueue,
+        params: virtio_video_params {
+            queue_type: (QueueType::InputQueue as u32).into(),
+            ..Default::default()
+        }})]
+    #[case::get_control(virtio_video_get_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_GET_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: (ControlType::ForceKeyframe as u32).into(),
+        padding: 0.into(),
+    }, VideoCmd::GetControl { stream_id: 1, control: ControlType::ForceKeyframe })]
+    fn test_read_video_cmd<T: ByteValued>(#[case] cmd: T, #[case] variant: VideoCmd) {
+        let desc_chain = prepare_video_desc_chain(&cmd);
+        let video_cmd = VideoCmd::from_descriptor(&desc_chain);
+        assert!(video_cmd.is_ok());
+        assert_eq!(video_cmd.unwrap(), variant);
+    }
+
+    #[rstest]
+    #[case::invalid_queue_type(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_GET_PARAMS_EXT.into(),
+            stream_id: 1.into()
+        },
+        queue_type: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_queue_type(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_DESTROY_ALL.into(),
+            stream_id: 1.into()
+        },
+        queue_type: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_queue_type(virtio_video_get_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUEUE_CLEAR.into(),
+            stream_id: 1.into()
+        },
+        queue_type: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_queue_type(virtio_video_query_capability {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CAPABILITY.into(),
+            stream_id: 1.into()
+        },
+        queue_type: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_queue_type(virtio_video_resource_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_RESOURCE_CREATE.into(),
+            stream_id: 1.into()
+        },
+        queue_type: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_queue_type(virtio_video_set_params {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_SET_PARAMS_EXT.into(),
+            stream_id: 1.into()
+        },
+        params: virtio_video_params {
+            queue_type: 0.into(),
+            ..Default::default()
+        }
+    })]
+    #[case::invalid_format(virtio_video_query_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: (ControlType::Bitrate as u32).into(),
+        fmt: virtio_video_query_control_format {
+            format: 0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    })]
+    #[case::invalid_format(virtio_video_stream_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_STREAM_CREATE.into(),
+            stream_id: 1.into()
+        },
+        coded_format: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_control(virtio_video_query_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_QUERY_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_control(virtio_video_get_control {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_GET_CONTROL.into(),
+            stream_id: 1.into()
+        },
+        control: 0.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_memory_type(virtio_video_stream_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_STREAM_CREATE.into(),
+            stream_id: 1.into()
+        },
+        in_mem_type: 3.into(),
+        ..Default::default()
+    })]
+    #[case::invalid_memory_type(virtio_video_stream_create {
+        hdr: virtio_video_cmd_hdr {
+            type_: VIRTIO_VIDEO_CMD_STREAM_CREATE.into(),
+            stream_id: 1.into()
+        },
+        out_mem_type: 3.into(),
+        ..Default::default()
+    })]
+    fn test_read_video_cmd_invalid_arg<T: ByteValued>(#[case] cmd: T) {
+        let desc_chain = prepare_video_desc_chain(&cmd);
+        let video_cmd = VideoCmd::from_descriptor(&desc_chain);
+        assert_matches!(video_cmd.unwrap_err(), VuVideoError::UnexpectedArgValue(_));
+    }
+
+    #[rstest]
+    #[case(0)]
+    #[case(VIRTIO_VIDEO_CMD_QUERY_CAPABILITY - 1)]
+    #[case(VIRTIO_VIDEO_CMD_GET_PARAMS__UNUSED)]
+    #[case(VIRTIO_VIDEO_CMD_SET_PARAMS_EXT + 1)]
+    fn test_read_video_cmd_invalid_cmd(#[case] invalid_type: u32) {
+        let cmd = virtio_video_cmd_hdr {
+            type_: invalid_type.into(),
+            stream_id: 0.into(),
+        };
+        let desc_chain = prepare_video_desc_chain(&cmd);
+        let video_cmd = VideoCmd::from_descriptor(&desc_chain);
+        assert_matches!(video_cmd.unwrap_err(), VuVideoError::InvalidCmdType(..));
+    }
+
+    #[rstest]
+    #[case::ok_nodata(CmdResponse::OkNoData, VIRTIO_VIDEO_RESP_OK_NODATA)]
+    #[case::query_capability(
+        CmdResponse::QueryCapability(Vec::new()),
+        VIRTIO_VIDEO_RESP_OK_QUERY_CAPABILITY
+    )]
+    #[case::resource_queue(CmdResponse::ResourceQueue {
+        timestamp: 0,
+        flags: 0,
+        size: 0
+    }, VIRTIO_VIDEO_RESP_OK_RESOURCE_QUEUE)]
+    #[case::get_params(CmdResponse::GetParams {
+        queue_type: QueueType::InputQueue,
+        params: virtio_video_params::default()
+    }, VIRTIO_VIDEO_RESP_OK_GET_PARAMS)]
+    #[case::query_control(CmdResponse::QueryControl(VideoControl::Bitrate(0.into())), VIRTIO_VIDEO_RESP_OK_QUERY_CONTROL)]
+    #[case::get_control(
+        CmdResponse::GetControl(ControlType::Bitrate),
+        VIRTIO_VIDEO_RESP_OK_GET_CONTROL
+    )]
+    #[case::set_control(CmdResponse::SetControl, VIRTIO_VIDEO_RESP_OK_NODATA)]
+    #[case::error_invalid_operation(
+        CmdResponse::Error(CmdError::InvalidOperation),
+        VIRTIO_VIDEO_RESP_ERR_INVALID_OPERATION
+    )]
+    #[case::error_out_of_memory(
+        CmdResponse::Error(CmdError::OutOfMemory),
+        VIRTIO_VIDEO_RESP_ERR_OUT_OF_MEMORY
+    )]
+    #[case::error_invalid_stream_id(
+        CmdResponse::Error(CmdError::InvalidStreamId),
+        VIRTIO_VIDEO_RESP_ERR_INVALID_STREAM_ID
+    )]
+    #[case::error_invalid_resource_id(
+        CmdResponse::Error(CmdError::InvalidResourceId),
+        VIRTIO_VIDEO_RESP_ERR_INVALID_RESOURCE_ID
+    )]
+    #[case::error_invalid_parameter(
+        CmdResponse::Error(CmdError::InvalidParameter),
+        VIRTIO_VIDEO_RESP_ERR_INVALID_PARAMETER
+    )]
+    #[case::error_unsupported_control(
+        CmdResponse::Error(CmdError::UnsupportedControl),
+        VIRTIO_VIDEO_RESP_ERR_UNSUPPORTED_CONTROL
+    )]
+    fn test_virtio_cmd_type(#[case] response: CmdResponse, #[case] expected: u32) {
+        assert_eq!(response.cmd_type(), Le32::from(expected));
+    }
+
+    #[rstest]
+    #[case::bitrate(ControlType::Bitrate, VideoControl::Bitrate(0.into()))]
+    #[case::bitrate_mode(ControlType::BitrateMode, VideoControl::BitrateMode(0.into()))]
+    #[case::bitrate_peak(ControlType::BitratePeak, VideoControl::BitratePeak(0.into()))]
+    #[case::profile(ControlType::Profile, VideoControl::Profile(0.into()))]
+    #[case::level(ControlType::Level, VideoControl::Level(0.into()))]
+    #[case::prepend_spspps_to_idr(ControlType::PrependSpsPpsToIdr, VideoControl::PrependSpsPpsToIdr(0.into()))]
+    #[case::force_key_frame(ControlType::ForceKeyframe, VideoControl::ForceKeyframe(0.into()))]
+    fn test_video_control_from_type(
+        #[case] control_type: ControlType,
+        #[case] expected: VideoControl,
+    ) {
+        assert_eq!(
+            VideoControl::new_from_type(control_type, 0.into()),
+            expected
+        );
+    }
+}

@@ -126,3 +126,77 @@ fn main() -> Result<()> {
 
     start_backend(VuVideoConfig::try_from(VideoArgs::parse()).unwrap())
 }
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use rstest::*;
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[rstest]
+    // No device specified defaults to /dev/video0
+    #[case::no_device(vec!["", "-s", "video.sock", "-b", "null"],
+    VideoArgs {
+        socket_path: "video.sock".into(),
+        v4l2_device: "/dev/video0".into(),
+        backend: BackendType::Null,
+    })]
+    // Specifying device overwrite the default value
+    #[case::set_device(vec!["", "-s" , "video.sock", "-d", "/dev/video1", "-b", "null"],
+    VideoArgs {
+        socket_path: "video.sock".into(),
+        v4l2_device: "/dev/video1".into(),
+        backend: BackendType::Null,
+    })]
+    // Selecting different decoder
+    #[case::set_v4l2_decoder(vec![" ", "--socket-path", "long-video.sock", "-b", "v4l2-decoder"],
+    VideoArgs {
+        socket_path: "long-video.sock".into(),
+        v4l2_device: "/dev/video0".into(),
+        backend: BackendType::V4L2Decoder,
+    })]
+    fn test_command_line_arguments(#[case] args: Vec<&str>, #[case] command_line: VideoArgs) {
+        let args: VideoArgs = Parser::parse_from(args.as_slice());
+
+        assert_eq!(
+            VuVideoConfig::try_from(command_line).unwrap(),
+            VuVideoConfig::try_from(args).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_fail_create_backend() {
+        use vhu_video::VuVideoError;
+        let config = VideoArgs {
+            socket_path: "video.sock".into(),
+            v4l2_device: "/path/invalid/video.dev".into(),
+            backend: BackendType::V4L2Decoder,
+        };
+        assert_matches!(
+            start_backend(VuVideoConfig::try_from(config.clone()).unwrap()).unwrap_err(),
+            Error::CouldNotCreateBackend(VuVideoError::AccessVideoDeviceFile)
+        );
+    }
+
+    #[test]
+    fn test_fail_listener() {
+        use std::fs::File;
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+        let v4l2_device = test_dir.path().join("video.dev");
+        File::create(&v4l2_device).expect("Could not create a test device file.");
+        let config = VideoArgs {
+            socket_path: "~/path/invalid/video.sock".into(),
+            v4l2_device: v4l2_device.to_owned(),
+            backend: BackendType::Null,
+        };
+        assert_matches!(
+            start_backend(VuVideoConfig::try_from(config).unwrap()).unwrap_err(),
+            Error::FailedCreatingListener(_)
+        );
+        // cleanup
+        std::fs::remove_file(v4l2_device).expect("Failed to clean up");
+        test_dir.close().unwrap();
+    }
+}

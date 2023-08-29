@@ -91,7 +91,7 @@ impl From<stream::Error> for Error {
     }
 }
 
-#[derive(ValueEnum, Clone, Default, Debug)]
+#[derive(ValueEnum, Clone, Copy, Default, Debug, Eq, PartialEq)]
 pub enum BackendType {
     #[default]
     Null,
@@ -231,6 +231,10 @@ impl SoundConfig {
     /// requests from the guest.
     pub fn get_socket_path(&self) -> String {
         String::from(&self.socket)
+    }
+
+    pub fn get_audio_backend(&self) -> BackendType {
+        self.audio_backend
     }
 }
 

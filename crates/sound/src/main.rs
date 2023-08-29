@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_vsock_config_setup() {
+    fn test_sound_config_setup() {
         let args = SoundArgs::from_args("/tmp/vhost-sound.socket");
 
         let config = SoundConfig::try_from(args);
@@ -63,5 +63,23 @@ mod tests {
 
         let config = config.unwrap();
         assert_eq!(config.get_socket_path(), "/tmp/vhost-sound.socket");
+    }
+
+    #[test]
+    #[serial]
+    fn test_cli_backend_arg() {
+        let args: SoundArgs = Parser::parse_from([
+            "",
+            "--socket",
+            "/tmp/vhost-sound.socket ",
+            "--backend",
+            "null",
+        ]);
+
+        let config = SoundConfig::try_from(args);
+        assert!(config.is_ok());
+
+        let config = config.unwrap();
+        assert_eq!(config.get_audio_backend(), BackendType::Null);
     }
 }

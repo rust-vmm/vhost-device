@@ -4,7 +4,7 @@
 use std::convert::TryFrom;
 
 use clap::Parser;
-use vhost_user_sound::{start_backend_server, Error, Result, SoundConfig};
+use vhost_user_sound::{start_backend_server, BackendType, Error, Result, SoundConfig};
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -12,9 +12,10 @@ struct SoundArgs {
     /// vhost-user Unix domain socket path.
     #[clap(long)]
     socket: String,
-    /// audio backend to be used (supported: null)
+    /// audio backend to be used
     #[clap(long)]
-    backend: String,
+    #[clap(value_enum)]
+    backend: BackendType,
 }
 
 impl TryFrom<SoundArgs> for SoundConfig {
@@ -22,9 +23,8 @@ impl TryFrom<SoundArgs> for SoundConfig {
 
     fn try_from(cmd_args: SoundArgs) -> Result<Self> {
         let socket = cmd_args.socket.trim().to_string();
-        let backend = cmd_args.backend.trim().to_string();
 
-        Ok(SoundConfig::new(socket, false, backend))
+        Ok(SoundConfig::new(socket, false, cmd_args.backend))
     }
 }
 
@@ -48,7 +48,7 @@ mod tests {
         fn from_args(socket: &str) -> Self {
             SoundArgs {
                 socket: socket.to_string(),
-                backend: "null".to_string(),
+                backend: BackendType::default(),
             }
         }
     }

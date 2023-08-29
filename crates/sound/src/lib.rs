@@ -12,6 +12,7 @@ use std::{
     sync::Arc,
 };
 
+use clap::ValueEnum;
 use log::{info, warn};
 pub use stream::Stream;
 use thiserror::Error as ThisError;
@@ -88,6 +89,14 @@ impl From<stream::Error> for Error {
     fn from(val: stream::Error) -> Self {
         Self::Stream(val)
     }
+}
+
+#[derive(ValueEnum, Clone, Default, Debug)]
+pub enum BackendType {
+    #[default]
+    Null,
+    Pipewire,
+    Alsa,
 }
 
 #[derive(Debug)]
@@ -203,18 +212,18 @@ pub struct SoundConfig {
     socket: String,
     /// use multiple threads to hanlde the virtqueues
     multi_thread: bool,
-    /// audio backend name
-    audio_backend_name: String,
+    /// audio backend variant
+    audio_backend: BackendType,
 }
 
 impl SoundConfig {
     /// Create a new instance of the SoundConfig struct, containing the
     /// parameters to be fed into the sound-backend server.
-    pub fn new(socket: String, multi_thread: bool, audio_backend_name: String) -> Self {
+    pub fn new(socket: String, multi_thread: bool, audio_backend: BackendType) -> Self {
         Self {
             socket,
             multi_thread,
-            audio_backend_name,
+            audio_backend,
         }
     }
 

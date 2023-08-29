@@ -557,7 +557,7 @@ impl VhostUserSoundBackend {
             )?)]
         };
 
-        let audio_backend = alloc_audio_backend(config.audio_backend_name, streams)?;
+        let audio_backend = alloc_audio_backend(config.audio_backend, streams)?;
 
         Ok(Self {
             threads,

@@ -107,8 +107,12 @@ impl TryFrom<ScmiArgs> for VuScmiConfig {
 fn start_backend(config: VuScmiConfig) -> Result<()> {
     loop {
         debug!("Starting backend");
-        // TODO: Print a nice error message on backend configuration failure.
-        let backend = Arc::new(RwLock::new(VuScmiBackend::new(&config).unwrap()));
+        let backend_instance = VuScmiBackend::new(&config);
+        if let Err(error) = backend_instance {
+            return Err(error.to_string());
+        }
+
+        let backend = Arc::new(RwLock::new(backend_instance.unwrap()));
         let listener = Listener::new(config.socket_path.clone(), true).unwrap();
         let mut daemon = VhostUserDaemon::new(
             "vhost-device-scmi".to_owned(),
@@ -163,6 +167,7 @@ fn main() {
             Ok(config) => {
                 if let Err(error) = start_backend(config) {
                     error!("{error}");
+                    println!("{error}");
                     exit(1);
                 }
             }

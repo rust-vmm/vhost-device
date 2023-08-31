@@ -47,7 +47,8 @@ pub trait AudioBackend {
 
 pub fn alloc_audio_backend(
     backend: BackendType,
-    streams: Arc<RwLock<Vec<Stream>>>,
+    // Unused when compiled with no features.
+    #[allow(unused_variables)] streams: Arc<RwLock<Vec<Stream>>>,
 ) -> Result<Box<dyn AudioBackend + Send + Sync>> {
     log::trace!("allocating audio backend {:?}", backend);
     match backend {

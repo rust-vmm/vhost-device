@@ -70,7 +70,25 @@ implemented.
 See source code (`scmi` crate) documentation for details and how to
 add more protocols, host device bindings or other functionality.
 
-## Kernel support for testing
+## Testing
+
+SCMI is supported only on Arm in Linux.  This restriction doesn't
+apply to the host, which can be any architecture as long as the guest
+is Arm.
+
+The easiest way to test it on the guest side is using the Linux SCMI
+Industrial I/O driver there.  If an 3-axes accelerometer or gyroscope
+VirtIO SCMI device is present and the guest kernel is compiled with
+`CONFIG_IIO_SCMI` enabled then the device should be available in
+`/sys/bus/iio/devices/`.  The vhost-device-scmi fake device is
+suitable for this.
+
+Of course, other means of accessing SCMI devices can be used too.  The
+following Linux kernel command line can be useful to obtain SCMI trace
+information, in addition to SCMI related messages in dmesg:
+`trace_event=scmi:* ftrace=function ftrace_filter=scmi*`.
+
+### Kernel support for testing
 
 `kernel` subdirectory contains
 [instructions](kernel/iio-dummy/README.md) how to create emulated

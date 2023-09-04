@@ -16,7 +16,7 @@ generated with help2man target/debug/vhost-user-sound |mandoc
             vhost-user Unix domain socket path
 
      --backend <BACKEND>
-            audio backend to be used (supported: null)
+            audio backend to be used [possible values: null, pipewire, alsa]
 
      -h, --help
             Print help

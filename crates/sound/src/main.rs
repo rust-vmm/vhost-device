@@ -4,7 +4,7 @@
 use std::convert::TryFrom;
 
 use clap::Parser;
-use vhost_user_sound::{start_backend_server, Error, Result, SoundConfig};
+use vhost_user_sound::{start_backend_server, BackendType, Error, Result, SoundConfig};
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -12,9 +12,10 @@ struct SoundArgs {
     /// vhost-user Unix domain socket path.
     #[clap(long)]
     socket: String,
-    /// audio backend to be used (supported: null)
+    /// audio backend to be used
     #[clap(long)]
-    backend: String,
+    #[clap(value_enum)]
+    backend: BackendType,
 }
 
 impl TryFrom<SoundArgs> for SoundConfig {
@@ -22,9 +23,8 @@ impl TryFrom<SoundArgs> for SoundConfig {
 
     fn try_from(cmd_args: SoundArgs) -> Result<Self> {
         let socket = cmd_args.socket.trim().to_string();
-        let backend = cmd_args.backend.trim().to_string();
 
-        Ok(SoundConfig::new(socket, false, backend))
+        Ok(SoundConfig::new(socket, false, cmd_args.backend))
     }
 }
 
@@ -43,19 +43,20 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
+    use rstest::*;
 
     impl SoundArgs {
         fn from_args(socket: &str) -> Self {
             SoundArgs {
                 socket: socket.to_string(),
-                backend: "null".to_string(),
+                backend: BackendType::default(),
             }
         }
     }
 
     #[test]
     #[serial]
-    fn test_vsock_config_setup() {
+    fn test_sound_config_setup() {
         let args = SoundArgs::from_args("/tmp/vhost-sound.socket");
 
         let config = SoundConfig::try_from(args);
@@ -63,5 +64,26 @@ mod tests {
 
         let config = config.unwrap();
         assert_eq!(config.get_socket_path(), "/tmp/vhost-sound.socket");
+    }
+
+    #[rstest]
+    #[serial]
+    #[case::null_backend("null", BackendType::Null)]
+    #[case::pipewire("pipewire", BackendType::Pipewire)]
+    #[case::alsa("alsa", BackendType::Alsa)]
+    fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
+        let args: SoundArgs = Parser::parse_from([
+            "",
+            "--socket",
+            "/tmp/vhost-sound.socket ",
+            "--backend",
+            backend_name,
+        ]);
+
+        let config = SoundConfig::try_from(args);
+        assert!(config.is_ok());
+
+        let config = config.unwrap();
+        assert_eq!(config.get_audio_backend(), backend);
     }
 }

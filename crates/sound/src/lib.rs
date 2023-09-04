@@ -95,7 +95,9 @@ impl From<stream::Error> for Error {
 pub enum BackendType {
     #[default]
     Null,
+    #[cfg(feature = "pw-backend")]
     Pipewire,
+    #[cfg(feature = "alsa-backend")]
     Alsa,
 }
 

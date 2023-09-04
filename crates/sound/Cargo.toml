@@ -10,8 +10,7 @@ license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2018"
 
 [features]
-default = ["null-backend", "alsa-backend", "pw-backend"]
-null-backend = []
+default = ["alsa-backend", "pw-backend"]
 alsa-backend = ["dep:alsa"]
 pw-backend = ["pipewire", "libspa", "pipewire-sys", "libspa-sys", "bindgen"]
 

@@ -69,8 +69,11 @@ mod tests {
     #[rstest]
     #[serial]
     #[case::null_backend("null", BackendType::Null)]
-    #[case::pipewire("pipewire", BackendType::Pipewire)]
-    #[case::alsa("alsa", BackendType::Alsa)]
+    #[cfg_attr(
+        feature = "pw-backend",
+        case::pipewire("pipewire", BackendType::Pipewire)
+    )]
+    #[cfg_attr(feature = "alsa-backend", case::alsa("alsa", BackendType::Alsa))]
     fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
         let args: SoundArgs = Parser::parse_from([
             "",

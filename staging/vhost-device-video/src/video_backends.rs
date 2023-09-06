@@ -2,9 +2,14 @@
 
 mod null;
 
+#[cfg(feature = "v4l2-decoder")]
+mod v4l2_decoder;
+
 use std::path::Path;
 
 use self::null::NullBackend;
+#[cfg(feature = "v4l2-decoder")]
+use self::v4l2_decoder::V4L2Decoder;
 use crate::{
     stream::{ResourcePlane, Stream},
     vhu_video::{BackendType, Result, VuVideoError},
@@ -81,9 +86,14 @@ pub(crate) fn alloc_video_backend(
     backend: BackendType,
     video_path: &Path,
 ) -> Result<Box<dyn VideoBackend + Sync + Send>> {
-    match backend {
-        BackendType::Null => Ok(Box::new(
-            NullBackend::new(video_path).map_err(|_| VuVideoError::AccessVideoDeviceFile)?,
-        )),
+    macro_rules! build_backend {
+        ($type:ident) => {
+            Box::new($type::new(video_path).map_err(|_| VuVideoError::AccessVideoDeviceFile)?)
+        };
     }
+    Ok(match backend {
+        BackendType::Null => build_backend!(NullBackend),
+        #[cfg(feature = "v4l2-decoder")]
+        BackendType::V4L2Decoder => build_backend!(V4L2Decoder),
+    })
 }

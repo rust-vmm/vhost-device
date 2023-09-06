@@ -13,7 +13,8 @@ edition = "2021"
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
-default = []
+default = ["v4l2-decoder"]
+v4l2-decoder = ["v4l2r"]
 
 [dependencies]
 bitflags = "2.3.3"
@@ -31,7 +32,11 @@ virtio-bindings = "0.2.1"
 virtio-queue = "0.9"
 vm-memory = "0.12"
 vmm-sys-util = "0.11"
+v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "110fd77", optional = true }
 
 [dev-dependencies]
+assert_matches = "1.5"
+rstest = "0.18.2"
+tempfile = "3.8.0"
 virtio-queue = { version = "0.9", features = ["test-utils"] }
 vm-memory = { version = "0.12", features = ["backend-mmap", "backend-atomic"] }

@@ -106,6 +106,8 @@ impl convert::From<VuVideoError> for io::Error {
 pub(crate) enum BackendType {
     #[default]
     Null,
+    #[cfg(feature = "v4l2-decoder")]
+    V4L2Decoder,
 }
 
 /// Virtio Video Configuration

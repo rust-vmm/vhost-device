@@ -135,6 +135,8 @@ pub(crate) enum Error {
     EventFdCreate(std::io::Error),
     #[error("Raw vsock packets queue is empty")]
     EmptyRawPktsQueue,
+    #[error("CID already in use by another vsock device")]
+    CidAlreadyInUse,
 }
 
 impl std::convert::From<Error> for std::io::Error {

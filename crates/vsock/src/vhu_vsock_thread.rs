@@ -111,14 +111,21 @@ impl VhostUserVsockThread {
             cid_map.clone(),
         );
 
-        cid_map.write().unwrap().insert(
-            guest_cid,
-            (
-                thread_backend.raw_pkts_queue.clone(),
-                groups_set,
-                sibling_event_fd.try_clone().unwrap(),
-            ),
-        );
+        {
+            let mut cid_map = cid_map.write().unwrap();
+            if cid_map.contains_key(&guest_cid) {
+                return Err(Error::CidAlreadyInUse);
+            }
+
+            cid_map.insert(
+                guest_cid,
+                (
+                    thread_backend.raw_pkts_queue.clone(),
+                    groups_set,
+                    sibling_event_fd.try_clone().unwrap(),
+                ),
+            );
+        }
 
         let thread = VhostUserVsockThread {
             mem: None,
@@ -824,9 +831,14 @@ mod tests {
             .join("test_vsock_thread_failures.vsock")
             .display()
             .to_string();
-        let mut t =
-            VhostUserVsockThread::new(vsock_socket_path, 3, CONN_TX_BUF_SIZE, groups, cid_map)
-                .unwrap();
+        let mut t = VhostUserVsockThread::new(
+            vsock_socket_path,
+            3,
+            CONN_TX_BUF_SIZE,
+            groups.clone(),
+            cid_map.clone(),
+        )
+        .unwrap();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());
@@ -847,6 +859,16 @@ mod tests {
             .push_back(ConnMapKey::new(0, 0));
         assert!(t.process_rx(&vring, false).is_err());
         assert!(t.process_rx(&vring, true).is_err());
+
+        // trying to use a CID that is already in use should fail
+        let vsock_socket_path2 = test_dir
+            .path()
+            .join("test_vsock_thread_failures2.vsock")
+            .display()
+            .to_string();
+        let t2 =
+            VhostUserVsockThread::new(vsock_socket_path2, 3, CONN_TX_BUF_SIZE, groups, cid_map);
+        assert!(t2.is_err());
 
         test_dir.close().unwrap();
     }

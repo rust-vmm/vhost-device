@@ -124,24 +124,22 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.64.0"
+version = "0.66.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4243e6031260db77ede97ad86c27e501d646a27ab57b59a574f725d98ab1fb4"
+checksum = "f2b84e06fc203107bfbad243f4aba2af864eb7db3b1cf46ea0a023b0b433d2a7"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.3.3",
  "cexpr",
  "clang-sys",
  "lazy_static",
  "lazycell",
- "log",
  "peeking_take_while",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash",
  "shlex",
- "syn 1.0.109",
- "which",
+ "syn 2.0.31",
 ]
 
 [[package]]
@@ -236,7 +234,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 2.0.26",
+ "syn 2.0.31",
 ]
 
 [[package]]
@@ -250,6 +248,15 @@ name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
+
+[[package]]
+name = "convert_case"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
+dependencies = [
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "cookie-factory"
@@ -397,7 +404,7 @@ checksum = "89ca545a94061b6365f2c7355b4b32bd20df3ff95f02da9329b34ccc3bd6ee72"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.26",
+ "syn 2.0.31",
 ]
 
 [[package]]
@@ -581,27 +588,26 @@ dependencies = [
 
 [[package]]
 name = "libspa"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "667dfbb50c3d1f7ee1d33afdc04d1255923ece7642db3303046e7d63d997d77d"
+version = "0.7.2"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.3.3",
  "cc",
+ "convert_case",
  "cookie-factory",
- "errno 0.3.1",
  "libc",
  "libspa-sys",
+ "nix 0.26.2",
  "nom",
  "system-deps",
 ]
 
 [[package]]
 name = "libspa-sys"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79cf5b88f52534df7ca88d451ae9628e22124e3cc5c60966465a7db479534c7a"
+version = "0.7.2"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
 dependencies = [
- "bindgen 0.64.0",
+ "bindgen 0.66.1",
  "cc",
  "system-deps",
 ]
@@ -749,13 +755,11 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pipewire"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc2180a4a84b855be86e6cd72fa6fd4318278871d2b1082e7cd05fe64b135ccb"
+version = "0.7.2"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
 dependencies = [
  "anyhow",
- "bitflags 1.3.2",
- "errno 0.3.1",
+ "bitflags 2.3.3",
  "libc",
  "libspa",
  "libspa-sys",
@@ -767,11 +771,10 @@ dependencies = [
 
 [[package]]
 name = "pipewire-sys"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95290eedb7fb6aa3922fdc0261cd0ddeb940abcdbdef28778928106554d2123"
+version = "0.7.2"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
 dependencies = [
- "bindgen 0.64.0",
+ "bindgen 0.66.1",
  "libspa-sys",
  "system-deps",
 ]
@@ -905,7 +908,7 @@ dependencies = [
  "regex",
  "relative-path",
  "rustc_version",
- "syn 2.0.26",
+ "syn 2.0.31",
  "unicode-ident",
 ]
 
@@ -1049,9 +1052,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.26"
+version = "2.0.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45c3457aacde3c65315de5031ec191ce46604304d2446e803d71ade03308d970"
+checksum = "718fa2415bcb8d8bd775917a1bf12a7931b6dfa890753378538118181e0cb398"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1117,7 +1120,7 @@ checksum = "463fe12d7993d3b327787537ce8dd4dfa058de32fc2b195ef3cde03dc4771e8f"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.26",
+ "syn 2.0.31",
 ]
 
 [[package]]
@@ -1159,6 +1162,12 @@ name = "unicode-ident"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "301abaae475aa91687eb82514b328ab47a211a533026cb25fc3e519b86adfc3c"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dd624098567895118886609431a7c3b8f516e41d30e0643f03d94592a147e36"
 
 [[package]]
 name = "utf8parse"
@@ -1259,14 +1268,10 @@ name = "vhost-user-sound"
 version = "0.1.0"
 dependencies = [
  "alsa",
- "bindgen 0.64.0",
  "clap",
  "env_logger",
- "libspa",
- "libspa-sys",
  "log",
  "pipewire",
- "pipewire-sys",
  "rstest",
  "serial_test",
  "thiserror",

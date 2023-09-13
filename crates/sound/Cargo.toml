@@ -12,18 +12,14 @@ edition = "2018"
 [features]
 default = ["alsa-backend", "pw-backend"]
 alsa-backend = ["dep:alsa"]
-pw-backend = ["pipewire", "libspa", "pipewire-sys", "libspa-sys", "bindgen"]
+pw-backend = ["pw"]
 
 [dependencies]
 alsa = { version = "0.7", optional = true }
-bindgen = { version = "0.64.0", optional = true }
 clap = { version = "4.1", features = ["derive"] }
 env_logger = "0.10"
-libspa = { version = "0.6.0", optional = true }
-libspa-sys = { version = "0.6.0", optional = true }
 log = "0.4"
-pipewire = { version = "0.6.0", optional = true }
-pipewire-sys = { version = "0.6.0", optional = true }
+pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "068f16e4bcc2a58657ceb53bd134acb5b00a5391", optional = true }
 thiserror = "1.0"
 vhost = { version = "0.6", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.8"

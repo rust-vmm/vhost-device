@@ -77,6 +77,10 @@ pub enum Error {
     UnexpectedDescriptorSize(usize, u32),
     #[error("Protocol or device error: {0}")]
     Stream(stream::Error),
+    #[error("Stream with id {0} not found")]
+    StreamWithIdNotFound(u32),
+    #[error("Channel number not supported: {0}")]
+    ChannelNotSupported(u8),
 }
 
 impl From<Error> for IoError {

@@ -219,11 +219,22 @@ impl GpioDevice for PhysDevice {
                 .set_consumer("vhu-gpio")
                 .map_err(Error::GpiodFailed)?;
 
-            state.request = Some(Arc::new(Mutex::new(
-                self.chip
-                    .request_lines(Some(&rconfig), &lconfig)
-                    .map_err(Error::GpiodFailed)?,
-            )));
+            // This is causing a warning since libgpiod's request_config is
+            // not `Send`.
+            // We, however, unsafely claim that it is by marking PhysDevice as
+            // `Send`. This is wrong, but until we figure out what to do, we
+            // just silence the clippy warning here.
+            //
+            // https://github.com/rust-vmm/vhost-device/issues/442 tracks
+            // finding a solution to this.
+            #[allow(clippy::arc_with_non_send_sync)]
+            {
+                state.request = Some(Arc::new(Mutex::new(
+                    self.chip
+                        .request_lines(Some(&rconfig), &lconfig)
+                        .map_err(Error::GpiodFailed)?,
+                )));
+            }
         }
 
         Ok(())

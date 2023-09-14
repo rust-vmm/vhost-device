@@ -3,6 +3,8 @@
 
 ### Added
 
+  - optional "mock_gpio" feature for testing
+
 ### Changed
 
 ### Fixed

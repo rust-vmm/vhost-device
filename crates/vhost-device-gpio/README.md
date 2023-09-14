@@ -43,6 +43,28 @@ Examples section below.
   --socket-count. For example, the GPIO device 0 will be allocated to the guest
   with "<socket-path>0" path.
 
+## MockGpioDevice support
+
+As connecting VM guests to random GPIO pins on your host is generally
+asking for trouble you can enable the "mock_gpio" feature in your build:
+
+    cargo build --features "mock_gpio"
+
+You can then enable simulated GPIOs using the 's' prefix:
+
+    --device-list s4,s8
+
+Which will create two gpio devices, the first with 4 pins and the
+second with 8. By default updates are display via env logger:
+
+    vhost-device-gpio -s /tmp/vus.sock -c 1 -l s4
+    [2023-09-14T14:15:14Z INFO  vhost_device_gpio::mock_gpio] gpio dummy0 set value to 1
+    [2023-09-14T14:15:14Z INFO  vhost_device_gpio::mock_gpio] gpio dummy0 set direction to 1
+    [2023-09-14T14:15:14Z INFO  vhost_device_gpio::mock_gpio] gpio dummy0 set direction to 0
+    [2023-09-14T14:15:19Z INFO  vhost_device_gpio::mock_gpio] gpio dummy1 set value to 1
+    [2023-09-14T14:15:19Z INFO  vhost_device_gpio::mock_gpio] gpio dummy1 set direction to 1
+    [2023-09-14T14:15:19Z INFO  vhost_device_gpio::mock_gpio] gpio dummy1 set direction to 0
+
 ## Examples
 
 The daemon should be started first:

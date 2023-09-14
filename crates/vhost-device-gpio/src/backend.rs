@@ -174,9 +174,11 @@ impl TryFrom<GpioArgs> for GpioConfiguration {
     }
 }
 
-fn start_device_backend<D: GpioDevice>(device: D, socket: String) {
-    let controller = GpioController::<D>::new(device).unwrap();
-    let backend = Arc::new(RwLock::new(VhostUserGpioBackend::new(controller).unwrap()));
+fn start_device_backend<D: GpioDevice>(device: D, socket: String) -> Result<()> {
+    let controller = GpioController::new(device).map_err(Error::CouldNotCreateGpioController)?;
+    let backend = Arc::new(RwLock::new(
+        VhostUserGpioBackend::new(controller).map_err(Error::CouldNotCreateBackend)?,
+    ));
     let listener = Listener::new(socket, true).unwrap();
 
     let mut daemon = VhostUserDaemon::new(
@@ -184,7 +186,7 @@ fn start_device_backend<D: GpioDevice>(device: D, socket: String) {
         backend.clone(),
         GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )
-    .unwrap();
+    .map_err(Error::CouldNotCreateDaemon)?;
 
     daemon.start(listener).unwrap();
 
@@ -201,6 +203,7 @@ fn start_device_backend<D: GpioDevice>(device: D, socket: String) {
     }
     // No matter the result, we need to shut down the worker thread.
     backend.read().unwrap().exit_event.write(1).unwrap();
+    Ok(())
 }
 
 fn start_backend(args: GpioArgs) -> Result<()> {
@@ -212,23 +215,23 @@ fn start_backend(args: GpioArgs) -> Result<()> {
         let cfg = config.devices.inner[i];
 
         let handle: JoinHandle<Result<()>> = spawn(move || loop {
-            // A separate thread is spawned for each socket and can connect to a separate guest.
-            // These are run in an infinite loop to not require the daemon to be restarted once a
-            // guest exits.
+            // A separate thread is spawned for each socket and can
+            // connect to a separate guest. These are run in an
+            // infinite loop to not require the daemon to be restarted
+            // once a guest exits.
             //
-            // There isn't much value in complicating code here to return an error from the
-            // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
-            // trouble to other threads/guests or the main() function and should be safe for the
-            // daemon.
+            // However if we fail to spawn (due to bad config or
+            // other reason) we will bail out of the spawning and
+            // propagate the error back to gpio_init().
             match cfg {
                 GpioDeviceType::PhysicalDevice { id } => {
-                    let controller = PhysDevice::open(id).unwrap();
-                    start_device_backend(controller, socket.clone());
+                    let controller = PhysDevice::open(id).map_err(Error::CouldNotOpenDevice)?;
+                    start_device_backend(controller, socket.clone())?;
                 }
                 #[cfg(any(test, feature = "mock_gpio"))]
                 GpioDeviceType::SimulatedDevice { num_gpios } => {
-                    let controller = MockGpioDevice::open(num_gpios).unwrap();
-                    start_device_backend(controller, socket.clone());
+                    let controller = MockGpioDevice::open(num_gpios).unwrap(); // cannot fail
+                    start_device_backend(controller, socket.clone())?;
                 }
             };
         });

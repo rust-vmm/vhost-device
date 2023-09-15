@@ -9,10 +9,10 @@ mod i2c;
 mod vhu_i2c;
 
 use log::{error, info, warn};
-use std::num::ParseIntError;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
+use std::{num::ParseIntError, path::PathBuf};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
@@ -53,7 +53,7 @@ pub(crate) enum Error {
 struct I2cArgs {
     /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
     #[clap(short, long)]
-    socket_path: String,
+    socket_path: PathBuf,
 
     /// Number of guests (sockets) to connect to.
     #[clap(short = 'c', long, default_value_t = 1)]
@@ -153,7 +153,7 @@ impl TryFrom<&str> for AdapterConfig {
 
 #[derive(PartialEq, Debug)]
 struct I2cConfiguration {
-    socket_path: String,
+    socket_path: PathBuf,
     socket_count: usize,
     devices: AdapterConfig,
 }
@@ -168,7 +168,7 @@ impl TryFrom<I2cArgs> for I2cConfiguration {
 
         let devices = AdapterConfig::try_from(args.device_list.trim())?;
         Ok(I2cConfiguration {
-            socket_path: args.socket_path.trim().to_string(),
+            socket_path: args.socket_path,
             socket_count: args.socket_count,
             devices,
         })
@@ -184,7 +184,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
     let mut handles = Vec::new();
 
     for i in 0..config.socket_count {
-        let socket = config.socket_path.to_owned() + &i.to_string();
+        let socket = config.socket_path.join(i.to_string());
         let i2c_map = i2c_map.clone();
 
         let handle: JoinHandle<Result<()>> = spawn(move || loop {
@@ -249,6 +249,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+
     use assert_matches::assert_matches;
 
     use super::*;
@@ -270,9 +271,9 @@ mod tests {
     }
 
     impl I2cArgs {
-        fn from_args(path: &str, devices: &str, count: usize) -> I2cArgs {
+        fn from_args(path: PathBuf, devices: &str, count: usize) -> I2cArgs {
             I2cArgs {
-                socket_path: path.to_string(),
+                socket_path: path,
                 socket_count: count,
                 device_list: devices.to_string(),
             }
@@ -300,17 +301,17 @@ mod tests {
 
     #[test]
     fn test_parse_failure() {
-        let socket_name = "vi2c.sock";
+        let socket_name = PathBuf::from("vi2c.sock");
 
         // Invalid client address
-        let cmd_args = I2cArgs::from_args(socket_name, "1:4d", 5);
+        let cmd_args = I2cArgs::from_args(socket_name.clone(), "1:4d", 5);
         assert_matches!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ParseFailure(e) if e == "4d".parse::<u16>().unwrap_err()
         );
 
         // Zero socket count
-        let cmd_args = I2cArgs::from_args(socket_name, "1:4", 0);
+        let cmd_args = I2cArgs::from_args(socket_name.clone(), "1:4", 0);
         assert_matches!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::SocketCountInvalid(0)
@@ -326,15 +327,10 @@ mod tests {
 
     #[test]
     fn test_parse_successful() {
-        let socket_name = "vi2c.sock";
-
-        // Space before and after the device list and socket name
-        let cmd_args = I2cArgs::from_args(" ./vi2c.sock", " 1:4 ", 1);
-        let config = I2cConfiguration::try_from(cmd_args).unwrap();
-        Listener::new(config.socket_path, true).unwrap();
+        let socket_name = PathBuf::from("vi2c.sock");
 
         // Valid configuration
-        let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:5:23", 5);
+        let cmd_args = I2cArgs::from_args(socket_name.clone(), "1:4,2:32:21,5:5:23", 5);
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
 
         let expected_devices = AdapterConfig::new_with(vec![
@@ -345,7 +341,7 @@ mod tests {
 
         let expected_config = I2cConfiguration {
             socket_count: 5,
-            socket_path: String::from(socket_name),
+            socket_path: socket_name,
             devices: expected_devices,
         };
 
@@ -389,7 +385,7 @@ mod tests {
     #[test]
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
-        let socket_name = "~/path/not/present/i2c";
+        let socket_name = PathBuf::from("~/path/not/present/i2c");
         let cmd_args = I2cArgs::from_args(socket_name, "1:4,3:5", 5);
 
         assert_matches!(

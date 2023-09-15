@@ -195,8 +195,8 @@ mod tests {
             period: VHU_RNG_MAX_PERIOD_MS,
             max_bytes: usize::MAX,
             socket_count: 1,
-            socket_path: "/some/socket_path".into(),
-            rng_source: "/dev/urandom".into(),
+            socket_path: PathBuf::from("/some/socket_path"),
+            rng_source: PathBuf::from("/dev/urandom"),
         };
 
         // All configuration elements should be what we expect them to be.
@@ -248,14 +248,14 @@ mod tests {
     fn verify_start_backend() {
         let dir = tempdir().unwrap();
         let random_path = dir.path().join("urandom");
-        let _random_file = File::create(random_path.clone());
+        let _random_file = File::create(&random_path);
 
         let mut config = VuRngConfig {
             period_ms: 1000,
             max_bytes: 512,
             count: 1,
-            socket_path: "/invalid/path".into(),
-            rng_source: "/invalid/path".into(),
+            socket_path: PathBuf::from("/invalid/path"),
+            rng_source: PathBuf::from("/invalid/path"),
         };
 
         // An invalid RNG source file should trigger an AccessRngSourceFile error.

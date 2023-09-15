@@ -39,6 +39,7 @@ mod vhu_scmi;
 use devices::common::{print_devices_help, DeviceDescription, DeviceProperties};
 
 use std::{
+    path::PathBuf,
     process::exit,
     sync::{Arc, RwLock},
 };
@@ -60,7 +61,7 @@ struct ScmiArgs {
     // Location of vhost-user Unix domain socket.
     // Required, unless one of the --help options is used.
     #[clap(short, long, help = "vhost-user socket to use (required)")]
-    socket_path: Option<String>,
+    socket_path: PathBuf,
     // Specification of SCMI devices to create.
     #[clap(short, long, help = "Devices to expose")]
     #[arg(num_args(1..))]
@@ -70,7 +71,7 @@ struct ScmiArgs {
 }
 
 pub struct VuScmiConfig {
-    socket_path: String,
+    socket_path: PathBuf,
     devices: DeviceDescription,
 }
 
@@ -78,10 +79,7 @@ impl TryFrom<ScmiArgs> for VuScmiConfig {
     type Error = String;
 
     fn try_from(cmd_args: ScmiArgs) -> Result<Self> {
-        if cmd_args.socket_path.is_none() {
-            return Result::Err("Required argument socket-path was not provided".to_string());
-        }
-        let socket_path = cmd_args.socket_path.unwrap().trim().to_string();
+        let socket_path = cmd_args.socket_path;
         let mut devices: DeviceDescription = vec![];
         let device_iterator = cmd_args.device.iter();
         for d in device_iterator {
@@ -113,7 +111,7 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
         }
 
         let backend = Arc::new(RwLock::new(backend_instance.unwrap()));
-        let listener = Listener::new(config.socket_path.clone(), true).unwrap();
+        let listener = Listener::new(&config.socket_path, true).unwrap();
         let mut daemon = VhostUserDaemon::new(
             "vhost-device-scmi".to_owned(),
             backend.clone(),
@@ -182,13 +180,14 @@ mod tests {
 
     #[test]
     fn test_command_line() {
-        let path = "/foo/scmi.sock".to_owned();
+        let path = PathBuf::from("/foo/scmi.sock");
         let params_string = format!(
             "binary \
                      --device dummy \
-                     -s {path} \
+                     -s {} \
                      --device fake,name=foo,prop=value \
-                     -d fake,name=bar"
+                     -d fake,name=bar",
+            path.display()
         );
         let params: Vec<&str> = params_string.split_whitespace().collect();
         let args: ScmiArgs = process_args(Parser::parse_from(params)).unwrap();

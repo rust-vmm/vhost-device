@@ -12,6 +12,7 @@ use std::{
         net::{UnixListener, UnixStream},
         prelude::{AsRawFd, FromRawFd, RawFd},
     },
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
@@ -50,7 +51,7 @@ pub(crate) struct VhostUserVsockThread {
     /// Host socket raw file descriptor.
     host_sock: RawFd,
     /// Host socket path
-    host_sock_path: String,
+    host_sock_path: PathBuf,
     /// Listener listening for new connections on the host.
     host_listener: UnixListener,
     /// Instance of VringWorker.
@@ -78,14 +79,14 @@ pub(crate) struct VhostUserVsockThread {
 impl VhostUserVsockThread {
     /// Create a new instance of VhostUserVsockThread.
     pub fn new(
-        uds_path: String,
+        uds_path: PathBuf,
         guest_cid: u64,
         tx_buffer_size: u32,
         groups: Vec<String>,
         cid_map: Arc<RwLock<CidMap>>,
     ) -> Result<Self> {
         // TODO: better error handling, maybe add a param to force the unlink
-        let _ = std::fs::remove_file(uds_path.clone());
+        let _ = std::fs::remove_file(&uds_path);
         let host_sock = UnixListener::bind(&uds_path)
             .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
             .map_err(Error::UnixBind)?;
@@ -739,11 +740,7 @@ mod tests {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let t = VhostUserVsockThread::new(
-            test_dir
-                .path()
-                .join("test_vsock_thread.vsock")
-                .display()
-                .to_string(),
+            test_dir.path().join("test_vsock_thread.vsock"),
             3,
             CONN_TX_BUF_SIZE,
             groups,
@@ -811,7 +808,7 @@ mod tests {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let t = VhostUserVsockThread::new(
-            "/sys/not_allowed.vsock".to_string(),
+            PathBuf::from("/sys/not_allowed.vsock"),
             3,
             CONN_TX_BUF_SIZE,
             groups.clone(),
@@ -819,11 +816,7 @@ mod tests {
         );
         assert!(t.is_err());
 
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_failures.vsock")
-            .display()
-            .to_string();
+        let vsock_socket_path = test_dir.path().join("test_vsock_thread_failures.vsock");
         let mut t =
             VhostUserVsockThread::new(vsock_socket_path, 3, CONN_TX_BUF_SIZE, groups, cid_map)
                 .unwrap();

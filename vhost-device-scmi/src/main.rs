@@ -165,13 +165,14 @@ mod tests {
 
     #[test]
     fn test_command_line() {
-        let path = "/foo/scmi.sock".to_owned();
+        let path = PathBuf::from("/foo/scmi.sock");
         let params_string = format!(
             "binary \
                      --device dummy \
-                     -s {path} \
+                     -s {} \
                      --device fake,name=foo,prop=value \
-                     -d fake,name=bar"
+                     -d fake,name=bar",
+            path.display()
         );
         let params: Vec<&str> = params_string.split_whitespace().collect();
         let args: ScmiArgs = Parser::parse_from(params);

@@ -442,6 +442,8 @@ impl VhostUserBackendMut for VuScmiBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
@@ -587,7 +589,7 @@ mod tests {
 
     fn make_backend() -> VuScmiBackend {
         let config = VuScmiConfig {
-            socket_path: "/foo/scmi.sock".into(),
+            socket_path: PathBuf::from("/foo/scmi.sock"),
             devices: vec![],
         };
         VuScmiBackend::new(&config).unwrap()

@@ -7,6 +7,7 @@ use std::{
         net::UnixStream,
         prelude::{AsRawFd, RawFd},
     },
+    path::PathBuf,
     sync::{Arc, RwLock},
 };
 
@@ -59,7 +60,7 @@ pub(crate) struct VsockThreadBackend {
     /// Map of host-side unix streams indexed by raw file descriptors.
     pub stream_map: HashMap<i32, UnixStream>,
     /// Host side socket for listening to new connections from the host.
-    host_socket_path: String,
+    host_socket_path: PathBuf,
     /// epoll for registering new host-side connections.
     epoll_fd: i32,
     /// CID of the guest.
@@ -78,7 +79,7 @@ pub(crate) struct VsockThreadBackend {
 impl VsockThreadBackend {
     /// New instance of VsockThreadBackend.
     pub fn new(
-        host_socket_path: String,
+        host_socket_path: PathBuf,
         epoll_fd: i32,
         guest_cid: u64,
         tx_buffer_size: u32,
@@ -294,7 +295,7 @@ impl VsockThreadBackend {
     /// corresponding to the destination port as follows:
     /// - "{self.host_sock_path}_{local_port}""
     fn handle_new_guest_conn<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) {
-        let port_path = format!("{}_{}", self.host_socket_path, pkt.dst_port());
+        let port_path = format!("{}_{}", self.host_socket_path.display(), pkt.dst_port());
 
         UnixStream::connect(port_path)
             .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
@@ -378,7 +379,7 @@ mod tests {
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let mut vtp = VsockThreadBackend::new(
-            vsock_socket_path.display().to_string(),
+            vsock_socket_path.clone(),
             epoll_fd,
             CID,
             CONN_TX_BUF_SIZE,
@@ -439,31 +440,19 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_backend.vsock")
-            .display()
-            .to_string();
+        let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
         let sibling_vhost_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling.socket")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling.socket");
         let sibling_vsock_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling.vsock")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling.vsock");
         let sibling2_vhost_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling2.socket")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling2.socket");
         let sibling2_vsock_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling2.vsock")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling2.vsock");
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 

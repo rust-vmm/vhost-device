@@ -12,10 +12,11 @@ use std::{
         net::{UnixListener, UnixStream},
         prelude::{AsRawFd, FromRawFd, RawFd},
     },
-    sync::{Arc, RwLock},
+    sync::mpsc::Sender,
+    sync::{mpsc, Arc, RwLock},
+    thread,
 };
 
-use futures::executor::{ThreadPool, ThreadPoolBuilder};
 use log::warn;
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
@@ -42,6 +43,15 @@ enum RxQueueType {
     Standard,
     RawPkts,
 }
+
+// Data which is required by a worker handling event idx.
+struct EventData {
+    vring: VringRwLock,
+    event_idx: bool,
+    head_idx: u16,
+    used_len: usize,
+}
+
 pub(crate) struct VhostUserVsockThread {
     /// Guest memory map.
     pub mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
@@ -61,8 +71,8 @@ pub(crate) struct VhostUserVsockThread {
     pub thread_backend: VsockThreadBackend,
     /// CID of the guest.
     guest_cid: u64,
-    /// Thread pool to handle event idx.
-    pool: ThreadPool,
+    /// Channel to a worker which handles event idx.
+    sender: Sender<EventData>,
     /// host side port on which application listens.
     local_port: Wrapping<u32>,
     /// The tx buffer size
@@ -126,7 +136,15 @@ impl VhostUserVsockThread {
                 ),
             );
         }
-
+        let (sender, receiver) = mpsc::channel::<EventData>();
+        thread::spawn(move || loop {
+            // TODO: Understand why doing the following in the background thread works.
+            // maybe we'd better have thread pool for the entire application if necessary.
+            let Ok(event_data) = receiver.recv() else {
+                break;
+            };
+            Self::vring_handle_event(event_data);
+        });
         let thread = VhostUserVsockThread {
             mem: None,
             event_idx: false,
@@ -137,10 +155,7 @@ impl VhostUserVsockThread {
             epoll_file,
             thread_backend,
             guest_cid,
-            pool: ThreadPoolBuilder::new()
-                .pool_size(1)
-                .create()
-                .map_err(Error::CreateThreadPool)?,
+            sender,
             local_port: Wrapping(0),
             tx_buffer_size,
             sibling_event_fd,
@@ -152,6 +167,37 @@ impl VhostUserVsockThread {
         Ok(thread)
     }
 
+    fn vring_handle_event(event_data: EventData) {
+        if event_data.event_idx {
+            if event_data
+                .vring
+                .add_used(event_data.head_idx, event_data.used_len as u32)
+                .is_err()
+            {
+                warn!("Could not return used descriptors to ring");
+            }
+            match event_data.vring.needs_notification() {
+                Err(_) => {
+                    warn!("Could not check if queue needs to be notified");
+                    event_data.vring.signal_used_queue().unwrap();
+                }
+                Ok(needs_notification) => {
+                    if needs_notification {
+                        event_data.vring.signal_used_queue().unwrap();
+                    }
+                }
+            }
+        } else {
+            if event_data
+                .vring
+                .add_used(event_data.head_idx, event_data.used_len as u32)
+                .is_err()
+            {
+                warn!("Could not return used descriptors to ring");
+            }
+            event_data.vring.signal_used_queue().unwrap();
+        }
+    }
     /// Register a file with an epoll to listen for events in evset.
     pub fn epoll_register(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
         epoll::ctl(
@@ -504,31 +550,14 @@ impl VhostUserVsockThread {
 
             let vring = vring.clone();
             let event_idx = self.event_idx;
-
-            self.pool.spawn_ok(async move {
-                // TODO: Understand why doing the following in the pool works
-                if event_idx {
-                    if vring.add_used(head_idx, used_len as u32).is_err() {
-                        warn!("Could not return used descriptors to ring");
-                    }
-                    match vring.needs_notification() {
-                        Err(_) => {
-                            warn!("Could not check if queue needs to be notified");
-                            vring.signal_used_queue().unwrap();
-                        }
-                        Ok(needs_notification) => {
-                            if needs_notification {
-                                vring.signal_used_queue().unwrap();
-                            }
-                        }
-                    }
-                } else {
-                    if vring.add_used(head_idx, used_len as u32).is_err() {
-                        warn!("Could not return used descriptors to ring");
-                    }
-                    vring.signal_used_queue().unwrap();
-                }
-            });
+            self.sender
+                .send(EventData {
+                    vring,
+                    event_idx,
+                    head_idx,
+                    used_len,
+                })
+                .unwrap();
 
             match rx_queue_type {
                 RxQueueType::Standard => {
@@ -661,30 +690,14 @@ impl VhostUserVsockThread {
 
             let vring = vring.clone();
             let event_idx = self.event_idx;
-
-            self.pool.spawn_ok(async move {
-                if event_idx {
-                    if vring.add_used(head_idx, used_len as u32).is_err() {
-                        warn!("Could not return used descriptors to ring");
-                    }
-                    match vring.needs_notification() {
-                        Err(_) => {
-                            warn!("Could not check if queue needs to be notified");
-                            vring.signal_used_queue().unwrap();
-                        }
-                        Ok(needs_notification) => {
-                            if needs_notification {
-                                vring.signal_used_queue().unwrap();
-                            }
-                        }
-                    }
-                } else {
-                    if vring.add_used(head_idx, used_len as u32).is_err() {
-                        warn!("Could not return used descriptors to ring");
-                    }
-                    vring.signal_used_queue().unwrap();
-                }
-            });
+            self.sender
+                .send(EventData {
+                    vring,
+                    event_idx,
+                    head_idx,
+                    used_len,
+                })
+                .unwrap();
         }
 
         Ok(used_any)

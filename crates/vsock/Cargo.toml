@@ -17,7 +17,6 @@ byteorder = "1"
 clap = { version = "4.4",  features = ["derive"] }
 env_logger = "0.10"
 epoll = "4.3.2"
-futures = { version = "0.3", features = ["thread-pool"] }
 log = "0.4"
 thiserror = "1.0"
 vhost = { version = "0.8", features = ["vhost-user-slave"] }

@@ -6,10 +6,10 @@
 mod vhu_rng;
 
 use log::{error, info, warn};
-use std::fs::File;
 use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
+use std::{fs::File, path::PathBuf};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
@@ -59,11 +59,11 @@ struct RngArgs {
 
     // Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
     #[clap(short, long)]
-    socket_path: String,
+    socket_path: PathBuf,
 
     // Where to get the RNG data from. Defaults to /dev/urandom.
     #[clap(short = 'f', long, default_value = "/dev/urandom")]
-    rng_source: String,
+    rng_source: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,8 +71,8 @@ pub(crate) struct VuRngConfig {
     pub period_ms: u128,
     pub max_bytes: usize,
     pub count: u32,
-    pub socket_path: String,
-    pub rng_source: String,
+    pub socket_path: PathBuf,
+    pub rng_source: PathBuf,
 }
 
 impl TryFrom<RngArgs> for VuRngConfig {
@@ -90,15 +90,13 @@ impl TryFrom<RngArgs> for VuRngConfig {
         // Divide available bandwidth by the number of threads in order
         // to avoid overwhelming the HW.
         let max_bytes = args.max_bytes / args.socket_count as usize;
-        let socket_path = args.socket_path.trim().to_string();
-        let rng_source = args.rng_source.trim().to_string();
 
         Ok(VuRngConfig {
             period_ms: args.period,
             max_bytes,
             count: args.socket_count,
-            socket_path,
-            rng_source,
+            socket_path: args.socket_path,
+            rng_source: args.rng_source,
         })
     }
 }
@@ -109,7 +107,7 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
     let random_file = Arc::new(Mutex::new(file));
 
     for i in 0..config.count {
-        let socket = format!("{}{}", config.socket_path.to_owned(), i);
+        let socket = format!("{}{}", config.socket_path.display(), i);
         let period_ms = config.period_ms;
         let max_bytes = config.max_bytes;
         let random = Arc::clone(&random_file);
@@ -194,8 +192,8 @@ mod tests {
             period: VHU_RNG_MAX_PERIOD_MS,
             max_bytes: usize::MAX,
             socket_count: 1,
-            socket_path: "/some/socket_path".to_string(),
-            rng_source: "/dev/urandom".to_string(),
+            socket_path: PathBuf::from("/some/socket_path"),
+            rng_source: PathBuf::from("/dev/urandom"),
         };
 
         // All configuration elements should be what we expect them to be.  Using
@@ -226,14 +224,14 @@ mod tests {
     fn verify_start_backend() {
         let dir = tempdir().unwrap();
         let random_path = dir.path().join("urandom");
-        let _random_file = File::create(random_path.clone());
+        let _random_file = File::create(&random_path);
 
         let mut config = VuRngConfig {
             period_ms: 1000,
             max_bytes: 512,
             count: 1,
-            socket_path: "/invalid/path".to_string(),
-            rng_source: "/invalid/path".to_string(),
+            socket_path: PathBuf::from("/invalid/path"),
+            rng_source: PathBuf::from("/invalid/path"),
         };
 
         // An invalid RNG source file should trigger an AccessRngSourceFile error.
@@ -245,7 +243,7 @@ mod tests {
         // Set the RNG source to something valid, forcing the code to check the validity
         // of the socket file.  Since the latter is invalid the vhost_user::Listener will
         // throw an error, forcing the thread to exit and the call to handle.join() to fail.
-        config.rng_source = random_path.to_str().unwrap().to_string();
+        config.rng_source = random_path;
         assert_matches!(
             start_backend(config).unwrap_err(),
             Error::FailedJoiningThreads

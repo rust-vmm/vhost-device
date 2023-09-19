@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, Result as IoResult},
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
     u16, u32, u64, u8,
 };
@@ -148,8 +149,8 @@ impl std::convert::From<Error> for std::io::Error {
 /// is allowed to configure the backend.
 pub(crate) struct VsockConfig {
     guest_cid: u64,
-    socket: String,
-    uds_path: String,
+    socket: PathBuf,
+    uds_path: PathBuf,
     tx_buffer_size: u32,
     groups: Vec<String>,
 }
@@ -159,8 +160,8 @@ impl VsockConfig {
     /// parameters to be fed into the vsock-backend server.
     pub fn new(
         guest_cid: u64,
-        socket: String,
-        uds_path: String,
+        socket: PathBuf,
+        uds_path: PathBuf,
         tx_buffer_size: u32,
         groups: Vec<String>,
     ) -> Self {
@@ -180,14 +181,14 @@ impl VsockConfig {
 
     /// Return the path of the unix domain socket which is listening to
     /// requests from the host side application.
-    pub fn get_uds_path(&self) -> String {
-        String::from(&self.uds_path)
+    pub fn get_uds_path(&self) -> &Path {
+        self.uds_path.as_path()
     }
 
     /// Return the path of the unix domain socket which is listening to
     /// requests from the guest.
-    pub fn get_socket_path(&self) -> String {
-        String::from(&self.socket)
+    pub fn get_socket_path(&self) -> &Path {
+        self.socket.as_path()
     }
 
     pub fn get_tx_buffer_size(&self) -> u32 {
@@ -237,7 +238,7 @@ pub(crate) struct VhostUserVsockBackend {
 impl VhostUserVsockBackend {
     pub fn new(config: VsockConfig, cid_map: Arc<RwLock<CidMap>>) -> Result<Self> {
         let thread = Mutex::new(VhostUserVsockThread::new(
-            config.get_uds_path(),
+            config.get_uds_path().to_path_buf(),
             config.get_guest_cid(),
             config.get_tx_buffer_size(),
             config.get_groups(),
@@ -382,21 +383,13 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend.socket")
-            .display()
-            .to_string();
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend.vsock")
-            .display()
-            .to_string();
+        let vhost_socket_path = test_dir.path().join("test_vsock_backend.socket");
+        let vsock_socket_path = test_dir.path().join("test_vsock_backend.vsock");
 
         let config = VsockConfig::new(
             CID,
-            vhost_socket_path.to_string(),
-            vsock_socket_path.to_string(),
+            vhost_socket_path.clone(),
+            vsock_socket_path.clone(),
             CONN_TX_BUF_SIZE,
             groups_list,
         );
@@ -458,8 +451,8 @@ mod tests {
         assert!(!ret.unwrap());
 
         // cleanup
-        let _ = std::fs::remove_file(vhost_socket_path);
-        let _ = std::fs::remove_file(vsock_socket_path);
+        let _ = std::fs::remove_file(&vhost_socket_path);
+        let _ = std::fs::remove_file(&vsock_socket_path);
 
         test_dir.close().unwrap();
     }
@@ -472,21 +465,13 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend_failures.socket")
-            .display()
-            .to_string();
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend_failures.vsock")
-            .display()
-            .to_string();
+        let vhost_socket_path = test_dir.path().join("test_vsock_backend_failures.socket");
+        let vsock_socket_path = test_dir.path().join("test_vsock_backend_failures.vsock");
 
         let config = VsockConfig::new(
             CID,
-            "/sys/not_allowed.socket".to_string(),
-            "/sys/not_allowed.vsock".to_string(),
+            PathBuf::from("/sys/not_allowed.socket"),
+            PathBuf::from("/sys/not_allowed.vsock"),
             CONN_TX_BUF_SIZE,
             groups.clone(),
         );
@@ -498,8 +483,8 @@ mod tests {
 
         let config = VsockConfig::new(
             CID,
-            vhost_socket_path.to_string(),
-            vsock_socket_path.to_string(),
+            vhost_socket_path.clone(),
+            vsock_socket_path.clone(),
             CONN_TX_BUF_SIZE,
             groups,
         );
@@ -535,8 +520,8 @@ mod tests {
         );
 
         // cleanup
-        let _ = std::fs::remove_file(vhost_socket_path);
-        let _ = std::fs::remove_file(vsock_socket_path);
+        let _ = std::fs::remove_file(&vhost_socket_path);
+        let _ = std::fs::remove_file(&vsock_socket_path);
 
         test_dir.close().unwrap();
     }

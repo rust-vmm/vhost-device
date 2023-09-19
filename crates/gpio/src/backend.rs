@@ -6,10 +6,10 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use log::{error, info, warn};
-use std::num::ParseIntError;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
+use std::{num::ParseIntError, path::PathBuf};
 
 use clap::Parser;
 use thiserror::Error as ThisError;
@@ -50,7 +50,7 @@ pub(crate) enum Error {
 struct GpioArgs {
     /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
     #[clap(short, long)]
-    socket_path: String,
+    socket_path: PathBuf,
 
     /// Number of guests (sockets) to connect to.
     #[clap(short = 'c', long, default_value_t = 1)]
@@ -104,7 +104,7 @@ impl TryFrom<&str> for DeviceConfig {
 
 #[derive(PartialEq, Debug)]
 struct GpioConfiguration {
-    socket_path: String,
+    socket_path: PathBuf,
     socket_count: usize,
     devices: DeviceConfig,
 }
@@ -139,7 +139,7 @@ fn start_backend<D: 'static + GpioDevice + Send + Sync>(args: GpioArgs) -> Resul
     let mut handles = Vec::new();
 
     for i in 0..config.socket_count {
-        let socket = config.socket_path.to_owned() + &i.to_string();
+        let socket = config.socket_path.join(i.to_string());
         let device_num = config.devices.inner[i];
 
         let handle: JoinHandle<Result<()>> = spawn(move || loop {
@@ -218,9 +218,9 @@ mod tests {
         }
     }
 
-    fn get_cmd_args(path: &str, devices: &str, count: usize) -> GpioArgs {
+    fn get_cmd_args(path: PathBuf, devices: &str, count: usize) -> GpioArgs {
         GpioArgs {
-            socket_path: path.to_string(),
+            socket_path: path,
             socket_count: count,
             device_list: devices.to_string(),
         }
@@ -238,24 +238,24 @@ mod tests {
 
     #[test]
     fn test_gpio_parse_failure() {
-        let socket_name = "vgpio.sock";
+        let socket_name = PathBuf::from("vgpio.sock");
 
         // Invalid device number
-        let cmd_args = get_cmd_args(socket_name, "1:4d:5", 3);
+        let cmd_args = get_cmd_args(socket_name.clone(), "1:4d:5", 3);
         assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::ParseFailure(e) if e == "4d".parse::<u32>().unwrap_err()
         );
 
         // Zero socket count
-        let cmd_args = get_cmd_args(socket_name, "1:4", 0);
+        let cmd_args = get_cmd_args(socket_name.clone(), "1:4", 0);
         assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::SocketCountInvalid(0)
         );
 
         // Duplicate client address: 4
-        let cmd_args = get_cmd_args(socket_name, "1:4:5:6:4", 5);
+        let cmd_args = get_cmd_args(socket_name.clone(), "1:4:5:6:4", 5);
         assert_matches!(
             GpioConfiguration::try_from(cmd_args).unwrap_err(),
             Error::DeviceDuplicate(4)
@@ -271,16 +271,16 @@ mod tests {
 
     #[test]
     fn test_gpio_parse_successful() {
-        let socket_name = "vgpio.sock";
+        let socket_name = PathBuf::from("vgpio.sock");
 
         // Match expected and actual configuration
-        let cmd_args = get_cmd_args(socket_name, "1:4:32:21:5", 5);
+        let cmd_args = get_cmd_args(socket_name.clone(), "1:4:32:21:5", 5);
         let config = GpioConfiguration::try_from(cmd_args).unwrap();
 
         let expected_devices = DeviceConfig::new_with(vec![1, 4, 32, 21, 5]);
         let expected_config = GpioConfiguration {
             socket_count: 5,
-            socket_path: String::from(socket_name),
+            socket_path: socket_name,
             devices: expected_devices,
         };
 
@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn test_gpio_fail_listener() {
         // This will fail the listeners and thread will panic.
-        let socket_name = "~/path/not/present/gpio";
+        let socket_name = PathBuf::from("~/path/not/present/gpio");
         let cmd_args = get_cmd_args(socket_name, "1:4:3:5", 4);
 
         assert_matches!(

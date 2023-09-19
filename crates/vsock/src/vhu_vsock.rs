@@ -115,8 +115,6 @@ pub(crate) enum Error {
     IterateQueue,
     #[error("No rx request available")]
     NoRequestRx,
-    #[error("Unable to create thread pool")]
-    CreateThreadPool(std::io::Error),
     #[error("Packet missing data buffer")]
     PktBufMissing,
     #[error("Failed to connect to unix socket")]

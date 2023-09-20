@@ -389,7 +389,7 @@ impl AudioBackend for PwBackend {
                     None => debug!("No buffer recieved"),
                     Some(mut buf) => {
                         let datas = buf.datas_mut();
-                        let frame_size = info.channels as u32 * size_of::<i16>() as u32;
+                        let frame_size = info.channels * size_of::<i16>() as u32;
                         let data = &mut datas[0];
                         let n_bytes = if let Some(slice) = data.data() {
                             let mut n_bytes = slice.len();

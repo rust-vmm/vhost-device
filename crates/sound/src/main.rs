@@ -40,10 +40,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use rstest::*;
     use serial_test::serial;
 
     use super::*;
-    use rstest::*;
 
     impl SoundArgs {
         fn from_args(socket: &str) -> Self {

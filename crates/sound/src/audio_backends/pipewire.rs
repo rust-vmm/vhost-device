@@ -1,28 +1,6 @@
 // Pipewire backend device
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use crate::device::ControlMessage;
-use crate::Result;
-use virtio_queue::Descriptor;
-use vm_memory::Bytes;
-
-use super::AudioBackend;
-use crate::virtio_sound::{
-    VirtioSndPcmSetParams, VIRTIO_SND_D_INPUT, VIRTIO_SND_D_OUTPUT, VIRTIO_SND_PCM_FMT_A_LAW,
-    VIRTIO_SND_PCM_FMT_FLOAT, VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW,
-    VIRTIO_SND_PCM_FMT_S16, VIRTIO_SND_PCM_FMT_S18_3, VIRTIO_SND_PCM_FMT_S20,
-    VIRTIO_SND_PCM_FMT_S20_3, VIRTIO_SND_PCM_FMT_S24, VIRTIO_SND_PCM_FMT_S24_3,
-    VIRTIO_SND_PCM_FMT_S32, VIRTIO_SND_PCM_FMT_S8, VIRTIO_SND_PCM_FMT_U16,
-    VIRTIO_SND_PCM_FMT_U18_3, VIRTIO_SND_PCM_FMT_U20, VIRTIO_SND_PCM_FMT_U20_3,
-    VIRTIO_SND_PCM_FMT_U24, VIRTIO_SND_PCM_FMT_U24_3, VIRTIO_SND_PCM_FMT_U32,
-    VIRTIO_SND_PCM_FMT_U8, VIRTIO_SND_PCM_RATE_11025, VIRTIO_SND_PCM_RATE_16000,
-    VIRTIO_SND_PCM_RATE_176400, VIRTIO_SND_PCM_RATE_192000, VIRTIO_SND_PCM_RATE_22050,
-    VIRTIO_SND_PCM_RATE_32000, VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100,
-    VIRTIO_SND_PCM_RATE_48000, VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000,
-    VIRTIO_SND_PCM_RATE_8000, VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000,
-    VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP,
-};
-use crate::{Error, Stream};
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -35,27 +13,57 @@ use std::{
 };
 
 use log::debug;
-use spa::param::{audio::AudioFormat, audio::AudioInfoRaw, ParamType};
-use spa::pod::{serialize::PodSerializer, Object, Pod, Value};
-
-use spa::sys::{
-    spa_audio_info_raw, SPA_PARAM_EnumFormat, SPA_TYPE_OBJECT_Format, SPA_AUDIO_CHANNEL_FC,
-    SPA_AUDIO_CHANNEL_FL, SPA_AUDIO_CHANNEL_FR, SPA_AUDIO_CHANNEL_LFE, SPA_AUDIO_CHANNEL_MONO,
-    SPA_AUDIO_CHANNEL_RC, SPA_AUDIO_CHANNEL_RL, SPA_AUDIO_CHANNEL_RR, SPA_AUDIO_CHANNEL_UNKNOWN,
-    SPA_AUDIO_FORMAT_ALAW, SPA_AUDIO_FORMAT_F32, SPA_AUDIO_FORMAT_F64, SPA_AUDIO_FORMAT_S16,
-    SPA_AUDIO_FORMAT_S18_LE, SPA_AUDIO_FORMAT_S20, SPA_AUDIO_FORMAT_S20_LE, SPA_AUDIO_FORMAT_S24,
-    SPA_AUDIO_FORMAT_S24_LE, SPA_AUDIO_FORMAT_S32, SPA_AUDIO_FORMAT_S8, SPA_AUDIO_FORMAT_U16,
-    SPA_AUDIO_FORMAT_U18_LE, SPA_AUDIO_FORMAT_U20, SPA_AUDIO_FORMAT_U20_LE, SPA_AUDIO_FORMAT_U24,
-    SPA_AUDIO_FORMAT_U24_LE, SPA_AUDIO_FORMAT_U32, SPA_AUDIO_FORMAT_U8, SPA_AUDIO_FORMAT_ULAW,
-    SPA_AUDIO_FORMAT_UNKNOWN,
+use pw::{
+    properties, spa,
+    sys::{
+        pw_loop, pw_thread_loop, pw_thread_loop_get_loop, pw_thread_loop_lock, pw_thread_loop_new,
+        pw_thread_loop_signal, pw_thread_loop_start, pw_thread_loop_unlock, pw_thread_loop_wait,
+        PW_ID_CORE,
+    },
+    Context, Core, LoopRef,
 };
-
-use pw::sys::{
-    pw_loop, pw_thread_loop, pw_thread_loop_get_loop, pw_thread_loop_lock, pw_thread_loop_new,
-    pw_thread_loop_signal, pw_thread_loop_start, pw_thread_loop_unlock, pw_thread_loop_wait,
-    PW_ID_CORE,
+use spa::{
+    param::{
+        audio::{AudioFormat, AudioInfoRaw},
+        ParamType,
+    },
+    pod::{serialize::PodSerializer, Object, Pod, Value},
+    sys::{
+        spa_audio_info_raw, SPA_PARAM_EnumFormat, SPA_TYPE_OBJECT_Format, SPA_AUDIO_CHANNEL_FC,
+        SPA_AUDIO_CHANNEL_FL, SPA_AUDIO_CHANNEL_FR, SPA_AUDIO_CHANNEL_LFE, SPA_AUDIO_CHANNEL_MONO,
+        SPA_AUDIO_CHANNEL_RC, SPA_AUDIO_CHANNEL_RL, SPA_AUDIO_CHANNEL_RR,
+        SPA_AUDIO_CHANNEL_UNKNOWN, SPA_AUDIO_FORMAT_ALAW, SPA_AUDIO_FORMAT_F32,
+        SPA_AUDIO_FORMAT_F64, SPA_AUDIO_FORMAT_S16, SPA_AUDIO_FORMAT_S18_LE, SPA_AUDIO_FORMAT_S20,
+        SPA_AUDIO_FORMAT_S20_LE, SPA_AUDIO_FORMAT_S24, SPA_AUDIO_FORMAT_S24_LE,
+        SPA_AUDIO_FORMAT_S32, SPA_AUDIO_FORMAT_S8, SPA_AUDIO_FORMAT_U16, SPA_AUDIO_FORMAT_U18_LE,
+        SPA_AUDIO_FORMAT_U20, SPA_AUDIO_FORMAT_U20_LE, SPA_AUDIO_FORMAT_U24,
+        SPA_AUDIO_FORMAT_U24_LE, SPA_AUDIO_FORMAT_U32, SPA_AUDIO_FORMAT_U8, SPA_AUDIO_FORMAT_ULAW,
+        SPA_AUDIO_FORMAT_UNKNOWN,
+    },
 };
-use pw::{properties, spa, Context, Core, LoopRef};
+use virtio_queue::Descriptor;
+use vm_memory::Bytes;
+
+use super::AudioBackend;
+use crate::{
+    device::ControlMessage,
+    virtio_sound::{
+        VirtioSndPcmSetParams, VIRTIO_SND_D_INPUT, VIRTIO_SND_D_OUTPUT, VIRTIO_SND_PCM_FMT_A_LAW,
+        VIRTIO_SND_PCM_FMT_FLOAT, VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW,
+        VIRTIO_SND_PCM_FMT_S16, VIRTIO_SND_PCM_FMT_S18_3, VIRTIO_SND_PCM_FMT_S20,
+        VIRTIO_SND_PCM_FMT_S20_3, VIRTIO_SND_PCM_FMT_S24, VIRTIO_SND_PCM_FMT_S24_3,
+        VIRTIO_SND_PCM_FMT_S32, VIRTIO_SND_PCM_FMT_S8, VIRTIO_SND_PCM_FMT_U16,
+        VIRTIO_SND_PCM_FMT_U18_3, VIRTIO_SND_PCM_FMT_U20, VIRTIO_SND_PCM_FMT_U20_3,
+        VIRTIO_SND_PCM_FMT_U24, VIRTIO_SND_PCM_FMT_U24_3, VIRTIO_SND_PCM_FMT_U32,
+        VIRTIO_SND_PCM_FMT_U8, VIRTIO_SND_PCM_RATE_11025, VIRTIO_SND_PCM_RATE_16000,
+        VIRTIO_SND_PCM_RATE_176400, VIRTIO_SND_PCM_RATE_192000, VIRTIO_SND_PCM_RATE_22050,
+        VIRTIO_SND_PCM_RATE_32000, VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100,
+        VIRTIO_SND_PCM_RATE_48000, VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000,
+        VIRTIO_SND_PCM_RATE_8000, VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000,
+        VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP,
+    },
+    Error, Result, Stream,
+};
 
 struct PwThreadLoop(NonNull<pw_thread_loop>);
 
@@ -159,11 +167,13 @@ impl PwBackend {
         thread_loop.start();
         let core = context.connect(None).expect("Failed to connect to core");
 
-        // Create new reference for the variable so that it can be moved into the closure.
+        // Create new reference for the variable so that it can be moved into the
+        // closure.
         let thread_clone = thread_loop.clone();
 
-        // Trigger the sync event. The server's answer won't be processed until we start the thread loop,
-        // so we can safely do this before setting up a callback. This lets us avoid using a Cell.
+        // Trigger the sync event. The server's answer won't be processed until we start
+        // the thread loop, so we can safely do this before setting up a
+        // callback. This lets us avoid using a Cell.
         let pending = core.sync(0).expect("sync failed");
         let _listener_core = core
             .add_listener_local()
@@ -389,7 +399,7 @@ impl AudioBackend for PwBackend {
                     None => debug!("No buffer recieved"),
                     Some(mut buf) => {
                         let datas = buf.datas_mut();
-                        let frame_size = info.channels as u32 * size_of::<i16>() as u32;
+                        let frame_size = info.channels * size_of::<i16>() as u32;
                         let data = &mut datas[0];
                         let n_bytes = if let Some(slice) = data.data() {
                             let mut n_bytes = slice.len();

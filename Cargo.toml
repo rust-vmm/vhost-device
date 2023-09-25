@@ -2,10 +2,10 @@
 resolver = "2"
 
 members = [
-    "gpio",
-    "i2c",
-    "rng",
-    "scsi",
-    "scmi",
-    "vsock",
+    "vhost-device-gpio",
+    "vhost-device-i2c",
+    "vhost-device-rng",
+    "vhost-device-scsi",
+    "vhost-device-scmi",
+    "vhost-device-vsock",
 ]

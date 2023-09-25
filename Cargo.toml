@@ -2,10 +2,10 @@
 resolver = "2"
 
 members = [
-    "crates/gpio",
-    "crates/i2c",
-    "crates/rng",
-    "crates/scsi",
-    "crates/scmi",
-    "crates/vsock",
+    "gpio",
+    "i2c",
+    "rng",
+    "scsi",
+    "scmi",
+    "vsock",
 ]

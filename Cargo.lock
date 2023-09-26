@@ -589,7 +589,7 @@ dependencies = [
 [[package]]
 name = "libspa"
 version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=5fe090b3ac8f6fed756c4871ac18f26edda3ac89#5fe090b3ac8f6fed756c4871ac18f26edda3ac89"
 dependencies = [
  "bitflags 2.3.3",
  "cc",
@@ -605,7 +605,7 @@ dependencies = [
 [[package]]
 name = "libspa-sys"
 version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=5fe090b3ac8f6fed756c4871ac18f26edda3ac89#5fe090b3ac8f6fed756c4871ac18f26edda3ac89"
 dependencies = [
  "bindgen 0.66.1",
  "cc",
@@ -756,7 +756,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 [[package]]
 name = "pipewire"
 version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=5fe090b3ac8f6fed756c4871ac18f26edda3ac89#5fe090b3ac8f6fed756c4871ac18f26edda3ac89"
 dependencies = [
  "anyhow",
  "bitflags 2.3.3",
@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "pipewire-sys"
 version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=068f16e4bcc2a58657ceb53bd134acb5b00a5391#068f16e4bcc2a58657ceb53bd134acb5b00a5391"
+source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=5fe090b3ac8f6fed756c4871ac18f26edda3ac89#5fe090b3ac8f6fed756c4871ac18f26edda3ac89"
 dependencies = [
  "bindgen 0.66.1",
  "libspa-sys",

@@ -19,7 +19,7 @@ alsa = { version = "0.7", optional = true }
 clap = { version = "4.1", features = ["derive"] }
 env_logger = "0.10"
 log = "0.4"
-pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "068f16e4bcc2a58657ceb53bd134acb5b00a5391", optional = true }
+pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "5fe090b3ac8f6fed756c4871ac18f26edda3ac89", optional = true }
 thiserror = "1.0"
 vhost = { version = "0.6", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.8"

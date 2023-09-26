@@ -8,12 +8,12 @@ crates.
 
 Here is the list of device backends that we support:
 
-- [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/crates/gpio/README.md)
-- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/crates/i2c/README.md)
-- [RNG](https://github.com/rust-vmm/vhost-device/blob/main/crates/rng/README.md)
-- [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/crates/scmi/README.md)
-- [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/crates/scsi/README.md)
-- [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/crates/vsock/README.md)
+- [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-gpio/README.md)
+- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-i2c/README.md)
+- [RNG](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-rng/README.md)
+- [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-scmi/README.md)
+- [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-scsi/README.md)
+- [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-vsock/README.md)
 
 ## Testing and Code Coverage
 

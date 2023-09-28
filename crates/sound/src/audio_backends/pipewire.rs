@@ -385,10 +385,10 @@ impl AudioBackend for PwBackend {
                 )
                 .expect("could not connect to the stream");
 
-            lock_guard.unlock();
-
             // insert created stream in a hash table
             stream_hash.insert(stream_id, stream);
+
+            lock_guard.unlock();
         }
 
         Ok(())

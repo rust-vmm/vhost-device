@@ -91,7 +91,7 @@ pub(crate) struct PhysLineState {
 }
 
 pub(crate) struct PhysDevice {
-    chip: chip::Chip,
+    chip: Mutex<chip::Chip>,
     ngpio: u16,
     state: Vec<RwLock<PhysLineState>>,
 }
@@ -121,7 +121,11 @@ impl GpioDevice for PhysDevice {
             })
         });
 
-        Ok(PhysDevice { chip, ngpio, state })
+        Ok(PhysDevice {
+            chip: Mutex::new(chip),
+            ngpio,
+            state,
+        })
     }
 
     fn num_gpios(&self) -> Result<u16> {
@@ -131,6 +135,8 @@ impl GpioDevice for PhysDevice {
     fn gpio_name(&self, gpio: u16) -> Result<String> {
         let line_info = self
             .chip
+            .lock()
+            .unwrap()
             .line_info(gpio.into())
             .map_err(Error::GpiodFailed)?;
 
@@ -140,6 +146,8 @@ impl GpioDevice for PhysDevice {
     fn direction(&self, gpio: u16) -> Result<u8> {
         let line_info = self
             .chip
+            .lock()
+            .unwrap()
             .line_info(gpio.into())
             .map_err(Error::GpiodFailed)?;
 
@@ -195,22 +203,13 @@ impl GpioDevice for PhysDevice {
                 .set_consumer("vhu-gpio")
                 .map_err(Error::GpiodFailed)?;
 
-            // This is causing a warning since libgpiod's request_config is
-            // not `Send`.
-            // We, however, unsafely claim that it is by marking PhysDevice as
-            // `Send`. This is wrong, but until we figure out what to do, we
-            // just silence the clippy warning here.
-            //
-            // https://github.com/rust-vmm/vhost-device/issues/442 tracks
-            // finding a solution to this.
-            #[allow(clippy::arc_with_non_send_sync)]
-            {
-                state.request = Some(Arc::new(Mutex::new(
-                    self.chip
-                        .request_lines(Some(&rconfig), &lconfig)
-                        .map_err(Error::GpiodFailed)?,
-                )));
-            }
+            state.request = Some(
+                self.chip
+                    .lock()
+                    .unwrap()
+                    .request_lines(Some(&rconfig), &lconfig)
+                    .map_err(Error::GpiodFailed)?,
+            );
         }
 
         Ok(())

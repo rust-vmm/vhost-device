@@ -411,9 +411,9 @@ checksum = "a08173bc88b7955d1b3145aa561539096c421ac8debde8cbc3612ec635fee29b"
 
 [[package]]
 name = "libgpiod"
-version = "0.1.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e9fdf4b437063f5697151f9ead12bafa223958e243f2f736107ec68c2b88231"
+checksum = "f726cc57967d3b982e1b3074cdfa8f68a3b36f345fd80b5c0ccb0dfd7dee0f79"
 dependencies = [
  "errno 0.2.8",
  "intmap",

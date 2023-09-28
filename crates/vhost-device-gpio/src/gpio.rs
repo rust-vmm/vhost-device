@@ -96,13 +96,6 @@ pub(crate) struct PhysDevice {
     state: Vec<Mutex<PhysLineState>>,
 }
 
-// SAFETY: Safe as the structure can be sent to another thread.
-unsafe impl Send for PhysDevice {}
-
-// SAFETY: Safe as the structure can be shared with another thread as the state
-// is protected with a lock.
-unsafe impl Sync for PhysDevice {}
-
 impl GpioDevice for PhysDevice {
     fn open(device: u32) -> Result<Self>
     where

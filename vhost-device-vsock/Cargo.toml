@@ -19,12 +19,12 @@ env_logger = "0.10"
 epoll = "4.3.2"
 log = "0.4"
 thiserror = "1.0"
-vhost = { version = "0.8", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.10"
+vhost = { version = "0.9", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.11"
 virtio-bindings = "0.2.2"
-virtio-queue = "0.9"
-virtio-vsock = "0.3.1"
-vm-memory = "0.12"
+virtio-queue = "0.10"
+virtio-vsock = "0.4"
+vm-memory = "0.13.1"
 vmm-sys-util = "0.11"
 config = { version = "0.13", default-features = false, features = ["yaml"] }
 serde = { version = "1", features = ["derive"] }
@@ -32,5 +32,5 @@ serde_yaml = "0.9"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.9", features = ["test-utils"] }
+virtio-queue = { version = "0.10", features = ["test-utils"] }
 tempfile = "3.6.0"

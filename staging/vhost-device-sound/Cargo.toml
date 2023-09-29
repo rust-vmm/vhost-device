@@ -23,15 +23,15 @@ env_logger = "0.10"
 log = "0.4"
 pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "5fe090b3ac8f6fed756c4871ac18f26edda3ac89", optional = true }
 thiserror = "1.0"
-vhost = { version = "0.8", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.10"
+vhost = { version = "0.9", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.11"
 virtio-bindings = "0.2.1"
-virtio-queue = "0.9"
-vm-memory = "0.12"
+virtio-queue = "0.10"
+vm-memory = "0.13.1"
 vmm-sys-util = "0.11"
 
 [dev-dependencies]
 rstest = "0.18.2"
 tempfile = "3.5"
-virtio-queue = { version = "0.9", features = ["test-utils"] }
-vm-memory = { version = "0.12", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { version = "0.10", features = ["test-utils"] }
+vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic"] }

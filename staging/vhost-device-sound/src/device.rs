@@ -90,7 +90,7 @@ impl VhostUserSoundThread {
         device_event: u16,
         vrings: &[VringRwLock],
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         let vring = &vrings[device_event as usize];
         let queue_idx = self.queue_indexes[device_event as usize];
         if self.event_idx {
@@ -121,7 +121,7 @@ impl VhostUserSoundThread {
                 _ => Err(Error::HandleUnknownEvent.into()),
             }?;
         }
-        Ok(false)
+        Ok(())
     }
 
     #[allow(clippy::cognitive_complexity)]
@@ -697,7 +697,10 @@ impl VhostUserSoundBackend {
     }
 }
 
-impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
+impl VhostUserBackend for VhostUserSoundBackend {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES as usize
     }
@@ -742,7 +745,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
@@ -1110,17 +1113,18 @@ mod tests {
         assert!(exit.is_some());
         exit.unwrap().write(1).unwrap();
 
-        let ret = backend.handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(!ret.unwrap());
-
-        let ret = backend.handle_event(EVENT_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(!ret.unwrap());
-
-        let ret = backend.handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(!ret.unwrap());
-
-        let ret = backend.handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(!ret.unwrap());
+        backend
+            .handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0)
+            .unwrap();
+        backend
+            .handle_event(EVENT_QUEUE_IDX, EventSet::IN, &vrings, 0)
+            .unwrap();
+        backend
+            .handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0)
+            .unwrap();
+        backend
+            .handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0)
+            .unwrap();
 
         test_dir.close().unwrap();
     }

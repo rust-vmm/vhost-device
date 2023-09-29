@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     num::Wrapping,
     os::unix::prelude::{AsRawFd, RawFd},
 };
 
 use log::{error, info};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
-use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
+use vm_memory::{bitmap::BitmapSlice, ReadVolatile, VolatileSlice, WriteVolatile};
 
 use crate::{
     rxops::*,
@@ -55,7 +55,7 @@ pub(crate) struct VsockConnection<S> {
     tx_buffer_size: u32,
 }
 
-impl<S: AsRawFd + Read + Write> VsockConnection<S> {
+impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile> VsockConnection<S> {
     /// Create a new vsock connection object for locally i.e host-side
     /// inititated connections.
     pub fn new_local_init(
@@ -158,9 +158,11 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                 // data must fit inside a packet buffer and be within peer's
                 // available buffer space
                 let max_read_len = std::cmp::min(buf.len(), self.peer_avail_credit());
-
+                let mut buf = buf
+                    .subslice(0, max_read_len)
+                    .expect("subslicing should work since length was checked");
                 // Read data from the stream directly into the buffer
-                if let Ok(read_cnt) = buf.read_from(0, &mut self.stream, max_read_len) {
+                if let Ok(read_cnt) = self.stream.read_volatile(&mut buf) {
                     if read_cnt == 0 {
                         // If no data was read then the stream was closed down unexpectedly.
                         // Send a shutdown packet to the guest-side application.
@@ -305,7 +307,8 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
         }
 
         // Write data to the stream
-        let written_count = match buf.write_to(0, &mut self.stream, buf.len()) {
+
+        let written_count = match self.stream.write_volatile(buf) {
             Ok(cnt) => cnt,
             Err(vm_memory::VolatileMemoryError::IOError(e)) => {
                 if e.kind() == ErrorKind::WouldBlock {
@@ -382,7 +385,7 @@ mod tests {
     use super::*;
     use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
     use std::collections::VecDeque;
-    use std::io::Result as IoResult;
+    use std::io::{Read, Result as IoResult};
     use std::ops::Deref;
     use std::sync::{Arc, Mutex};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
@@ -527,14 +530,49 @@ mod tests {
         fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
             self.write_buffer.lock().unwrap().write(buf)
         }
+
         fn flush(&mut self) -> IoResult<()> {
             Ok(())
+        }
+    }
+
+    impl WriteVolatile for VsockDummySocket {
+        fn write_volatile<B: BitmapSlice>(
+            &mut self,
+            buf: &VolatileSlice<B>,
+        ) -> std::result::Result<usize, vm_memory::VolatileMemoryError> {
+            // VecDequeue has no fancy unsafe tricks that vm-memory can abstract.
+            // One could do fairly efficient stuff using the moving From<Vec> imp...
+            // But this is just for tests, so lets clone, convert to Vec, append, convert back and replace.
+            let mut write_buffer = self.write_buffer.lock().unwrap();
+            let mut vec = Vec::from(write_buffer.clone());
+            let n = vec.write_volatile(buf)?;
+            *write_buffer = VecDeque::from(vec);
+
+            Ok(n)
         }
     }
 
     impl Read for VsockDummySocket {
         fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
             self.read_buffer.lock().unwrap().read(buf)
+        }
+    }
+
+    impl ReadVolatile for VsockDummySocket {
+        fn read_volatile<B: BitmapSlice>(
+            &mut self,
+            buf: &mut VolatileSlice<B>,
+        ) -> std::result::Result<usize, vm_memory::VolatileMemoryError> {
+            // Similar to the std's Read impl, we only read on the head. Since
+            // we drain the head, successive reads will cover the rest of the
+            // queue.
+            let mut read_buffer = self.read_buffer.lock().unwrap();
+            let (head, _) = read_buffer.as_slices();
+            let n = ReadVolatile::read_volatile(&mut &head[..], buf)?;
+            read_buffer.drain(..n);
+
+            Ok(n)
         }
     }
 

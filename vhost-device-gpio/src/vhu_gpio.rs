@@ -380,9 +380,10 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
 }
 
 /// VhostUserBackendMut trait methods
-impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
-    for VhostUserGpioBackend<D>
-{
+impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut for VhostUserGpioBackend<D> {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -438,7 +439,7 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
@@ -490,7 +491,7 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
                 return Err(Error::HandleEventUnknown.into());
             }
         }
-        Ok(false)
+        Ok(())
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {

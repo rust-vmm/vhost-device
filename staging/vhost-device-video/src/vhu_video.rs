@@ -151,7 +151,10 @@ impl VuVideoBackend {
 }
 
 /// VhostUserBackend trait methods
-impl VhostUserBackendMut<VringRwLock, ()> for VuVideoBackend {
+impl VhostUserBackendMut for VuVideoBackend {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -194,7 +197,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VuVideoBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         if evset != EventSet::IN {
             return Err(VuVideoError::HandleEventNotEpollIn.into());
         }
@@ -240,7 +243,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VuVideoBackend {
                 return Err(VuVideoError::HandleUnknownEvent.into());
             }
         }
-        Ok(false)
+        Ok(())
     }
 
     fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
@@ -349,7 +352,6 @@ pub mod tests {
             }
             let ret = backend.handle_event(queue, EventSet::IN, &vrings, 0);
             assert!(ret.is_ok());
-            assert!(!ret.unwrap());
         }
     }
 

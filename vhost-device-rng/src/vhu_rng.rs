@@ -6,7 +6,6 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use log::warn;
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -21,7 +20,8 @@ use virtio_bindings::bindings::virtio_ring::{
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
-    Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+    GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+    ReadVolatile,
 };
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -82,7 +82,7 @@ impl VuRngTimerConfig {
     }
 }
 
-pub(crate) struct VuRngBackend<T: Read> {
+pub(crate) struct VuRngBackend<T: ReadVolatile> {
     event_idx: bool,
     timer: VuRngTimerConfig,
     rng_source: Arc<Mutex<T>>,
@@ -90,7 +90,7 @@ pub(crate) struct VuRngBackend<T: Read> {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
-impl<T: Read> VuRngBackend<T> {
+impl<T: ReadVolatile> VuRngBackend<T> {
     /// Create a new virtio rng device that gets random data from /dev/urandom.
     pub fn new(
         rng_source: Arc<Mutex<T>>,
@@ -169,7 +169,7 @@ impl<T: Read> VuRngBackend<T> {
 
             let len = desc_chain
                 .memory()
-                .read_from(descriptor.addr(), &mut *rng_source, to_read)
+                .read_volatile_from(descriptor.addr(), &mut *rng_source, to_read)
                 .map_err(|_| VuRngError::UnexpectedRngSourceError)?;
 
             timer.quota_remaining -= len;
@@ -202,7 +202,10 @@ impl<T: Read> VuRngBackend<T> {
 }
 
 /// VhostUserBackend trait methods
-impl<T: 'static + Read + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for VuRngBackend<T> {
+impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBackend<T> {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -242,7 +245,7 @@ impl<T: 'static + Read + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for V
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> result::Result<bool, io::Error> {
+    ) -> result::Result<(), io::Error> {
         if evset != EventSet::IN {
             return Err(VuRngError::HandleEventNotEpollIn.into());
         }
@@ -274,7 +277,7 @@ impl<T: 'static + Read + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for V
                 return Err(VuRngError::HandleEventUnknownEvent.into());
             }
         }
-        Ok(false)
+        Ok(())
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
@@ -285,14 +288,14 @@ impl<T: 'static + Read + Sync + Send> VhostUserBackendMut<VringRwLock, ()> for V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{ErrorKind, Read};
+    use std::io::ErrorKind;
 
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
-    use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     // Add VuRngBackend accessor to artificially manipulate internal fields
-    impl<T: Read> VuRngBackend<T> {
+    impl<T: ReadVolatile> VuRngBackend<T> {
         // For testing purposes modify time synthetically
         pub(crate) fn time_add(&mut self, duration: Duration) {
             if let Some(t) = self.timer.period_start.checked_add(duration) {
@@ -327,12 +330,17 @@ mod tests {
         }
     }
 
-    impl Read for MockRng {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    impl ReadVolatile for MockRng {
+        fn read_volatile<B: vm_memory::bitmap::BitmapSlice>(
+            &mut self,
+            buf: &mut vm_memory::VolatileSlice<B>,
+        ) -> result::Result<usize, vm_memory::VolatileMemoryError> {
             match self.permission_denied {
-                true => Err(std::io::Error::from(ErrorKind::PermissionDenied)),
+                true => Err(vm_memory::VolatileMemoryError::IOError(
+                    std::io::Error::from(ErrorKind::PermissionDenied),
+                )),
                 false => {
-                    buf[0] = rand::random::<u8>();
+                    buf.write_obj(rand::random::<u8>(), 0)?;
                     Ok(1)
                 }
             }

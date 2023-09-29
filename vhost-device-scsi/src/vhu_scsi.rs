@@ -195,7 +195,10 @@ impl VhostUserScsiBackend {
     }
 }
 
-impl VhostUserBackendMut<VringRwLock> for VhostUserScsiBackend {
+impl VhostUserBackendMut for VhostUserScsiBackend {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         // control + event + request queues
         let num_request_queues = 1;
@@ -237,7 +240,7 @@ impl VhostUserBackendMut<VringRwLock> for VhostUserScsiBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         thread_id: usize,
-    ) -> io::Result<bool> {
+    ) -> io::Result<()> {
         assert!(evset == EventSet::IN);
         assert!(vrings.len() == 3);
         assert!((device_event as usize) < vrings.len());
@@ -268,7 +271,7 @@ impl VhostUserBackendMut<VringRwLock> for VhostUserScsiBackend {
             }
         }
 
-        Ok(false)
+        Ok(())
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {

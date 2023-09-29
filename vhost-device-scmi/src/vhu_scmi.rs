@@ -329,7 +329,10 @@ impl VuScmiBackend {
 }
 
 /// VhostUserBackend trait methods
-impl VhostUserBackendMut<VringRwLock, ()> for VuScmiBackend {
+impl VhostUserBackendMut for VuScmiBackend {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         debug!("Num queues called");
         NUM_QUEUES
@@ -372,7 +375,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VuScmiBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         debug!("Handle event called");
         if evset != EventSet::IN {
             warn!("Non-input event");
@@ -428,7 +431,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VuScmiBackend {
             }
         }
         debug!("Handle event finished");
-        Ok(false)
+        Ok(())
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {

@@ -190,7 +190,7 @@ pub(crate) struct VhostUserVideoThread {
     /// VIRTIO_RING_F_EVENT_IDX.
     pub event_idx: bool,
     poller: VideoPoller,
-    vring_worker: Option<Arc<VringEpollHandler<ArcVhostBknd, VringRwLock, ()>>>,
+    vring_worker: Option<Arc<VringEpollHandler<ArcVhostBknd>>>,
     backend: Arc<RwLock<Box<dyn VideoBackend + Sync + Send>>>,
     /// Thread pool to handle async commands.
     pool: ThreadPool,
@@ -233,10 +233,7 @@ impl VhostUserVideoThread {
         })
     }
 
-    pub fn set_vring_workers(
-        &mut self,
-        vring_worker: Arc<VringEpollHandler<ArcVhostBknd, VringRwLock, ()>>,
-    ) {
+    pub fn set_vring_workers(&mut self, vring_worker: Arc<VringEpollHandler<ArcVhostBknd>>) {
         self.vring_worker = Some(vring_worker);
         self.vring_worker
             .as_ref()

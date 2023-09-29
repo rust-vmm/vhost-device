@@ -256,7 +256,10 @@ impl VhostUserVsockBackend {
     }
 }
 
-impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
+impl VhostUserBackend for VhostUserVsockBackend {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -295,7 +298,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         let vring_rx = &vrings[0];
         let vring_tx = &vrings[1];
 
@@ -328,7 +331,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
             SIBLING_VM_EVENT => {
                 let _ = thread.sibling_event_fd.read();
                 thread.process_raw_pkts(vring_rx, evt_idx)?;
-                return Ok(false);
+                return Ok(());
             }
             _ => {
                 return Err(Error::HandleUnknownEvent.into());
@@ -339,7 +342,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserVsockBackend {
             thread.process_rx(vring_rx, evt_idx)?;
         }
 
-        Ok(false)
+        Ok(())
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
@@ -443,19 +446,15 @@ mod tests {
 
         let ret = backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
-        assert!(!ret.unwrap());
 
         let ret = backend.handle_event(TX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
-        assert!(!ret.unwrap());
 
         let ret = backend.handle_event(EVT_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
-        assert!(!ret.unwrap());
 
         let ret = backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
-        assert!(!ret.unwrap());
 
         // cleanup
         let _ = std::fs::remove_file(vhost_socket_path);

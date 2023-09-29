@@ -277,9 +277,10 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
 }
 
 /// VhostUserBackendMut trait methods
-impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
-    for VhostUserI2cBackend<D>
-{
+impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cBackend<D> {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         NUM_QUEUES
     }
@@ -317,7 +318,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
@@ -349,7 +350,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut<VringRwLock, ()>
                 return Err(Error::HandleEventUnknown.into());
             }
         }
-        Ok(false)
+        Ok(())
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {

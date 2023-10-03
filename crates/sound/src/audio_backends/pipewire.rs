@@ -329,26 +329,27 @@ impl AudioBackend for PwBackend {
 
                             let mut start = buffer.pos;
 
-                            let avail = (buffer.bytes.len() - start) as i32;
+                            let avail = (buffer.data_descriptor.len() - start as u32) as i32;
 
                             if avail < n_bytes as i32 {
                                 n_bytes = avail.try_into().unwrap();
                             }
-                            let p = &mut slice[buffer.pos..start + n_bytes];
+                            let p = &mut slice[0..n_bytes];
                             if avail <= 0 {
                                 // pad with silence
                                 unsafe {
                                     ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
                                 }
                             } else {
-                                let slice = &buffer.bytes[buffer.pos..start + n_bytes];
-                                p.copy_from_slice(slice);
+                                // consume() always reads (buffer.data_descriptor.len() -
+                                // buffer.pos) bytes
+                                buffer.consume(p).expect("failed to read buffer from guest");
 
                                 start += n_bytes;
 
                                 buffer.pos = start;
 
-                                if start >= buffer.bytes.len() {
+                                if start >= buffer.data_descriptor.len() as usize {
                                     streams.buffers.pop_front();
                                 }
                             }

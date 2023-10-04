@@ -35,6 +35,8 @@ use crate::{
 struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     event_idx: bool,
+    chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>>,
+    jacks: Arc<RwLock<Vec<VirtioSoundJackInfo>>>,
     queue_indexes: Vec<u16>,
     streams: Arc<RwLock<Vec<Stream>>>,
     streams_no: usize,
@@ -44,6 +46,8 @@ type SoundDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap
 
 impl VhostUserSoundThread {
     pub fn new(
+        chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>>,
+        jacks: Arc<RwLock<Vec<VirtioSoundJackInfo>>>,
         mut queue_indexes: Vec<u16>,
         streams: Arc<RwLock<Vec<Stream>>>,
         streams_no: usize,
@@ -53,6 +57,8 @@ impl VhostUserSoundThread {
         Ok(Self {
             event_idx: false,
             mem: None,
+            chmaps,
+            jacks,
             queue_indexes,
             streams,
             streams_no,
@@ -172,9 +178,84 @@ impl VhostUserSoundThread {
 
             let code = ControlMessageKind::try_from(request.code).map_err(Error::from)?;
             match code {
-                ControlMessageKind::ChmapInfo
-                | ControlMessageKind::JackInfo
-                | ControlMessageKind::JackRemap => {
+                ControlMessageKind::ChmapInfo => {
+                    if descriptors.len() != 3 {
+                        log::error!("a CHMAP_INFO request should have three descriptors total.");
+                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
+                    } else if !descriptors[2].is_write_only() {
+                        log::error!(
+                            "a CHMAP_INFO request should have a writeable descriptor for the info \
+                             payload response after the header status response"
+                        );
+                        return Err(Error::UnexpectedReadableDescriptor(2).into());
+                    }
+                    let request = desc_chain
+                        .memory()
+                        .read_obj::<VirtioSoundQueryInfo>(desc_request.addr())
+                        .map_err(|_| Error::DescriptorReadFailed)?;
+                    let start_id = u32::from(request.start_id) as usize;
+                    let count = u32::from(request.count) as usize;
+                    let chmaps = self.chmaps.read().unwrap();
+                    if chmaps.len() <= start_id || chmaps.len() < start_id + count {
+                        resp.code = VIRTIO_SND_S_BAD_MSG.into();
+                    } else {
+                        let desc_response = descriptors[2];
+                        let mut buf = vec![];
+
+                        for i in chmaps
+                            .iter()
+                            .skip(start_id)
+                            .take(count)
+                        {
+                            buf.extend_from_slice(i.as_slice());
+                        }
+                        desc_chain
+                            .memory()
+                            .write_slice(&buf, desc_response.addr())
+                            .map_err(|_| Error::DescriptorWriteFailed)?;
+                        used_len += desc_response.len();
+                    }
+                }
+                ControlMessageKind::JackInfo => {
+                    if descriptors.len() != 3 {
+                        log::error!("a JACK_INFO request should have three descriptors total.");
+                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
+                    } else if !descriptors[2].is_write_only() {
+                        log::error!(
+                            "a JACK_INFO request should have a writeable descriptor for the info \
+                             payload response after the header status response"
+                        );
+                        return Err(Error::UnexpectedReadableDescriptor(2).into());
+                    }
+                    let request = desc_chain
+                        .memory()
+                        .read_obj::<VirtioSoundQueryInfo>(desc_request.addr())
+                        .map_err(|_| Error::DescriptorReadFailed)?;
+
+                    let start_id = u32::from(request.start_id) as usize;
+                    let count = u32::from(request.count) as usize;
+                    let jacks = self.jacks.read().unwrap();
+                    if jacks.len() <= start_id || jacks.len() < start_id + count {
+                        resp.code = VIRTIO_SND_S_BAD_MSG.into();
+                    } else {
+                        let desc_response = descriptors[2];
+                        let mut buf = vec![];
+
+                        for i in jacks
+                            .iter()
+                            .skip(start_id)
+                            .take(count)
+                        {
+                            buf.extend_from_slice(i.as_slice());
+                        }
+                        desc_chain
+                            .memory()
+                            .write_slice(&buf, desc_response.addr())
+                            .map_err(|_| Error::DescriptorWriteFailed)?;
+                        used_len += desc_response.len();
+                    }
+                }
+                ControlMessageKind::JackRemap => {
                     resp.code = VIRTIO_SND_S_NOT_SUPP.into();
                 }
                 ControlMessageKind::PcmInfo => {
@@ -527,20 +608,45 @@ impl VhostUserSoundBackend {
         ];
         let streams_no = streams.len();
         let streams = Arc::new(RwLock::new(streams));
+        let jacks: Arc<RwLock<Vec<VirtioSoundJackInfo>>> = Arc::new(RwLock::new(Vec::new()));
+        let mut positions = [VIRTIO_SND_CHMAP_NONE; VIRTIO_SND_CHMAP_MAX_SIZE];
+        positions[0] = VIRTIO_SND_CHMAP_FL;
+        positions[1] = VIRTIO_SND_CHMAP_FR;
+        let chmaps_info: Vec<VirtioSoundChmapInfo> = vec![
+            VirtioSoundChmapInfo {
+                direction: VIRTIO_SND_D_OUTPUT,
+                channels: 2,
+                positions,
+                ..VirtioSoundChmapInfo::default()
+            },
+            VirtioSoundChmapInfo {
+                direction: VIRTIO_SND_D_INPUT,
+                channels: 2,
+                positions,
+                ..VirtioSoundChmapInfo::default()
+            },
+        ];
+        let chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>> = Arc::new(RwLock::new(chmaps_info));
         log::trace!("VhostUserSoundBackend::new config {:?}", &config);
         let threads = if config.multi_thread {
             vec![
                 RwLock::new(VhostUserSoundThread::new(
+                    chmaps.clone(),
+                    jacks.clone(),
                     vec![CONTROL_QUEUE_IDX, EVENT_QUEUE_IDX],
                     streams.clone(),
                     streams_no,
                 )?),
                 RwLock::new(VhostUserSoundThread::new(
+                    chmaps.clone(),
+                    jacks.clone(),
                     vec![TX_QUEUE_IDX],
                     streams.clone(),
                     streams_no,
                 )?),
                 RwLock::new(VhostUserSoundThread::new(
+                    chmaps.clone(),
+                    jacks.clone(),
                     vec![RX_QUEUE_IDX],
                     streams.clone(),
                     streams_no,
@@ -548,6 +654,8 @@ impl VhostUserSoundBackend {
             ]
         } else {
             vec![RwLock::new(VhostUserSoundThread::new(
+                chmaps.clone(),
+                jacks.clone(),
                 vec![
                     CONTROL_QUEUE_IDX,
                     EVENT_QUEUE_IDX,
@@ -566,7 +674,7 @@ impl VhostUserSoundBackend {
             virtio_cfg: VirtioSoundConfig {
                 jacks: 0.into(),
                 streams: 1.into(),
-                chmaps: 0.into(),
+                chmaps: 1.into(),
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
             audio_backend: RwLock::new(audio_backend),

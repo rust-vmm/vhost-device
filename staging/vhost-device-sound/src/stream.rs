@@ -4,7 +4,7 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use thiserror::Error as ThisError;
-use vm_memory::{Address, Bytes, Le32, Le64};
+use vm_memory::{Le32, Le64};
 
 use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
@@ -15,11 +15,7 @@ pub enum Error {
     InvalidStateTransition(PCMState, PCMState),
     #[error("Guest requested an invalid stream id: {0}")]
     InvalidStreamId(u32),
-    #[error("Descriptor read failed")]
-    DescriptorReadFailed,
 }
-
-type Result<T> = std::result::Result<T, Error>;
 
 /// PCM stream state machine.
 ///
@@ -108,12 +104,11 @@ pub enum PCMState {
 
 macro_rules! set_new_state {
     ($new_state_fn:ident, $new_state:expr, $($valid_source_states:tt)*) => {
-        pub fn $new_state_fn(&mut self) -> Result<()> {
-            if !matches!(self, $($valid_source_states)*) {
-                return Err(Error::InvalidStateTransition(*self, $new_state));
+        pub fn $new_state_fn(&mut self) {
+            if !matches!(*self, $($valid_source_states)*) {
+                log::error!("{}", Error::InvalidStateTransition(*self, $new_state));
             }
             *self = $new_state;
-            Ok(())
         }
     };
 }
@@ -236,8 +231,7 @@ impl Default for PcmParams {
 }
 
 pub struct Buffer {
-    // TODO: to make private and add len usize
-    pub data_descriptor: virtio_queue::Descriptor,
+    pub bytes: Vec<u8>,
     pub pos: usize,
     pub message: Arc<IOMessage>,
 }
@@ -245,6 +239,7 @@ pub struct Buffer {
 impl std::fmt::Debug for Buffer {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         fmt.debug_struct(stringify!(Buffer))
+            .field("bytes", &self.bytes.len())
             .field("pos", &self.pos)
             .field("message", &Arc::as_ptr(&self.message))
             .finish()
@@ -252,28 +247,12 @@ impl std::fmt::Debug for Buffer {
 }
 
 impl Buffer {
-    pub fn new(data_descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
+    pub fn new(bytes: Vec<u8>, message: Arc<IOMessage>) -> Self {
         Self {
+            bytes,
             pos: 0,
-            data_descriptor,
             message,
         }
-    }
-
-    pub fn consume(&self, buf: &mut [u8]) -> Result<u32> {
-        let addr = self.data_descriptor.addr();
-        let offset = self.pos as u64;
-        let len = self
-            .message
-            .desc_chain
-            .memory()
-            .read(
-                buf,
-                addr.checked_add(offset)
-                    .expect("invalid guest memory address"),
-            )
-            .map_err(|_| Error::DescriptorReadFailed)?;
-        Ok(len as u32)
     }
 }
 

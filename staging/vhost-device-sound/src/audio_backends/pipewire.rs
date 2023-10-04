@@ -49,7 +49,7 @@ use crate::{
         VIRTIO_SND_PCM_RATE_32000, VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100,
         VIRTIO_SND_PCM_RATE_48000, VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000,
         VIRTIO_SND_PCM_RATE_8000, VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000,
-        VIRTIO_SND_S_NOT_SUPP,
+        VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP,
     },
     Error, Result, Stream,
 };
@@ -137,19 +137,20 @@ impl AudioBackend for PwBackend {
         {
             let stream_clone = self.stream_params.clone();
             let mut stream_params = stream_clone.write().unwrap();
-            let st = stream_params
-                .get_mut(stream_id as usize)
-                .expect("Stream does not exist");
-            st.state.set_parameters();
-            if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
-                msg.code = VIRTIO_SND_S_NOT_SUPP;
+            if let Some(st) = stream_params.get_mut(stream_id as usize) {
+                st.state.set_parameters();
+                if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
+                    msg.code = VIRTIO_SND_S_NOT_SUPP;
+                } else {
+                    st.params.features = request.features;
+                    st.params.buffer_bytes = request.buffer_bytes;
+                    st.params.period_bytes = request.period_bytes;
+                    st.params.channels = request.channels;
+                    st.params.format = request.format;
+                    st.params.rate = request.rate;
+                }
             } else {
-                st.params.features = request.features;
-                st.params.buffer_bytes = request.buffer_bytes;
-                st.params.period_bytes = request.period_bytes;
-                st.params.channels = request.channels;
-                st.params.format = request.format;
-                st.params.rate = request.rate;
+                msg.code = VIRTIO_SND_S_BAD_MSG;
             }
         }
         drop(msg);
@@ -159,7 +160,11 @@ impl AudioBackend for PwBackend {
 
     fn prepare(&self, stream_id: u32) -> Result<()> {
         debug!("pipewire prepare");
-        self.stream_params.write().unwrap()[stream_id as usize]
+        self.stream_params
+            .write()
+            .unwrap()
+            .get_mut(stream_id as usize)
+            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
             .state
             .prepare();
         let mut stream_hash = self.stream_hash.write().unwrap();
@@ -385,18 +390,25 @@ impl AudioBackend for PwBackend {
         Ok(())
     }
 
-    fn release(&self, stream_id: u32, _msg: ControlMessage) -> Result<()> {
+    fn release(&self, stream_id: u32, mut msg: ControlMessage) -> Result<()> {
         debug!("pipewire backend, release function");
-        self.stream_params.write().unwrap()[stream_id as usize]
+        self.stream_params
+            .write()
+            .unwrap()
+            .get_mut(stream_id as usize)
+            .ok_or_else(|| {
+                msg.code = VIRTIO_SND_S_BAD_MSG;
+                Error::StreamWithIdNotFound(stream_id)
+            })?
             .state
             .release();
         let lock_guard = self.thread_loop.lock();
         let mut stream_hash = self.stream_hash.write().unwrap();
         let mut stream_listener = self.stream_listener.write().unwrap();
         let st_buffer = &mut self.stream_params.write().unwrap();
-        let Some(stream) = stream_hash.get(&stream_id) else {
-            return Err(Error::StreamWithIdNotFound(stream_id));
-        };
+        let stream = stream_hash
+            .get(&stream_id)
+            .expect("Could not find stream with this id in `stream_hash`.");
         stream.disconnect().expect("could not disconnect stream");
         std::mem::take(&mut st_buffer[stream_id as usize].buffers);
         stream_hash.remove(&stream_id);
@@ -407,14 +419,18 @@ impl AudioBackend for PwBackend {
 
     fn start(&self, stream_id: u32) -> Result<()> {
         debug!("pipewire start");
-        self.stream_params.write().unwrap()[stream_id as usize]
+        self.stream_params
+            .write()
+            .unwrap()
+            .get_mut(stream_id as usize)
+            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
             .state
             .start();
         let lock_guard = self.thread_loop.lock();
         let stream_hash = self.stream_hash.read().unwrap();
-        let Some(stream) = stream_hash.get(&stream_id) else {
-            return Err(Error::StreamWithIdNotFound(stream_id));
-        };
+        let stream = stream_hash
+            .get(&stream_id)
+            .expect("Could not find stream with this id in `stream_hash`.");
         stream.set_active(true).expect("could not start stream");
         lock_guard.unlock();
         Ok(())
@@ -422,14 +438,18 @@ impl AudioBackend for PwBackend {
 
     fn stop(&self, stream_id: u32) -> Result<()> {
         debug!("pipewire stop");
-        self.stream_params.write().unwrap()[stream_id as usize]
+        self.stream_params
+            .write()
+            .unwrap()
+            .get_mut(stream_id as usize)
+            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
             .state
             .stop();
         let lock_guard = self.thread_loop.lock();
         let stream_hash = self.stream_hash.read().unwrap();
-        let Some(stream) = stream_hash.get(&stream_id) else {
-            return Err(Error::StreamWithIdNotFound(stream_id));
-        };
+        let stream = stream_hash
+            .get(&stream_id)
+            .expect("Could not find stream with this id in `stream_hash`.");
         stream.set_active(false).expect("could not stop stream");
         lock_guard.unlock();
         Ok(())

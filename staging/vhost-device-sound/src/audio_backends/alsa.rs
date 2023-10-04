@@ -425,15 +425,13 @@ impl AlsaBackend {
                         msg.code = VIRTIO_SND_S_BAD_MSG;
                         continue;
                     };
-                    let release_result = streams.write().unwrap()[stream_id].state.release();
-                    if let Err(err) = release_result {
+                    if let Err(err) = streams.write().unwrap()[stream_id].state.release() {
                         log::error!("Stream {} release {}", stream_id, err);
                         msg.code = VIRTIO_SND_S_BAD_MSG;
-                    } else {
-                        senders[stream_id].send(false).unwrap();
-                        let mut streams = streams.write().unwrap();
-                        std::mem::take(&mut streams[stream_id].buffers);
                     }
+                    senders[stream_id].send(false).unwrap();
+                    let mut streams = streams.write().unwrap();
+                    std::mem::take(&mut streams[stream_id].buffers);
                 }
                 AlsaAction::SetParameters(stream_id, mut msg) => {
                     if stream_id >= streams_no {

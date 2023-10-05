@@ -549,14 +549,7 @@ impl VhostUserSoundThread {
                         // knowing whether the content has been updated. The device only reads the
                         // buffer from guest memory when the audio engine requires it, which is
                         // about after a period thus ensuring that the buffer is up-to-date.
-                        let mut buf = vec![0; descriptor.len() as usize];
-                        let bytes_read = desc_chain
-                            .memory()
-                            .read(&mut buf, descriptor.addr())
-                            .map_err(|_| Error::DescriptorReadFailed)?;
-                        buf.truncate(bytes_read);
-
-                        buffers.push(Buffer::new(buf, Arc::clone(&message)));
+                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message)));
                     }
                 }
             }

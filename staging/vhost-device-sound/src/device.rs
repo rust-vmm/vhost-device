@@ -542,14 +542,7 @@ impl VhostUserSoundThread {
                         .into());
                     }
                     TxState::WaitingBufferForStreamId(_stream_id) => {
-                        let mut buf = vec![0; descriptor.len() as usize];
-                        let bytes_read = desc_chain
-                            .memory()
-                            .read(&mut buf, descriptor.addr())
-                            .map_err(|_| Error::DescriptorReadFailed)?;
-                        buf.truncate(bytes_read);
-
-                        buffers.push(Buffer::new(buf, Arc::clone(&message)));
+                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message)));
                     }
                 }
             }

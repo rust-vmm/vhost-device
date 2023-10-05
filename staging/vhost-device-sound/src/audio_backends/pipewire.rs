@@ -325,6 +325,14 @@ impl AudioBackend for PwBackend {
                         let Some(buffer) = streams.buffers.front_mut() else {
                             return;
                         };
+                        if let Err(err) = buffer.read() {
+                            log::error!(
+                                "Could not read TX buffer, dropping it immediately: {}",
+                                err
+                            );
+                            streams.buffers.pop_front();
+                            return;
+                        }
 
                         let mut start = buffer.pos;
 

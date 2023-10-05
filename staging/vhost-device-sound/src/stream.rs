@@ -4,9 +4,9 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use thiserror::Error as ThisError;
-use vm_memory::{Le32, Le64};
+use vm_memory::{Bytes, Le32, Le64};
 
-use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
+use crate::{virtio_sound::*, IOMessage, Result, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
 #[derive(Debug, ThisError)]
@@ -233,7 +233,9 @@ impl Default for PcmParams {
 pub struct Buffer {
     pub bytes: Vec<u8>,
     pub pos: usize,
+    descriptor: virtio_queue::Descriptor,
     pub message: Arc<IOMessage>,
+    populated: bool,
 }
 
 impl std::fmt::Debug for Buffer {
@@ -241,18 +243,38 @@ impl std::fmt::Debug for Buffer {
         fmt.debug_struct(stringify!(Buffer))
             .field("bytes", &self.bytes.len())
             .field("pos", &self.pos)
+            .field("populated", &self.populated)
             .field("message", &Arc::as_ptr(&self.message))
             .finish()
     }
 }
 
 impl Buffer {
-    pub fn new(bytes: Vec<u8>, message: Arc<IOMessage>) -> Self {
+    pub fn new(descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
         Self {
-            bytes,
+            bytes: vec![],
             pos: 0,
+            descriptor,
+            populated: false,
             message,
         }
+    }
+
+    pub fn read(&mut self) -> Result<()> {
+        if self.populated {
+            return Ok(());
+        }
+        self.bytes = vec![0; self.descriptor.len() as usize];
+        let bytes_read = self
+            .message
+            .desc_chain
+            .memory()
+            .read(&mut self.bytes, self.descriptor.addr())
+            .map_err(|_| crate::Error::DescriptorReadFailed)?;
+        self.bytes.truncate(bytes_read);
+        self.populated = true;
+
+        Ok(())
     }
 }
 

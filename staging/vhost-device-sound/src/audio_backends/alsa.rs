@@ -34,6 +34,7 @@ type AResult<T> = std::result::Result<T, alsa::Error>;
 #[derive(Clone, Debug)]
 pub struct AlsaBackend {
     sender: Arc<Mutex<Sender<AlsaAction>>>,
+    streams: Arc<RwLock<Vec<Stream>>>,
 }
 
 #[derive(Debug)]
@@ -42,7 +43,6 @@ enum AlsaAction {
     Prepare(usize),
     Release(usize, ControlMessage),
     Start(usize),
-    Stop(usize),
     Write(usize),
     Read(usize),
 }
@@ -145,6 +145,14 @@ fn write_samples_direct(
         let Some(buffer) = stream.buffers.front_mut() else {
             return Ok(false);
         };
+        if !matches!(stream.state, PCMState::Start) {
+            return Ok(false);
+        }
+        if let Err(err) = buffer.read() {
+            log::error!("Could not read TX buffer, dropping it immediately: {}", err);
+            stream.buffers.pop_front();
+            continue;
+        }
         let mut iter = buffer.bytes[buffer.pos..].iter().cloned();
         let frames = mmap.write(&mut iter);
         let written_bytes = pcm.frames_to_bytes(frames);
@@ -156,41 +164,49 @@ fn write_samples_direct(
         }
     }
     match mmap.status().state() {
-        State::Running => {
-            return Ok(false);
-        }
-        State::Prepared => {}
-        State::XRun => {
-            log::trace!("Underrun in audio output stream!");
-            pcm.prepare()?
-        }
-        State::Suspended => {}
+        State::Suspended | State::Running | State::Prepared => Ok(false),
+        State::XRun => Ok(true), // Recover from this in next round
         n => panic!("Unexpected pcm state {:?}", n),
     }
-    Ok(true)
 }
 
 fn write_samples_io(
     p: &alsa::PCM,
-    stream: &mut Stream,
+    streams: &Arc<RwLock<Vec<Stream>>>,
+    stream_id: usize,
     io: &mut alsa::pcm::IO<u8>,
 ) -> AResult<bool> {
-    loop {
-        let avail = match p.avail_update() {
-            Ok(n) => n,
-            Err(err) => {
-                log::trace!("Recovering from {}", err);
-                p.recover(err.errno() as std::os::raw::c_int, true)?;
-                p.avail_update()?
+    let avail = match p.avail_update() {
+        Ok(n) => n,
+        Err(err) => {
+            log::trace!("Recovering from {}", err);
+            p.recover(err.errno() as std::os::raw::c_int, true)?;
+            if let Err(err) = p.start() {
+                log::error!(
+                    "Could not restart stream {}; ALSA returned: {}",
+                    stream_id,
+                    err
+                );
+                return Err(err);
             }
-        };
-        if avail == 0 {
-            break;
+            p.avail_update()?
         }
-        let written = io.mmap(avail as usize, |buf| {
+    };
+    if avail != 0 {
+        io.mmap(avail as usize, |buf| {
+            let stream = &mut streams.write().unwrap()[stream_id];
             let Some(buffer) = stream.buffers.front_mut() else {
                 return 0;
             };
+            if !matches!(stream.state, PCMState::Start) {
+                stream.buffers.pop_front();
+                return 0;
+            }
+            if let Err(err) = buffer.read() {
+                log::error!("Could not read TX buffer, dropping it immediately: {}", err);
+                stream.buffers.pop_front();
+                return 0;
+            }
             let mut iter = buffer.bytes[buffer.pos..].iter().cloned();
 
             let mut written_bytes = 0;
@@ -206,14 +222,12 @@ fn write_samples_io(
                 .try_into()
                 .unwrap_or_default()
         })?;
-        if written == 0 {
-            break;
-        };
+    } else {
+        return Ok(false);
     }
 
     match p.state() {
-        State::Suspended | State::Running => Ok(false),
-        State::Prepared => Ok(false),
+        State::Suspended | State::Running | State::Prepared => Ok(false),
         State::XRun => Ok(true), // Recover from this in next round
         n => panic!("Unexpected pcm state {:?}", n),
     }
@@ -226,47 +240,44 @@ fn alsa_worker(
     stream_id: usize,
 ) -> AResult<()> {
     loop {
+        // We get a `true` every time a new I/O message is received from the guest.
+        // If the recv() returns `Ok(false)` or an error, terminate this worker thread.
         let Ok(do_write) = receiver.recv() else {
             return Ok(());
         };
         if do_write {
-            loop {
-                if matches!(receiver.try_recv(), Ok(false)) {
-                    break;
-                }
-
+            let has_buffers = || -> bool {
+                // Hold `streams` lock as short as possible.
+                let lck = streams.read().unwrap();
+                !lck[stream_id].buffers.is_empty()
+                    && matches!(lck[stream_id].state, PCMState::Start)
+            };
+            // Run this loop till the stream's buffer vector is empty:
+            'empty_buffers: while has_buffers() {
+                // When we return from a write attempt and there is still space in the
+                // stream's buffers, get the ALSA file descriptors and poll them till the host
+                // sound device tells us there is more available data.
                 let mut fds = {
                     let lck = pcm.lock().unwrap();
-                    if matches!(lck.state(), State::Running | State::Prepared | State::XRun) {
-                        let mut mmap = lck.direct_mmap_playback::<u8>().ok();
+                    let mut mmap = lck.direct_mmap_playback::<u8>().ok();
 
-                        if let Some(ref mut mmap) = mmap {
-                            if write_samples_direct(
-                                &lck,
-                                &mut streams.write().unwrap()[stream_id],
-                                mmap,
-                            )? {
-                                continue;
-                            }
-                        } else {
-                            let mut io = lck.io_bytes();
-                            // Direct mode unavailable, use alsa-lib's mmap emulation instead
-                            if write_samples_io(
-                                &lck,
-                                &mut streams.write().unwrap()[stream_id],
-                                &mut io,
-                            )? {
-                                continue;
-                            }
+                    if let Some(ref mut mmap) = mmap {
+                        if write_samples_direct(
+                            &lck,
+                            &mut streams.write().unwrap()[stream_id],
+                            mmap,
+                        )? {
+                            continue 'empty_buffers;
                         }
-                        lck.get()?
                     } else {
-                        drop(lck);
-                        sleep(Duration::from_millis(500));
-                        continue;
+                        let mut io = lck.io_bytes();
+                        // Direct mode unavailable, use alsa-lib's mmap emulation instead
+                        if write_samples_io(&lck, &streams, stream_id, &mut io)? {
+                            continue 'empty_buffers;
+                        }
                     }
+                    lck.get()?
                 };
-                // Nothing to do, sleep until woken up by the kernel.
                 alsa::poll::poll(&mut fds, 100)?;
             }
         }
@@ -277,14 +288,15 @@ impl AlsaBackend {
     pub fn new(streams: Arc<RwLock<Vec<Stream>>>) -> Self {
         let (sender, receiver) = channel();
         let sender = Arc::new(Mutex::new(sender));
+        let streams2 = Arc::clone(&streams);
 
         thread::spawn(move || {
-            if let Err(err) = Self::run(streams, receiver) {
+            if let Err(err) = Self::run(streams2, receiver) {
                 log::error!("Main thread exited with error: {}", err);
             }
         });
 
-        Self { sender }
+        Self { sender, streams }
     }
 
     fn run(
@@ -366,18 +378,6 @@ impl AlsaBackend {
                             );
                         }
                     }
-                }
-                AlsaAction::Stop(stream_id) => {
-                    if stream_id >= streams_no {
-                        log::error!(
-                            "Received Stop action for stream id {} but there are only {} PCM \
-                             streams.",
-                            stream_id,
-                            pcms.len()
-                        );
-                        continue;
-                    };
-                    streams.write().unwrap()[stream_id].state.stop();
                 }
                 AlsaAction::Prepare(stream_id) => {
                     if stream_id >= streams_no {
@@ -498,8 +498,15 @@ impl AudioBackend for AlsaBackend {
         read Read,
         prepare Prepare,
         start Start,
-        stop Stop,
     }
+
+    fn stop(&self, id: u32) -> CrateResult<()> {
+        if let Some(s) = self.streams.write().unwrap().get_mut(id as usize) {
+            s.state.stop();
+        }
+        Ok(())
+    }
+
     send_action! {
         ctrl set_parameters SetParameters,
         ctrl release Release,

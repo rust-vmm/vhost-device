@@ -60,34 +60,37 @@ fn update_pcm(
             match s.direction {
                 d if d == VIRTIO_SND_D_OUTPUT => Direction::Playback,
                 d if d == VIRTIO_SND_D_INPUT => Direction::Capture,
-                other => panic!("Invalid virtio-sound stream: {}", other),
+                // We initialize the stream direction ourselves in device.rs, so it should never
+                // have another value.
+                _ => unreachable!(),
             },
             false,
         )?;
 
         {
+            let rate = match s.params.rate {
+                virtio_sound::VIRTIO_SND_PCM_RATE_5512 => 5512,
+                virtio_sound::VIRTIO_SND_PCM_RATE_8000 => 8000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_11025 => 11025,
+                virtio_sound::VIRTIO_SND_PCM_RATE_16000 => 16000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_22050 => 22050,
+                virtio_sound::VIRTIO_SND_PCM_RATE_32000 => 32000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_44100 => 44100,
+                virtio_sound::VIRTIO_SND_PCM_RATE_48000 => 48000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_64000 => 64000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_88200 => 88200,
+                virtio_sound::VIRTIO_SND_PCM_RATE_96000 => 96000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_176400 => 176400,
+                virtio_sound::VIRTIO_SND_PCM_RATE_192000 => 192000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_384000 => 384000,
+                // We check if a rate value is supported in PCM_SET_PARAMS so it should never have
+                // an unknown value.
+                _ => unreachable!(),
+            };
             let hwp = HwParams::any(&pcm)?;
             hwp.set_channels(s.params.channels.into())?;
-            hwp.set_rate(
-                match s.params.rate {
-                    virtio_sound::VIRTIO_SND_PCM_RATE_5512 => 5512,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_8000 => 8000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_11025 => 11025,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_16000 => 16000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_22050 => 22050,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_32000 => 32000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_44100 => 44100,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_48000 => 48000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_64000 => 64000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_88200 => 88200,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_96000 => 96000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_176400 => 176400,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_192000 => 192000,
-                    virtio_sound::VIRTIO_SND_PCM_RATE_384000 => 384000,
-                    _ => 44100,
-                },
-                ValueOr::Nearest,
-            )?;
+            hwp.set_rate(rate, ValueOr::Nearest)?;
+            hwp.set_rate_resample(false)?;
             hwp.set_format(match s.params.format {
                 virtio_sound::VIRTIO_SND_PCM_FMT_IMA_ADPCM => Format::ImaAdPCM,
                 virtio_sound::VIRTIO_SND_PCM_FMT_MU_LAW => Format::MuLaw,
@@ -114,17 +117,76 @@ fn update_pcm(
                 virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U16 => Format::DSDU16LE,
                 virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U32 => Format::DSDU32LE,
                 virtio_sound::VIRTIO_SND_PCM_FMT_IEC958_SUBFRAME => Format::iec958_subframe(),
-                _ => Format::Unknown,
+                // We check if a format value is supported in PCM_SET_PARAMS so it should never have
+                // an unknown value.
+                _ => unreachable!(),
             })?;
 
             hwp.set_access(Access::RWInterleaved)?;
 
-            // > A period is the number of frames in between each hardware interrupt.
-            // - https://www.alsa-project.org/wiki/FramesPeriods
+            let frame_size = u32::from(s.params.channels)
+                * match s.params.format {
+                    virtio_sound::VIRTIO_SND_PCM_FMT_A_LAW
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_S8
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U8
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U8
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_MU_LAW => 1,
+                    virtio_sound::VIRTIO_SND_PCM_FMT_S16
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U16
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U16
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_IMA_ADPCM => 2,
+                    virtio_sound::VIRTIO_SND_PCM_FMT_S18_3
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U18_3
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_S20_3
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U20_3
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_S24_3
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U24_3
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_S24
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U24 => 3,
+                    virtio_sound::VIRTIO_SND_PCM_FMT_S20
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U20
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_S32
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_U32
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_FLOAT
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U32
+                    | virtio_sound::VIRTIO_SND_PCM_FMT_IEC958_SUBFRAME => 4,
+                    virtio_sound::VIRTIO_SND_PCM_FMT_FLOAT64 => 8,
+                    // We check if a format value is supported in PCM_SET_PARAMS so it should never
+                    // have an unknown value.
+                    _ => unreachable!(),
+                };
+
+            // Calculate desirable bytes/sec rate to achieve the stream's desired
+            // parameters:
+
+            let bps_rate = frame_size * rate;
+
+            // Calculate period size for ~100ms (arbitrary) interrupt period:
+
+            let period_bytes = bps_rate / 10;
+
+            // Finally, calculate the size of a period (in frames):
+
+            let period_frames = period_bytes / frame_size;
+
+            hwp.set_period_size(period_frames as i64, alsa::ValueOr::Less)?;
+
+            // Online ALSA driver recommendations seem to be that the buffer should be at
+            // least 2 * period_size.
             //
-            // FIXME: What values should we set for buffer size and period size? (Should we
-            // set them at all?) virtio-sound spec deals in bytes but ALSA deals
-            // in frames. The alsa bindings sometimes use frames and sometimes bytes.
+            // https://www.alsa-project.org/wiki/FramesPeriods says:
+            //
+            // > It seems (writing-an-alsa-driver.pdf), however, that it is the ALSA runtime that
+            // > decides on the actual buffer_size and period_size, depending on: the requested
+            // > number of channels, and their respective properties (rate and sampling resolution) -
+            // > as well as the parameters set in the snd_pcm_hardware structure (in the driver).
+            //
+            // So, if the operation fails let's assume the ALSA runtime has set a better value.
+            if let Err(err) = hwp.set_buffer_size_near(2 * period_frames as i64) {
+                log::error!("could not set buffer size {}: {}", 2 * period_frames, err);
+            }
+
+            // Read more at https://www.alsa-project.org/wiki/FramesPeriods.
 
             pcm.hw_params(&hwp)?;
         }

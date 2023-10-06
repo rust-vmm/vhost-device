@@ -233,7 +233,7 @@ impl Default for PcmParams {
 pub struct Buffer {
     pub bytes: Vec<u8>,
     pub pos: usize,
-    descriptor: virtio_queue::Descriptor,
+    data_descriptor: virtio_queue::Descriptor,
     pub message: Arc<IOMessage>,
     populated: bool,
 }
@@ -250,11 +250,11 @@ impl std::fmt::Debug for Buffer {
 }
 
 impl Buffer {
-    pub fn new(descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
+    pub fn new(data_descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
         Self {
             bytes: vec![],
             pos: 0,
-            descriptor,
+            data_descriptor,
             populated: false,
             message,
         }
@@ -264,12 +264,12 @@ impl Buffer {
         if self.populated {
             return Ok(());
         }
-        self.bytes = vec![0; self.descriptor.len() as usize];
+        self.bytes = vec![0; self.data_descriptor.len() as usize];
         let bytes_read = self
             .message
             .desc_chain
             .memory()
-            .read(&mut self.bytes, self.descriptor.addr())
+            .read(&mut self.bytes, self.data_descriptor.addr())
             .map_err(|_| crate::Error::DescriptorReadFailed)?;
         self.bytes.truncate(bytes_read);
         self.populated = true;

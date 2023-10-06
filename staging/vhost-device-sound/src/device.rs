@@ -461,17 +461,23 @@ impl VhostUserSoundThread {
             return Ok(true);
         }
 
+        // Instead of counting descriptor chain lengths, encode the "parsing" logic in
+        // an enumeration. Then, the compiler will complain about any unhandled
+        // match {} cases if any part of the code is changed. This makes invalid
+        // states unrepresentable in the source code.
         #[derive(Copy, Clone, PartialEq, Debug)]
-        enum TxState {
+        enum IoState {
             Ready,
             WaitingBufferForStreamId(u32),
             Done,
         }
 
+        // Keep log of stream IDs to wake up, in case the guest has queued more than
+        // one.
         let mut stream_ids = BTreeSet::default();
 
         for desc_chain in requests {
-            let mut state = TxState::Ready;
+            let mut state = IoState::Ready;
             let mut buffers = vec![];
             let descriptors: Vec<_> = desc_chain.clone().collect();
             let message = Arc::new(IOMessage {
@@ -479,14 +485,17 @@ impl VhostUserSoundThread {
                 status: VIRTIO_SND_S_OK.into(),
                 latency_bytes: 0.into(),
                 desc_chain: desc_chain.clone(),
-                descriptor: descriptors.last().cloned().unwrap(),
+                response_descriptor: descriptors.last().cloned().ok_or_else(|| {
+                    log::error!("Received IO request with an empty descriptor chain.");
+                    Error::UnexpectedDescriptorCount(0)
+                })?,
             });
             for descriptor in &descriptors {
                 match state {
-                    TxState::Done => {
+                    IoState::Done => {
                         return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
                     }
-                    TxState::Ready if descriptor.is_write_only() => {
+                    IoState::Ready if descriptor.is_write_only() => {
                         if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
                             return Err(Error::UnexpectedDescriptorSize(
                                 size_of::<VirtioSoundPcmStatus>(),
@@ -494,9 +503,9 @@ impl VhostUserSoundThread {
                             )
                             .into());
                         }
-                        state = TxState::Done;
+                        state = IoState::Done;
                     }
-                    TxState::WaitingBufferForStreamId(stream_id) if descriptor.is_write_only() => {
+                    IoState::WaitingBufferForStreamId(stream_id) if descriptor.is_write_only() => {
                         if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
                             return Err(Error::UnexpectedDescriptorSize(
                                 size_of::<VirtioSoundPcmStatus>(),
@@ -508,9 +517,9 @@ impl VhostUserSoundThread {
                         for b in std::mem::take(&mut buffers) {
                             streams[stream_id as usize].buffers.push_back(b);
                         }
-                        state = TxState::Done;
+                        state = IoState::Done;
                     }
-                    TxState::Ready
+                    IoState::Ready
                         if descriptor.len() as usize != size_of::<VirtioSoundPcmXfer>() =>
                     {
                         return Err(Error::UnexpectedDescriptorSize(
@@ -519,7 +528,7 @@ impl VhostUserSoundThread {
                         )
                         .into());
                     }
-                    TxState::Ready => {
+                    IoState::Ready => {
                         let xfer = desc_chain
                             .memory()
                             .read_obj::<VirtioSoundPcmXfer>(descriptor.addr())
@@ -527,9 +536,9 @@ impl VhostUserSoundThread {
                         let stream_id: u32 = xfer.stream_id.into();
                         stream_ids.insert(stream_id);
 
-                        state = TxState::WaitingBufferForStreamId(stream_id);
+                        state = IoState::WaitingBufferForStreamId(stream_id);
                     }
-                    TxState::WaitingBufferForStreamId(stream_id)
+                    IoState::WaitingBufferForStreamId(stream_id)
                         if descriptor.len() as usize == size_of::<VirtioSoundPcmXfer>() =>
                     {
                         return Err(Error::UnexpectedDescriptorSize(
@@ -542,7 +551,9 @@ impl VhostUserSoundThread {
                         )
                         .into());
                     }
-                    TxState::WaitingBufferForStreamId(_stream_id) => {
+                    IoState::WaitingBufferForStreamId(_stream_id) => {
+                        // In the case of TX/Playback:
+                        //
                         // Rather than copying the content of a descriptor, buffer keeps a pointer
                         // to it. When we copy just after the request is enqueued, the guest's
                         // userspace may or may not have updated the buffer contents. Guest driver
@@ -618,7 +629,7 @@ impl VhostUserSoundBackend {
             },
         ];
         let chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>> = Arc::new(RwLock::new(chmaps_info));
-        log::trace!("VhostUserSoundBackend::new config {:?}", &config);
+        log::trace!("VhostUserSoundBackend::new(config = {:?})", &config);
         let threads = if config.multi_thread {
             vec![
                 RwLock::new(VhostUserSoundThread::new(
@@ -683,7 +694,10 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn max_queue_size(&self) -> usize {
-        // TODO: Investigate if an alternative value makes any difference.
+        // The linux kernel driver does no checks for queue length and fails silently if
+        // a queue is filled up. In this case, adding an element to the queue
+        // returns ENOSPC and the element is not queued for a later attempt and
+        // is lost. `64` is a "good enough" value from our observations.
         64
     }
 

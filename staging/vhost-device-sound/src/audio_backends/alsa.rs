@@ -178,15 +178,14 @@ fn update_pcm(
     Ok(())
 }
 
-// Returns `true` if the function should be called again, because there are are
-// more data left to write.
+// Returns `Ok(true)` if the function should be called again, because there are
+// are more data left to write.
 fn write_samples_direct(
     pcm: &alsa::PCM,
     stream: &mut Stream,
     mmap: &mut alsa::direct::pcm::MmapPlayback<u8>,
 ) -> AResult<bool> {
     while mmap.avail() > 0 {
-        // Write samples to DMA area from iterator
         let Some(buffer) = stream.buffers.front_mut() else {
             return Ok(false);
         };
@@ -198,6 +197,7 @@ fn write_samples_direct(
             stream.buffers.pop_front();
             continue;
         }
+        // Write samples to DMA area from iterator
         let mut iter = buffer.bytes[buffer.pos..].iter().cloned();
         let frames = mmap.write(&mut iter);
         let written_bytes = pcm.frames_to_bytes(frames);
@@ -215,6 +215,8 @@ fn write_samples_direct(
     }
 }
 
+// Returns `Ok(true)` if the function should be called again, because there are
+// are more data left to write.
 fn write_samples_io(
     p: &alsa::PCM,
     streams: &Arc<RwLock<Vec<Stream>>>,
@@ -356,6 +358,9 @@ impl AlsaBackend {
             let mut senders = Vec::with_capacity(streams_no);
             for i in 0..streams_no {
                 let (sender, receiver) = channel();
+
+                // Initialize with a dummy value, which will be updated every time we call
+                // `update_pcm`.
                 let pcm = Arc::new(Mutex::new(PCM::new("default", Direction::Playback, false)?));
 
                 let mtx = Arc::clone(&pcm);
@@ -460,7 +465,9 @@ impl AlsaBackend {
                         msg.code = VIRTIO_SND_S_BAD_MSG;
                         continue;
                     };
+                    // Stop worker thread
                     senders[stream_id].send(false).unwrap();
+                    // Drop pending stream buffers to complete pending I/O messages
                     let mut streams_lck = streams.write().unwrap();
                     streams_lck[stream_id].state.release();
                     std::mem::take(&mut streams_lck[stream_id].buffers);
@@ -499,9 +506,9 @@ impl AlsaBackend {
                             st.params.format = request.format;
                             st.params.rate = request.rate;
                         }
+                        // Manually drop msg for faster response: the kernel has a timeout.
+                        drop(msg);
                     }
-                    // Manually drop msg for faster response: the kernel has a timeout.
-                    drop(msg);
                     update_pcm(&pcms[stream_id], stream_id, &streams)?;
                 }
             }

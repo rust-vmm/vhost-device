@@ -248,13 +248,12 @@ pub struct IOMessage {
     status: std::sync::atomic::AtomicU32,
     pub latency_bytes: std::sync::atomic::AtomicU32,
     desc_chain: SoundDescriptorChain,
-    descriptor: virtio_queue::Descriptor,
+    response_descriptor: virtio_queue::Descriptor,
     vring: VringRwLock,
 }
 
 impl Drop for IOMessage {
     fn drop(&mut self) {
-        log::trace!("dropping IOMessage");
         let resp = VirtioSoundPcmStatus {
             status: self.status.load(std::sync::atomic::Ordering::SeqCst).into(),
             latency_bytes: self
@@ -262,24 +261,24 @@ impl Drop for IOMessage {
                 .load(std::sync::atomic::Ordering::SeqCst)
                 .into(),
         };
+        log::trace!("dropping IOMessage {:?}", resp);
 
         if let Err(err) = self
             .desc_chain
             .memory()
-            .write_obj(resp, self.descriptor.addr())
+            .write_obj(resp, self.response_descriptor.addr())
         {
             log::error!("Error::DescriptorWriteFailed: {}", err);
             return;
         }
-        if self
+        if let Err(err) = self
             .vring
             .add_used(self.desc_chain.head_index(), resp.as_slice().len() as u32)
-            .is_err()
         {
-            log::error!("Couldn't add used");
+            log::error!("Couldn't add used bytes count to vring: {}", err);
         }
-        if self.vring.signal_used_queue().is_err() {
-            log::error!("Couldn't signal used queue");
+        if let Err(err) = self.vring.signal_used_queue() {
+            log::error!("Couldn't signal used queue: {}", err);
         }
     }
 }
@@ -287,7 +286,7 @@ impl Drop for IOMessage {
 /// This is the public API through which an external program starts the
 /// vhost-device-sound backend server.
 pub fn start_backend_server(config: SoundConfig) {
-    log::trace!("Using config {:?}", &config);
+    log::trace!("Using config {:?}.", &config);
     let listener = Listener::new(config.get_socket_path(), true).unwrap();
     let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
 
@@ -298,12 +297,12 @@ pub fn start_backend_server(config: SoundConfig) {
     )
     .unwrap();
 
-    log::trace!("Starting daemon");
+    log::trace!("Starting daemon.");
     daemon.start(listener).unwrap();
 
     match daemon.wait() {
         Ok(()) => {
-            info!("Stopping cleanly");
+            info!("Stopping cleanly.");
         }
         Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
             info!(

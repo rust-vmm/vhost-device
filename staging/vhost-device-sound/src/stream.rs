@@ -280,6 +280,9 @@ impl Buffer {
 
 impl Drop for Buffer {
     fn drop(&mut self) {
+        self.message
+            .latency_bytes
+            .fetch_add(self.bytes.len() as u32, std::sync::atomic::Ordering::SeqCst);
         log::trace!("dropping buffer {:?}", self);
     }
 }

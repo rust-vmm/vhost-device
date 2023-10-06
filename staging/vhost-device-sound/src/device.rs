@@ -483,6 +483,7 @@ impl VhostUserSoundThread {
             let message = Arc::new(IOMessage {
                 vring: vring.clone(),
                 status: VIRTIO_SND_S_OK.into(),
+                latency_bytes: 0.into(),
                 desc_chain: desc_chain.clone(),
                 descriptor: descriptors.last().cloned().unwrap(),
             });

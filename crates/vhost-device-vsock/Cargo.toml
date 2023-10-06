@@ -24,7 +24,7 @@ vhost-user-backend = "0.10"
 virtio-bindings = "0.2.1"
 virtio-queue = "0.9"
 virtio-vsock = "0.3.1"
-vm-memory = "0.12"
+vm-memory = "0.13"
 vmm-sys-util = "0.11"
 config = { version = "0.13", default-features = false, features = ["yaml"] }
 serde = { version = "1", features = ["derive"] }

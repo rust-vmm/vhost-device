@@ -246,6 +246,7 @@ impl SoundConfig {
 
 pub struct IOMessage {
     status: std::sync::atomic::AtomicU32,
+    pub latency_bytes: std::sync::atomic::AtomicU32,
     desc_chain: SoundDescriptorChain,
     descriptor: virtio_queue::Descriptor,
     vring: VringRwLock,
@@ -256,7 +257,10 @@ impl Drop for IOMessage {
         log::trace!("dropping IOMessage");
         let resp = VirtioSoundPcmStatus {
             status: self.status.load(std::sync::atomic::Ordering::SeqCst).into(),
-            latency_bytes: 0.into(),
+            latency_bytes: self
+                .latency_bytes
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .into(),
         };
 
         if let Err(err) = self

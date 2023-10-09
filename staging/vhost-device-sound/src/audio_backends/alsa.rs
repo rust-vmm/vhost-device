@@ -13,7 +13,7 @@ use std::{
 
 use alsa::{
     pcm::{Access, Format, HwParams, State, PCM},
-    Direction, PollDescriptors, ValueOr,
+    PollDescriptors, ValueOr,
 };
 use virtio_queue::Descriptor;
 use vm_memory::Bytes;
@@ -22,12 +22,18 @@ use super::AudioBackend;
 use crate::{
     device::ControlMessage,
     stream::{PCMState, Stream},
-    virtio_sound::{
-        self, VirtioSndPcmSetParams, VIRTIO_SND_D_INPUT, VIRTIO_SND_D_OUTPUT, VIRTIO_SND_S_BAD_MSG,
-        VIRTIO_SND_S_NOT_SUPP,
-    },
-    Result as CrateResult,
+    virtio_sound::{self, VirtioSndPcmSetParams, VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP},
+    Direction, Result as CrateResult,
 };
+
+impl From<Direction> for alsa::Direction {
+    fn from(val: Direction) -> Self {
+        match val {
+            Direction::Output => Self::Playback,
+            Direction::Input => Self::Capture,
+        }
+    }
+}
 
 type AResult<T> = std::result::Result<T, alsa::Error>;
 
@@ -55,15 +61,7 @@ fn update_pcm(
     *pcm_.lock().unwrap() = {
         let streams = streams.read().unwrap();
         let s = &streams[stream_id];
-        let pcm = PCM::new(
-            "default",
-            match s.direction {
-                d if d == VIRTIO_SND_D_OUTPUT => Direction::Playback,
-                d if d == VIRTIO_SND_D_INPUT => Direction::Capture,
-                _ => unreachable!(),
-            },
-            false,
-        )?;
+        let pcm = PCM::new("default", s.direction.into(), false)?;
 
         {
             let rate = match s.params.rate {
@@ -361,7 +359,11 @@ impl AlsaBackend {
 
                 // Initialize with a dummy value, which will be updated every time we call
                 // `update_pcm`.
-                let pcm = Arc::new(Mutex::new(PCM::new("default", Direction::Playback, false)?));
+                let pcm = Arc::new(Mutex::new(PCM::new(
+                    "default",
+                    Direction::Output.into(),
+                    false,
+                )?));
 
                 let mtx = Arc::clone(&pcm);
                 let streams = Arc::clone(&streams);

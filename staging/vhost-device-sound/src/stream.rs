@@ -6,7 +6,7 @@ use std::{collections::VecDeque, sync::Arc};
 use thiserror::Error as ThisError;
 use vm_memory::{Bytes, Le32, Le64};
 
-use crate::{virtio_sound::*, IOMessage, Result, SUPPORTED_FORMATS, SUPPORTED_RATES};
+use crate::{virtio_sound::*, Direction, IOMessage, Result, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
 #[derive(Debug, ThisError)]
@@ -167,7 +167,7 @@ pub struct Stream {
     pub params: PcmParams,
     pub formats: Le64,
     pub rates: Le64,
-    pub direction: u8,
+    pub direction: Direction,
     pub channels_min: u8,
     pub channels_max: u8,
     pub state: PCMState,
@@ -178,7 +178,7 @@ impl Default for Stream {
     fn default() -> Self {
         Self {
             id: 0,
-            direction: VIRTIO_SND_D_OUTPUT,
+            direction: Direction::Output,
             formats: SUPPORTED_FORMATS.into(),
             rates: SUPPORTED_RATES.into(),
             params: PcmParams::default(),

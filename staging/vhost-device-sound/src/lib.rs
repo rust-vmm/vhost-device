@@ -42,6 +42,30 @@ use virtio_queue::DescriptorChain;
 pub type SoundDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Stream direction.
+///
+/// Equivalent to `VIRTIO_SND_D_OUTPUT` and `VIRTIO_SND_D_INPUT`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Direction {
+    /// [`VIRTIO_SND_D_OUTPUT`](crate::virtio_sound::VIRTIO_SND_D_OUTPUT)
+    Output = VIRTIO_SND_D_OUTPUT,
+    /// [`VIRTIO_SND_D_INPUT`](crate::virtio_sound::VIRTIO_SND_D_INPUT)
+    Input = VIRTIO_SND_D_INPUT,
+}
+
+impl TryFrom<u8> for Direction {
+    type Error = Error;
+
+    fn try_from(val: u8) -> std::result::Result<Self, Self::Error> {
+        Ok(match val {
+            virtio_sound::VIRTIO_SND_D_OUTPUT => Self::Output,
+            virtio_sound::VIRTIO_SND_D_INPUT => Self::Input,
+            other => return Err(Error::InvalidMessageValue(stringify!(Direction), other)),
+        })
+    }
+}
+
 /// Custom error types
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -59,6 +83,8 @@ pub enum Error {
     HandleUnknownEvent,
     #[error("Invalid control message code {0}")]
     InvalidControlMessage(u32),
+    #[error("Invalid value in {0}: {1}")]
+    InvalidMessageValue(&'static str, u8),
     #[error("Failed to create a new EventFd")]
     EventFdCreate(IoError),
     #[error("Request missing data buffer")]

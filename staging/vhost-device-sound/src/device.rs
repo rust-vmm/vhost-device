@@ -29,7 +29,7 @@ use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
     stream::{Buffer, Error as StreamError, Stream},
     virtio_sound::{self, *},
-    ControlMessageKind, Error, IOMessage, Result, SoundConfig,
+    ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
 };
 
 struct VhostUserSoundThread {
@@ -288,7 +288,7 @@ impl VhostUserSoundThread {
                             p.features = s.params.features;
                             p.formats = s.formats;
                             p.rates = s.rates;
-                            p.direction = s.direction;
+                            p.direction = s.direction as u8;
                             p.channels_min = s.channels_min;
                             p.channels_max = s.channels_max;
                             buf.extend_from_slice(p.as_slice());
@@ -599,12 +599,12 @@ impl VhostUserSoundBackend {
         let streams = vec![
             Stream {
                 id: 0,
-                direction: VIRTIO_SND_D_OUTPUT,
+                direction: Direction::Output,
                 ..Stream::default()
             },
             Stream {
                 id: 1,
-                direction: VIRTIO_SND_D_INPUT,
+                direction: Direction::Input,
                 ..Stream::default()
             },
         ];

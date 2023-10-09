@@ -37,22 +37,31 @@ use super::AudioBackend;
 use crate::{
     device::ControlMessage,
     virtio_sound::{
-        VirtioSndPcmSetParams, VIRTIO_SND_D_INPUT, VIRTIO_SND_D_OUTPUT, VIRTIO_SND_PCM_FMT_A_LAW,
-        VIRTIO_SND_PCM_FMT_FLOAT, VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW,
-        VIRTIO_SND_PCM_FMT_S16, VIRTIO_SND_PCM_FMT_S18_3, VIRTIO_SND_PCM_FMT_S20,
-        VIRTIO_SND_PCM_FMT_S20_3, VIRTIO_SND_PCM_FMT_S24, VIRTIO_SND_PCM_FMT_S24_3,
-        VIRTIO_SND_PCM_FMT_S32, VIRTIO_SND_PCM_FMT_S8, VIRTIO_SND_PCM_FMT_U16,
-        VIRTIO_SND_PCM_FMT_U18_3, VIRTIO_SND_PCM_FMT_U20, VIRTIO_SND_PCM_FMT_U20_3,
-        VIRTIO_SND_PCM_FMT_U24, VIRTIO_SND_PCM_FMT_U24_3, VIRTIO_SND_PCM_FMT_U32,
-        VIRTIO_SND_PCM_FMT_U8, VIRTIO_SND_PCM_RATE_11025, VIRTIO_SND_PCM_RATE_16000,
-        VIRTIO_SND_PCM_RATE_176400, VIRTIO_SND_PCM_RATE_192000, VIRTIO_SND_PCM_RATE_22050,
-        VIRTIO_SND_PCM_RATE_32000, VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100,
-        VIRTIO_SND_PCM_RATE_48000, VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000,
-        VIRTIO_SND_PCM_RATE_8000, VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000,
-        VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP,
+        VirtioSndPcmSetParams, VIRTIO_SND_PCM_FMT_A_LAW, VIRTIO_SND_PCM_FMT_FLOAT,
+        VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW, VIRTIO_SND_PCM_FMT_S16,
+        VIRTIO_SND_PCM_FMT_S18_3, VIRTIO_SND_PCM_FMT_S20, VIRTIO_SND_PCM_FMT_S20_3,
+        VIRTIO_SND_PCM_FMT_S24, VIRTIO_SND_PCM_FMT_S24_3, VIRTIO_SND_PCM_FMT_S32,
+        VIRTIO_SND_PCM_FMT_S8, VIRTIO_SND_PCM_FMT_U16, VIRTIO_SND_PCM_FMT_U18_3,
+        VIRTIO_SND_PCM_FMT_U20, VIRTIO_SND_PCM_FMT_U20_3, VIRTIO_SND_PCM_FMT_U24,
+        VIRTIO_SND_PCM_FMT_U24_3, VIRTIO_SND_PCM_FMT_U32, VIRTIO_SND_PCM_FMT_U8,
+        VIRTIO_SND_PCM_RATE_11025, VIRTIO_SND_PCM_RATE_16000, VIRTIO_SND_PCM_RATE_176400,
+        VIRTIO_SND_PCM_RATE_192000, VIRTIO_SND_PCM_RATE_22050, VIRTIO_SND_PCM_RATE_32000,
+        VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100, VIRTIO_SND_PCM_RATE_48000,
+        VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000, VIRTIO_SND_PCM_RATE_8000,
+        VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000, VIRTIO_SND_S_BAD_MSG,
+        VIRTIO_SND_S_NOT_SUPP,
     },
-    Error, Result, Stream,
+    Direction, Error, Result, Stream,
 };
+
+impl From<Direction> for spa::Direction {
+    fn from(val: Direction) -> Self {
+        match val {
+            Direction::Output => Self::Output,
+            Direction::Input => Self::Input,
+        }
+    }
+}
 
 // SAFETY: Safe as the structure can be sent to another thread.
 unsafe impl Send for PwBackend {}
@@ -373,16 +382,9 @@ impl AudioBackend for PwBackend {
             .expect("failed to register stream listener");
 
         stream_listener.insert(stream_id, listener_stream);
-
-        let direction = match stream_params[stream_id as usize].direction {
-            VIRTIO_SND_D_OUTPUT => spa::Direction::Output,
-            VIRTIO_SND_D_INPUT => spa::Direction::Input,
-            _ => panic!("Invalid direction"),
-        };
-
         stream
             .connect(
-                direction,
+                stream_params[stream_id as usize].direction.into(),
                 Some(pw::constants::ID_ANY),
                 pw::stream::StreamFlags::RT_PROCESS
                     | pw::stream::StreamFlags::AUTOCONNECT

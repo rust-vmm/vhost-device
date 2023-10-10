@@ -1,9 +1,12 @@
 [workspace]
+resolver = "2"
 
 members = [
-    "crates/gpio",
-    "crates/i2c",
-    "crates/rng",
+    "crates/vhost-device-gpio",
+    "crates/vhost-device-i2c",
+    "crates/vhost-device-rng",
+    "crates/vhost-device-scsi",
+    "crates/vhost-device-scmi",
     "crates/sound",
-    "crates/vsock",
+    "crates/vhost-device-vsock",
 ]

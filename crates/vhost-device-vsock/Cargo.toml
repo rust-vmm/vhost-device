@@ -1,0 +1,35 @@
+[package]
+name = "vhost-device-vsock"
+version = "0.1.0"
+authors = ["Harshavardhan Unnibhavi <harshanavkis@gmail.com>", "Stefano Garzarella <sgarzare@redhat.com>"]
+description = "A virtio-vsock device using the vhost-user protocol."
+repository = "https://github.com/rust-vmm/vhost-device"
+readme = "README.md"
+keywords = ["vhost", "vsock"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2021"
+
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+
+[dependencies]
+byteorder = "1"
+clap = { version = "4.4",  features = ["derive"] }
+env_logger = "0.10"
+epoll = "4.3.2"
+log = "0.4"
+thiserror = "1.0"
+vhost = { version = "0.8", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.10"
+virtio-bindings = "0.2.1"
+virtio-queue = "0.9"
+virtio-vsock = "0.3.1"
+vm-memory = "0.12"
+vmm-sys-util = "0.11"
+config = { version = "0.13", default-features = false, features = ["yaml"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+
+[dev-dependencies]
+virtio-queue = { version = "0.9", features = ["test-utils"] }
+tempfile = "3.6.0"

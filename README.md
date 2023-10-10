@@ -8,11 +8,13 @@ crates.
 
 Here is the list of device backends that we support:
 
-- [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/crates/gpio/README.md)
-- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/crates/i2c/README.md)
-- [RNG](https://github.com/rust-vmm/vhost-device/blob/main/crates/rng/README.md)
+- [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-gpio/README.md)
+- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-i2c/README.md)
+- [RNG](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-rng/README.md)
+- [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-scmi/README.md)
+- [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-scsi/README.md)
 - [Sound](https://github.com/rust-vmm/vhost-device/blob/main/crates/sound/README.md)
-- [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/crates/vsock/README.md)
+- [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-vsock/README.md)
 
 ## Testing and Code Coverage
 
@@ -46,14 +48,29 @@ logic to service the virtio requests directly in the application.
 
 ## Build dependency
 
-The GPIO crate needs a local installation of libgpiod library to be available,
-which can be done like:
+The GPIO crate needs a local installation of libgpiod library to be available.
+If your distro ships libgpiod >= v2.0, then you should be fine.
 
-$ git clone --depth 1 --branch v2.0-rc1 https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/
-$ cd libgpiod
-$ ./autogen.sh && make
+Otherwise, you will need to build libgpiod yourself:
 
-Either you can do a 'make install' now on your system, or provide path to the
-locally build library like this while building vhost-device crates:
+    git clone --depth 1 --branch v2.0.x https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/
+    cd libgpiod
+    ./autogen.sh --prefix="$PWD/install/"
+    make install
 
-$ RUSTFLAGS='-L /home/<username>/libgpiod/lib/.libs/'  cargo build --release
+In order to inform tools about the build location, you can now set:
+
+    export PKG_CONFIG_PATH="<PATH-TO-LIBGPIOD>/install/lib/pkgconfig/"
+
+To prevent setting this in every terminal session, you can also configure
+cargo to
+[set it automatically](https://doc.rust-lang.org/cargo/reference/config.html#env).
+
+## Xen support
+
+Supporting Xen requires special handling while mapping the guest memory. The
+`vm-memory` crate implements xen memory mapping support via a separate feature
+`xen`, and this crate uses the same feature name to enable Xen support.
+
+It was decided by the `rust-vmm` maintainers to keep the interface simple and
+build the crate for either standard Unix memory mapping or Xen, and not both.

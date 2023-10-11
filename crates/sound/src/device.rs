@@ -202,11 +202,7 @@ impl VhostUserSoundThread {
                         let desc_response = descriptors[2];
                         let mut buf = vec![];
 
-                        for i in chmaps
-                            .iter()
-                            .skip(start_id)
-                            .take(count)
-                        {
+                        for i in chmaps.iter().skip(start_id).take(count) {
                             buf.extend_from_slice(i.as_slice());
                         }
                         desc_chain
@@ -241,11 +237,7 @@ impl VhostUserSoundThread {
                         let desc_response = descriptors[2];
                         let mut buf = vec![];
 
-                        for i in jacks
-                            .iter()
-                            .skip(start_id)
-                            .take(count)
-                        {
+                        for i in jacks.iter().skip(start_id).take(count) {
                             buf.extend_from_slice(i.as_slice());
                         }
                         desc_chain

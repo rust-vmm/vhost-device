@@ -1,3 +1,5 @@
 [workspace]
 resolver = "2"
-members = []
+members = [
+  "vhost-device-sound",
+]

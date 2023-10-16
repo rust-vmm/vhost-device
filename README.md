@@ -13,7 +13,6 @@ Here is the list of device backends that we support:
 - [RNG](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-rng/README.md)
 - [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scmi/README.md)
 - [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)
-- [Sound](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-sound/README.md)
 - [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-vsock/README.md)
 
 For `vhost-user` device backends that have no final specification merged into
@@ -23,7 +22,7 @@ More information may be found in its [README file](./staging/README.md).
 
 Here is the list of device backends in **staging**:
 
-- Currently none.
+- [Sound](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-sound/README.md)
 
 <!--
 Template:

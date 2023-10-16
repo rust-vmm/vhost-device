@@ -6,6 +6,12 @@ This repository hosts various 'vhost-user' device backends in their own crates.
 See their individual README.md files for specific information about those
 crates.
 
+To be included here device backends must:
+
+  - be based on a published [VIRTIO specification](https://github.com/oasis-tcs/virtio-spec)
+  - fulfil basic functionality requirements (in conjunction with a implemented driver)
+  - meet the [rust-vmm dev requirements](https://github.com/rust-vmm/community#publishing-on-cratesio---requirements-list)
+
 Here is the list of device backends that we support:
 
 - [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-gpio/README.md)
@@ -15,9 +21,20 @@ Here is the list of device backends that we support:
 - [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)
 - [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-vsock/README.md)
 
-For `vhost-user` device backends that have no final specification merged into
-the [VIRTIO specification](https://github.com/oasis-tcs/virtio-spec), or have partial functionality, we have a [staging
-workspace](./staging/).
+### Staging Devices
+
+Implementing a proper VirtIO device requires co-ordination between the
+specification, drivers and backend implementations. As these can all
+be in flux during development it was decided introducing a staging
+workspace which would allow developers to work within the main rust-vmm
+project while clearly marking the backends as not production ready.
+
+To be included in the staging workspace there must at least be:
+
+  - A public proposal to extend the [VIRTIO specification](https://github.com/oasis-tcs/virtio-spec)
+  - A public implementation of a device driver
+  - Documentation pointing to the above
+
 More information may be found in its [README file](./staging/README.md).
 
 Here is the list of device backends in **staging**:

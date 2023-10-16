@@ -1,0 +1,33 @@
+[package]
+name = "vhost-device-sound"
+version = "0.1.0"
+authors = ["Stefano Garzarella <sgarzare@redhat.com>", "Manos Pitsidianakis <manos.pitsidianakis@linaro.org>"]
+description = "A virtio-sound device using the vhost-user protocol."
+repository = "https://github.com/rust-vmm/vhost-device"
+readme = "README.md"
+keywords = ["vhost", "sound", "virtio-sound", "virtio-snd", "virtio"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2018"
+
+[features]
+default = ["alsa-backend", "pw-backend"]
+alsa-backend = ["dep:alsa"]
+pw-backend = ["pw"]
+
+[dependencies]
+alsa = { version = "0.7", optional = true }
+clap = { version = "4.1", features = ["derive"] }
+env_logger = "0.10"
+log = "0.4"
+pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "5fe090b3ac8f6fed756c4871ac18f26edda3ac89", optional = true }
+thiserror = "1.0"
+vhost = { version = "0.6", features = ["vhost-user-slave"] }
+vhost-user-backend = "0.8"
+virtio-bindings = "0.2.1"
+virtio-queue = "0.7"
+vm-memory = "0.10"
+vmm-sys-util = "0.11"
+
+[dev-dependencies]
+serial_test = "1.0"
+rstest = "0.18.2"

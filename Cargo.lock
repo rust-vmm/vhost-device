@@ -1447,6 +1447,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost-device-sound"
+version = "0.1.0"
+dependencies = [
+ "alsa",
+ "clap",
+ "env_logger",
+ "log",
+ "pipewire",
+ "rstest",
+ "serial_test",
+ "thiserror",
+ "vhost 0.6.1",
+ "vhost-user-backend 0.8.0",
+ "virtio-bindings 0.2.1",
+ "virtio-queue 0.7.1",
+ "vm-memory 0.10.0",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-vsock"
 version = "0.1.0"
 dependencies = [
@@ -1496,26 +1516,6 @@ dependencies = [
  "virtio-bindings 0.2.1",
  "virtio-queue 0.9.0",
  "vm-memory 0.12.2",
- "vmm-sys-util",
-]
-
-[[package]]
-name = "vhost-user-sound"
-version = "0.1.0"
-dependencies = [
- "alsa",
- "clap",
- "env_logger",
- "log",
- "pipewire",
- "rstest",
- "serial_test",
- "thiserror",
- "vhost 0.6.1",
- "vhost-user-backend 0.8.0",
- "virtio-bindings 0.2.1",
- "virtio-queue 0.7.1",
- "vm-memory 0.10.0",
  "vmm-sys-util",
 ]
 

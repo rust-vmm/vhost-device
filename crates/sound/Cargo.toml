@@ -1,5 +1,5 @@
 [package]
-name = "vhost-user-sound"
+name = "vhost-device-sound"
 version = "0.1.0"
 authors = ["Stefano Garzarella <sgarzare@redhat.com>", "Manos Pitsidianakis <manos.pitsidianakis@linaro.org>"]
 description = "A virtio-sound device using the vhost-user protocol."

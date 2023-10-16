@@ -281,14 +281,14 @@ impl Drop for IOMessage {
 }
 
 /// This is the public API through which an external program starts the
-/// vhost-user-sound backend server.
+/// vhost-device-sound backend server.
 pub fn start_backend_server(config: SoundConfig) {
     log::trace!("Using config {:?}", &config);
     let listener = Listener::new(config.get_socket_path(), true).unwrap();
     let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
 
     let mut daemon = VhostUserDaemon::new(
-        String::from("vhost-user-sound"),
+        String::from("vhost-device-sound"),
         backend.clone(),
         GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )

@@ -1,10 +1,10 @@
-# vhost-user-sound
+# vhost-device-sound
 
 <!--
-generated with help2man target/debug/vhost-user-sound |mandoc
+generated with help2man target/debug/vhost-device-sound |mandoc
 -->
 ## Synopsis
-       vhost-user-sound --socket <SOCKET> --backend <BACKEND>
+       vhost-device-sound --socket <SOCKET> --backend <BACKEND>
 
 ## Description
        A virtio-sound device using the vhost-user protocol.
@@ -30,7 +30,7 @@ generated with help2man target/debug/vhost-user-sound |mandoc
 Launch the backend on the host machine:
 
 ```shell
-host# vhost-user-sound --socket /tmp/snd.sock --backend null
+host# vhost-device-sound --socket /tmp/snd.sock --backend null
 ```
 
 With QEMU, you can add a `virtio` device that uses the backend's socket with the following flags:

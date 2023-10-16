@@ -4,7 +4,7 @@
 use std::convert::TryFrom;
 
 use clap::Parser;
-use vhost_user_sound::{start_backend_server, BackendType, Error, Result, SoundConfig};
+use vhost_device_sound::{start_backend_server, BackendType, Error, Result, SoundConfig};
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]

@@ -8,13 +8,29 @@ crates.
 
 Here is the list of device backends that we support:
 
-- [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-gpio/README.md)
-- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-i2c/README.md)
-- [RNG](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-rng/README.md)
-- [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-scmi/README.md)
-- [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-scsi/README.md)
+- [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-gpio/README.md)
+- [I2C](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-i2c/README.md)
+- [RNG](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-rng/README.md)
+- [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scmi/README.md)
+- [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)
 - [Sound](https://github.com/rust-vmm/vhost-device/blob/main/crates/sound/README.md)
-- [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/crates/vhost-device-vsock/README.md)
+- [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-vsock/README.md)
+
+For `vhost-user` device backends that have no final specification merged into
+the [VIRTIO specification](https://github.com/oasis-tcs/virtio-spec), or have partial functionality, we have a [staging
+workspace](./staging/).
+More information may be found in its [README file](./staging/README.md).
+
+Here is the list of device backends in **staging**:
+
+- Currently none.
+
+<!--
+Template:
+
+- [`_DEVICE_NAME_`](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-_DEVICE_NAME_/README.md)
+
+-->
 
 ## Testing and Code Coverage
 

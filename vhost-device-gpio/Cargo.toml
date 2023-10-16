@@ -29,7 +29,7 @@ vm-memory = "0.12"
 vmm-sys-util = "0.11"
 
 [target.'cfg(target_env = "gnu")'.dependencies]
-libgpiod = { version = "0.1" }
+libgpiod = "0.2"
 
 [dev-dependencies]
 assert_matches = "1.5"

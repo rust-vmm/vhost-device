@@ -91,17 +91,10 @@ pub(crate) struct PhysLineState {
 }
 
 pub(crate) struct PhysDevice {
-    chip: chip::Chip,
+    chip: Mutex<chip::Chip>,
     ngpio: u16,
-    state: Vec<RwLock<PhysLineState>>,
+    state: Vec<Mutex<PhysLineState>>,
 }
-
-// SAFETY: Safe as the structure can be sent to another thread.
-unsafe impl Send for PhysDevice {}
-
-// SAFETY: Safe as the structure can be shared with another thread as the state
-// is protected with a lock.
-unsafe impl Sync for PhysDevice {}
 
 impl GpioDevice for PhysDevice {
     fn open(device: u32) -> Result<Self>
@@ -113,15 +106,19 @@ impl GpioDevice for PhysDevice {
         let ngpio = chip.info().map_err(Error::GpiodFailed)?.num_lines() as u16;
 
         // Can't set a vector to all None easily
-        let mut state: Vec<RwLock<PhysLineState>> = Vec::new();
+        let mut state: Vec<Mutex<PhysLineState>> = Vec::new();
         state.resize_with(ngpio as usize, || {
-            RwLock::new(PhysLineState {
+            Mutex::new(PhysLineState {
                 request: None,
                 buffer: None,
             })
         });
 
-        Ok(PhysDevice { chip, ngpio, state })
+        Ok(PhysDevice {
+            chip: Mutex::new(chip),
+            ngpio,
+            state,
+        })
     }
 
     fn num_gpios(&self) -> Result<u16> {
@@ -131,6 +128,8 @@ impl GpioDevice for PhysDevice {
     fn gpio_name(&self, gpio: u16) -> Result<String> {
         let line_info = self
             .chip
+            .lock()
+            .unwrap()
             .line_info(gpio.into())
             .map_err(Error::GpiodFailed)?;
 
@@ -140,6 +139,8 @@ impl GpioDevice for PhysDevice {
     fn direction(&self, gpio: u16) -> Result<u8> {
         let line_info = self
             .chip
+            .lock()
+            .unwrap()
             .line_info(gpio.into())
             .map_err(Error::GpiodFailed)?;
 
@@ -152,7 +153,7 @@ impl GpioDevice for PhysDevice {
 
     fn set_direction(&self, gpio: u16, dir: u8, value: u32) -> Result<()> {
         let mut lsettings = line::Settings::new().map_err(Error::GpiodFailed)?;
-        let state = &mut self.state[gpio as usize].write().unwrap();
+        let state = &mut self.state[gpio as usize].lock().unwrap();
 
         match dir {
             VIRTIO_GPIO_DIRECTION_NONE => {
@@ -195,29 +196,20 @@ impl GpioDevice for PhysDevice {
                 .set_consumer("vhu-gpio")
                 .map_err(Error::GpiodFailed)?;
 
-            // This is causing a warning since libgpiod's request_config is
-            // not `Send`.
-            // We, however, unsafely claim that it is by marking PhysDevice as
-            // `Send`. This is wrong, but until we figure out what to do, we
-            // just silence the clippy warning here.
-            //
-            // https://github.com/rust-vmm/vhost-device/issues/442 tracks
-            // finding a solution to this.
-            #[allow(clippy::arc_with_non_send_sync)]
-            {
-                state.request = Some(Arc::new(Mutex::new(
-                    self.chip
-                        .request_lines(Some(&rconfig), &lconfig)
-                        .map_err(Error::GpiodFailed)?,
-                )));
-            }
+            state.request = Some(Arc::new(Mutex::new(
+                self.chip
+                    .lock()
+                    .unwrap()
+                    .request_lines(Some(&rconfig), &lconfig)
+                    .map_err(Error::GpiodFailed)?,
+            )));
         }
 
         Ok(())
     }
 
     fn value(&self, gpio: u16) -> Result<u8> {
-        let state = &self.state[gpio as usize].read().unwrap();
+        let state = self.state[gpio as usize].lock().unwrap();
 
         if let Some(request) = &state.request {
             Ok(request
@@ -233,11 +225,11 @@ impl GpioDevice for PhysDevice {
     }
 
     fn set_value(&self, gpio: u16, value: u32) -> Result<()> {
-        let state = &self.state[gpio as usize].read().unwrap();
+        let mut state = self.state[gpio as usize].lock().unwrap();
 
         // Direction change can follow value change, don't fail here for invalid
         // direction.
-        if let Some(request) = &state.request {
+        if let Some(request) = &mut state.request {
             let value = line::Value::new(value as i32).map_err(Error::GpiodFailed)?;
             request
                 .lock()
@@ -250,7 +242,7 @@ impl GpioDevice for PhysDevice {
     }
 
     fn set_irq_type(&self, gpio: u16, value: u16) -> Result<()> {
-        let state = &mut self.state[gpio as usize].write().unwrap();
+        let mut state = self.state[gpio as usize].lock().unwrap();
 
         let edge = match value {
             VIRTIO_GPIO_IRQ_TYPE_EDGE_RISING => line::Edge::Rising,
@@ -289,7 +281,7 @@ impl GpioDevice for PhysDevice {
 
         state
             .request
-            .as_ref()
+            .as_mut()
             .unwrap()
             .lock()
             .unwrap()
@@ -326,18 +318,21 @@ impl GpioDevice for PhysDevice {
         // This design also allows `wait_for_interrupt()` to not take a lock for the entire
         // duration, which can potentially also starve the other thread trying to disable the
         // interrupt.
-        let request = {
-            let state = &self.state[gpio as usize].write().unwrap();
 
-            match &state.request {
-                Some(x) => x.clone(),
-                None => return Err(Error::GpioIrqNotEnabled),
-            }
+        // Take the state lock, get the request and release the state lock again
+        let request = {
+            let mut state = self.state[gpio as usize].lock().unwrap();
+            state
+                .request
+                .as_mut()
+                .ok_or(Error::GpioIrqNotEnabled)?
+                .clone()
         };
 
+        // Only take the request lock now
         let request = request.lock().unwrap();
 
-        // Wait for the interrupt for a second.
+        // Wait for the interrupt for a second while only taking the request lock
         if !request
             .wait_edge_events(Some(Duration::new(1, 0)))
             .map_err(Error::GpiodFailed)?
@@ -345,8 +340,8 @@ impl GpioDevice for PhysDevice {
             return Ok(false);
         }
 
-        // The interrupt has already occurred, we can lock now just fine.
-        let state = &mut self.state[gpio as usize].write().unwrap();
+        // The interrupt has already occurred, we can lock the state again.
+        let mut state = self.state[gpio as usize].lock().unwrap();
         if let Some(buffer) = &mut state.buffer {
             request
                 .read_edge_events(buffer)

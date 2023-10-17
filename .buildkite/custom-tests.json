@@ -1,0 +1,81 @@
+{
+  "tests": [
+    {
+      "test_name": "staging: build-gnu",
+      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "staging: build-musl",
+      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "staging: style",
+      "command": "cd staging && cargo fmt --all -- --check --config format_code_in_doc_comments=true"
+    },
+    {
+      "test_name": "staging: unittests-gnu",
+      "command": "cd staging && cargo test --all-features --workspace",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "staging: unittests-musl",
+      "command": "cd staging && cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "staging: clippy",
+      "command": "cd staging && cargo clippy --workspace --bins --examples --benches --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "staging: check-warnings",
+      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo check --all-targets --all-features --workspace",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "staging: coverage",
+      "command": "cd staging && pytest $(find .. -type f -name \"test_coverage.py\")",
+      "soft_fail": "true",
+      "docker_plugin": {
+        "privileged": true
+      },
+      "platform": [
+        "x86_64"
+      ]
+    },
+    {
+      "test_name": "staging: cargo-audit",
+      "command": "cd staging && cargo audit -q --deny warnings",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64"
+      ]
+    }
+  ]
+}

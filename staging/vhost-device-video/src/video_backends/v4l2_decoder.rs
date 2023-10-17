@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-
-use std::{
-    collections::HashMap, fs::File, io, os::unix::io::AsRawFd, path::Path, slice::from_raw_parts,
-};
+use std::{collections::HashMap, fs::File, io, os::unix::io::AsRawFd, path::Path};
 
 use log::{debug, warn};
 use v4l2r::{
@@ -268,7 +265,6 @@ impl VideoBackend for V4L2Decoder {
         // Clone stream to burrow the fd as inmutable
         let fd = stream.clone().file;
         let memory_type = stream.memory(queue_type);
-        let memory = v4l2r::memory::MemoryType::n(memory_type.to_v4l2()).unwrap();
         let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
         let bufcount = match queue_type {
             video::QueueType::InputQueue => stream.inputq_resources.map.len(),
@@ -283,8 +279,7 @@ impl VideoBackend for V4L2Decoder {
             }
         };
         if bufcount > 0 && all_created {
-            if let Err(e) = v4l2r::ioctl::reqbufs::<()>(&fd, queue, memory, bufcount as u32) {
-                warn!("reqbufs failed: {}", e);
+            if !Self::v4l2_request_buffers(&fd, queue_type, memory_type, bufcount as u32) {
                 return Sync(video::CmdResponse::Error(InvalidParameter));
             }
             res.set_queried();
@@ -300,34 +295,10 @@ impl VideoBackend for V4L2Decoder {
             warn!("Virtio Object Memory NOT YET supported");
             return Sync(video::CmdResponse::Error(InvalidParameter));
         }
-        let planes: Vec<v4l2r::ioctl::QBufPlane> = res
-            .planes
-            .iter()
-            .map(|plane| {
-                let handle = v4l2r::memory::UserPtrHandle::from(
-                    // SAFETY: the address pointer memory is initialized by the guest.
-                    unsafe { from_raw_parts(plane.address as *const u8, plane.length as usize) },
-                );
-                v4l2r::ioctl::QBufPlane::new_from_handle(&handle, plane.length as usize)
-            })
-            .collect();
-        let (sec, usec) = process_timestamp(timestamp);
-        let qbuffer: v4l2r::ioctl::QBuffer<v4l2r::memory::UserPtrHandle<Vec<u8>>> =
-            v4l2r::ioctl::QBuffer {
-                planes,
-                ..Default::default()
-            }
-            .set_timestamp(sec, usec);
-        match v4l2r::ioctl::qbuf::<_, ()>(&fd, queue, res.index as usize, qbuffer) {
-            Ok(_) => {
-                res.set_queued();
-            }
-            Err(e) => {
-                warn!("qbuf failed: {}", e);
-                return Sync(video::CmdResponse::Error(InvalidParameter));
-            }
+        if !Self::v4l2_queue_buffer(&fd, queue_type, timestamp, res) {
+            return Sync(video::CmdResponse::Error(InvalidParameter));
         }
-
+        res.set_queued();
         if stream.state() == stream::StreamState::Stopped {
             if let Err(e) = v4l2r::ioctl::subscribe_event(
                 stream,
@@ -365,18 +336,8 @@ impl VideoBackend for V4L2Decoder {
 
     fn query_capability(&self, queue_type: video::QueueType) -> video::CmdResponseType {
         let mut index: u32 = 0;
-        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
         let mut desc_list: Vec<video::virtio_video_format_desc> = Vec::new();
-        loop {
-            let fmtdesc: v4l2_fmtdesc =
-                match v4l2r::ioctl::enum_fmt(&self.video_device, queue, index) {
-                    Ok(fmtdesc) => fmtdesc,
-                    Err(e) => {
-                        warn!("fmtdesc failed: {}", e);
-                        break;
-                    }
-                };
-
+        while let Some(fmtdesc) = self.v4l2_enum_formats(queue_type, index) {
             if index != fmtdesc.index {
                 warn!("v4l2 driver modified index {}", fmtdesc.index);
             }
@@ -409,12 +370,9 @@ impl VideoBackend for V4L2Decoder {
     }
 
     fn query_control(&self, control: video::ControlType) -> video::CmdResponseType {
-        let (id, flags) = v4l2r::ioctl::parse_ctrl_id_and_flags(control.to_v4l2());
-        let queryctrl: v4l2_queryctrl = match v4l2r::ioctl::queryctrl(&self.video_device, id, flags)
-        {
-            Ok(queryctrl) => queryctrl,
-            Err(e) => {
-                warn!("queryctrl failed: {}", e);
+        let queryctrl: v4l2_queryctrl = match self.v4l2_query_control(control) {
+            Some(queryctrl) => queryctrl,
+            None => {
                 return Sync(video::CmdResponse::Error(UnsupportedControl));
             }
         };
@@ -467,12 +425,10 @@ impl VideoBackend for V4L2Decoder {
                 return Sync(video::CmdResponse::Error(InvalidStreamId));
             }
         };
-        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
         let mut params = video::virtio_video_params::default();
-        let format: v4l2_format = match v4l2r::ioctl::g_fmt(stream, queue) {
-            Ok(format) => format,
-            Err(e) => {
-                warn!("g_fmt failed: {}", e);
+        let format = match Self::v4l2_get_format(stream, queue_type) {
+            Some(format) => format,
+            None => {
                 return Sync(video::CmdResponse::Error(InvalidParameter));
             }
         };
@@ -494,9 +450,9 @@ impl VideoBackend for V4L2Decoder {
             params.plane_formats[i as usize].plane_size =
                 pix_fmt.plane_fmt[i as usize].sizeimage.into();
         }
-
+        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
         if queue.direction() == v4l2r::QueueDirection::Capture {
-            if let Some(sel) = Self::get_selection(stream, queue) {
+            if let Some(sel) = Self::v4l2_get_selection(stream, queue_type) {
                 params.crop.left = (sel.left as u32).into();
                 params.crop.top = (sel.top as u32).into();
                 params.crop.width = sel.width.into();
@@ -671,19 +627,134 @@ impl V4L2Decoder {
         })
     }
 
+    #[cfg(not(test))]
+    fn v4l2_queue_buffer<T: AsRawFd>(
+        fd: &T,
+        queue_type: video::QueueType,
+        timestamp: u64,
+        res: &stream::Resource,
+    ) -> bool {
+        use std::slice::from_raw_parts;
+        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
+        let planes: Vec<v4l2r::ioctl::QBufPlane> = res
+            .planes
+            .iter()
+            .map(|plane| {
+                let handle = v4l2r::memory::UserPtrHandle::from(
+                    // SAFETY: the address pointer memory is initialized by the guest.
+                    unsafe { from_raw_parts(plane.address as *const u8, plane.length as usize) },
+                );
+                v4l2r::ioctl::QBufPlane::new_from_handle(&handle, plane.length as usize)
+            })
+            .collect();
+        let (sec, usec) = process_timestamp(timestamp);
+        let qbuffer: v4l2r::ioctl::QBuffer<v4l2r::memory::UserPtrHandle<Vec<u8>>> =
+            v4l2r::ioctl::QBuffer {
+                planes,
+                ..Default::default()
+            }
+            .set_timestamp(sec, usec);
+        match v4l2r::ioctl::qbuf::<_, ()>(fd, queue, res.index as usize, qbuffer) {
+            Ok(_) => true,
+            Err(e) => {
+                warn!("qbuf failed: {}", e);
+                false
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn v4l2_enum_formats(&self, queue_type: video::QueueType, index: u32) -> Option<v4l2_fmtdesc> {
+        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
+        match v4l2r::ioctl::enum_fmt(&self.video_device, queue, index) {
+            Ok(fmtdesc) => Some(fmtdesc),
+            Err(e) => {
+                warn!("fmtdesc failed: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn v4l2_query_control(&self, control: video::ControlType) -> Option<v4l2_queryctrl> {
+        let (id, flags) = v4l2r::ioctl::parse_ctrl_id_and_flags(control.to_v4l2());
+        match v4l2r::ioctl::queryctrl(&self.video_device, id, flags) {
+            Ok(queryctrl) => Some(queryctrl),
+            Err(e) => {
+                warn!("queryctrl failed: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn v4l2_get_format<T: AsRawFd>(fd: &T, queue_type: video::QueueType) -> Option<v4l2_format> {
+        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
+        match v4l2r::ioctl::g_fmt(fd, queue) {
+            Ok(format) => format,
+            Err(e) => {
+                warn!("g_fmt failed: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn v4l2_request_buffers<T: AsRawFd>(
+        fd: &T,
+        queue_type: video::QueueType,
+        memory_type: video::MemoryType,
+        bufcount: u32,
+    ) -> bool {
+        let memory = v4l2r::memory::MemoryType::n(memory_type.to_v4l2()).unwrap();
+        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
+        if let Err(e) = v4l2r::ioctl::reqbufs::<()>(fd, queue, memory, bufcount) {
+            warn!("reqbufs failed: {}", e);
+            return false;
+        }
+        true
+    }
+
+    #[cfg(not(test))]
+    fn v4l2_enum_frame_sizes(&self, pixformat: u32, index: u32) -> Option<v4l2_frmsizeenum> {
+        let pixelformat: PixelFormat = PixelFormat::from(pixformat);
+        match v4l2r::ioctl::enum_frame_sizes(&self.video_device, index, pixelformat) {
+            Ok(frmsizeenum) => Some(frmsizeenum),
+            Err(e) => {
+                warn!("enum_frame_sizes failed: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn v4l2_enum_frame_intervals(
+        &self,
+        pixformat: u32,
+        width: u32,
+        height: u32,
+        index: u32,
+    ) -> Option<v4l2_frmivalenum> {
+        let pixelformat: PixelFormat = PixelFormat::from(pixformat);
+        match v4l2r::ioctl::enum_frame_intervals(
+            &self.video_device,
+            index,
+            pixelformat,
+            width,
+            height,
+        ) {
+            Ok(frmivalenum) => Some(frmivalenum),
+            Err(e) => {
+                warn!("enum_frame_intervals failed! {}", e);
+                None
+            }
+        }
+    }
+
     fn video_enum_frame_sizes(&self, pixformat: u32) -> Vec<video::virtio_video_format_frame> {
         let mut index: u32 = 0;
         let mut frames: Vec<video::virtio_video_format_frame> = Vec::new();
-        loop {
-            let pixelformat: PixelFormat = PixelFormat::from(pixformat);
-            let frame: v4l2_frmsizeenum =
-                match v4l2r::ioctl::enum_frame_sizes(&self.video_device, index, pixelformat) {
-                    Ok(frmsizeenum) => frmsizeenum,
-                    Err(e) => {
-                        warn!("enum_frame_sizes failed: {}", e);
-                        break;
-                    }
-                };
+        while let Some(frame) = self.v4l2_enum_frame_sizes(pixformat, index) {
             if index != frame.index {
                 warn!("driver returned wrong frame index: {}", frame.index);
             }
@@ -738,22 +809,7 @@ impl V4L2Decoder {
     ) -> Vec<video::virtio_video_format_range> {
         let mut index: u32 = 0;
         let mut frame_rates: Vec<video::virtio_video_format_range> = Vec::new();
-        loop {
-            let pixelformat = PixelFormat::from(pixformat);
-            let ival: v4l2_frmivalenum = match v4l2r::ioctl::enum_frame_intervals(
-                &self.video_device,
-                index,
-                pixelformat,
-                width,
-                height,
-            ) {
-                Ok(frmivalenum) => frmivalenum,
-                Err(e) => {
-                    warn!("enum_frame_intervals failed! {}", e);
-                    break;
-                }
-            };
-
+        while let Some(ival) = self.v4l2_enum_frame_intervals(pixformat, width, height, index) {
             if index != ival.index {
                 warn!("driver returned wrong ival index: {}", ival.index);
             }
@@ -777,14 +833,15 @@ impl V4L2Decoder {
         frame_rates
     }
 
-    fn get_selection<T: AsRawFd>(fd: &T, queue_type: v4l2r::QueueType) -> Option<v4l2_rect> {
-        let sel_type: v4l2r::ioctl::SelectionType = match queue_type {
+    fn v4l2_get_selection<T: AsRawFd>(fd: &T, queue_type: video::QueueType) -> Option<v4l2_rect> {
+        let queue = v4l2r::QueueType::from_value(queue_type as u32).unwrap();
+        let sel_type: v4l2r::ioctl::SelectionType = match queue {
             v4l2r::QueueType::VideoCaptureMplane => v4l2r::ioctl::SelectionType::Capture,
             v4l2r::QueueType::VideoOutputMplane => v4l2r::ioctl::SelectionType::Output,
             _ => return None,
         };
         let sel_target: v4l2r::ioctl::SelectionTarget =
-            if queue_type.direction() == v4l2r::QueueDirection::Capture {
+            if queue.direction() == v4l2r::QueueDirection::Capture {
                 v4l2r::ioctl::SelectionTarget::Compose
             } else {
                 v4l2r::ioctl::SelectionTarget::Crop
@@ -803,12 +860,113 @@ impl V4L2Decoder {
 #[cfg(test)]
 mod tests {
 
+    use std::mem;
+
     use assert_matches::assert_matches;
     use rstest::*;
     use tempfile::TempDir;
 
     use super::*;
     use crate::vhu_video::tests::{test_dir, VideoDeviceMock};
+
+    /// Mock implementations for v4l2r wrapped calls
+    impl V4L2Decoder {
+        pub fn v4l2_queue_buffer<T: AsRawFd>(
+            _fd: &T,
+            _queue_type: video::QueueType,
+            _timestamp: u64,
+            _res: &stream::Resource,
+        ) -> bool {
+            true
+        }
+
+        pub fn v4l2_enum_formats(
+            &self,
+            _queue_type: video::QueueType,
+            index: u32,
+        ) -> Option<v4l2_fmtdesc> {
+            if index > 0 {
+                return None;
+            }
+            Some(v4l2_fmtdesc {
+                index,
+                type_: v4l2r::bindings::v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+                pixelformat: 0x3231564e, // NV12
+                // SAFETY: test environment only.
+                ..unsafe { mem::zeroed() }
+            })
+        }
+
+        pub fn v4l2_query_control(&self, _control: video::ControlType) -> Option<v4l2_queryctrl> {
+            Some(v4l2_queryctrl {
+                // SAFETY: test environment only.
+                ..unsafe { mem::zeroed() }
+            })
+        }
+
+        pub fn v4l2_get_format<T: AsRawFd>(
+            _fd: &T,
+            _queue_type: video::QueueType,
+        ) -> Option<v4l2_format> {
+            Some(v4l2_format {
+                // SAFETY: test environment only.
+                ..unsafe { mem::zeroed() }
+            })
+        }
+
+        pub fn v4l2_request_buffers<T: AsRawFd>(
+            _fd: &T,
+            _queue_type: video::QueueType,
+            _memory_type: video::MemoryType,
+            _bufcount: u32,
+        ) -> bool {
+            true
+        }
+
+        pub fn v4l2_enum_frame_sizes(
+            &self,
+            pixformat: u32,
+            index: u32,
+        ) -> Option<v4l2_frmsizeenum> {
+            if index > 0 {
+                return None;
+            }
+            Some(v4l2_frmsizeenum {
+                index,
+                pixel_format: pixformat,
+                // SAFETY: test environment only.
+                ..unsafe { mem::zeroed() }
+            })
+        }
+
+        pub fn v4l2_enum_frame_intervals(
+            &self,
+            pixformat: u32,
+            width: u32,
+            height: u32,
+            index: u32,
+        ) -> Option<v4l2_frmivalenum> {
+            if index > 0 {
+                return None;
+            }
+            let ival = v4l2r::bindings::v4l2_frmivalenum__bindgen_ty_1 {
+                discrete: v4l2r::bindings::v4l2_fract {
+                    numerator: 1,
+                    denominator: 1,
+                },
+            };
+            Some(v4l2_frmivalenum {
+                index,
+                pixel_format: pixformat,
+                width,
+                height,
+                type_: v4l2r::bindings::v4l2_frmivaltypes_V4L2_FRMIVAL_TYPE_DISCRETE,
+                __bindgen_anon_1: ival,
+                // SAFETY: test environment only.
+                ..unsafe { mem::zeroed() }
+            })
+        }
+    }
 
     #[rstest]
     fn test_backend_trait(test_dir: TempDir) {
@@ -834,7 +992,7 @@ mod tests {
         );
         assert_matches!(
             decoder.query_control(video::ControlType::Bitrate),
-            Sync(Error(video::CmdError::UnsupportedControl))
+            Sync(QueryControl(video::VideoControl::Bitrate(_)))
         );
         let params = video::virtio_video_params {
             queue_type: <u32 as Into<Le32>>::into(queue_type as u32),
@@ -846,7 +1004,7 @@ mod tests {
         );
         assert_matches!(
             decoder.get_params(stream_id, queue_type),
-            Sync(Error(video::CmdError::InvalidParameter))
+            Sync(GetParams { .. })
         );
         // Create resource, queue, and dequeue it
         assert_matches!(
@@ -901,7 +1059,13 @@ mod tests {
             Sync(Error(video::CmdError::InvalidStreamId))
         );
         assert_matches!(
-            decoder.create_resource(stream_id, resource_id, 1, Vec::new(), queue_type),
+            decoder.create_resource(
+                stream_id,
+                resource_id,
+                1,
+                vec![stream::ResourcePlane::default()],
+                queue_type
+            ),
             Sync(Error(video::CmdError::InvalidStreamId))
         );
         assert_matches!(
@@ -924,19 +1088,33 @@ mod tests {
     }
 
     #[rstest]
+    fn test_backend_dequeue_event(test_dir: TempDir) {
+        use video::{CmdResponse::*, CmdResponseType::*};
+        // Mock video device, will not answer to requests
+        let v4l2_device = VideoDeviceMock::new(&test_dir);
+        let mut decoder = V4L2Decoder::new(Path::new(&v4l2_device.path)).unwrap();
+        let stream_id = 1;
+        // Create stream
+        assert_matches!(decoder.create_stream(stream_id, 0, 1, 1), Sync(OkNoData));
+        assert_matches!(
+            decoder.dequeue_event(stream_id),
+            Some(video::virtio_video_event { .. })
+        );
+    }
+
+    #[rstest]
     fn test_v4l2_backend_helpers(test_dir: TempDir) {
         let v4l2_device = VideoDeviceMock::new(&test_dir);
         let decoder = V4L2Decoder::new(Path::new(&v4l2_device.path)).unwrap();
-        let queue_type = v4l2r::QueueType::VideoOutputMplane;
         let nv12 = u32::from_le(0x3231564e);
         assert_matches!(
-            V4L2Decoder::get_selection(&decoder.video_device, queue_type),
+            V4L2Decoder::v4l2_get_selection(&decoder.video_device, video::QueueType::InputQueue),
             None
         );
         let frames = decoder.video_enum_frame_sizes(nv12);
         assert_eq!(frames.len(), 0);
         let intervals = decoder.video_enum_frame_intervals(nv12, 640, 640);
-        assert_eq!(intervals.len(), 0);
+        assert_eq!(intervals.len(), 1);
     }
 
     #[rstest]

@@ -128,10 +128,13 @@ impl VhostUserSoundThread {
         vring: &VringRwLock,
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
     ) -> IoResult<bool> {
+        let Some(ref atomic_mem) = self.mem else {
+            return Err(Error::NoMemoryConfigured.into());
+        };
         let requests: Vec<SoundDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
-            .iter(self.mem.as_ref().unwrap().memory())
+            .iter(atomic_mem.memory())
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 
@@ -450,10 +453,13 @@ impl VhostUserSoundThread {
         vring: &VringRwLock,
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
     ) -> IoResult<bool> {
+        let Some(ref atomic_mem) = self.mem else {
+            return Err(Error::NoMemoryConfigured.into());
+        };
         let requests: Vec<SoundDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
-            .iter(self.mem.as_ref().unwrap().memory())
+            .iter(atomic_mem.memory())
             .map_err(|_| Error::DescriptorNotFound)?
             .collect();
 

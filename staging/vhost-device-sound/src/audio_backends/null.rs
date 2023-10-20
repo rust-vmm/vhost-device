@@ -27,3 +27,31 @@ impl AudioBackend for NullBackend {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_null_backend_write() {
+        let streams = Arc::new(RwLock::new(vec![Stream::default()]));
+        let null_backend = NullBackend::new(streams.clone());
+
+        assert!(null_backend.write(0).is_ok());
+
+        let streams = streams.read().unwrap();
+        assert_eq!(streams[0].buffers.len(), 0);
+    }
+
+    #[test]
+    fn test_null_backend_read() {
+        let streams = Arc::new(RwLock::new(vec![Stream::default()]));
+        let null_backend = NullBackend::new(streams.clone());
+
+        assert!(null_backend.read(0).is_ok());
+
+        // buffer lengths should remain unchanged
+        let streams = streams.read().unwrap();
+        assert_eq!(streams[0].buffers.len(), 0);
+    }
+}

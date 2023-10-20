@@ -9,7 +9,7 @@ use vm_memory::{Address, Bytes, Le32, Le64};
 use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
-#[derive(Debug, ThisError)]
+#[derive(Debug, ThisError, PartialEq)]
 pub enum Error {
     #[error("Guest driver request an invalid stream state transition from {0} to {1}.")]
     InvalidStateTransition(PCMState, PCMState),
@@ -91,7 +91,7 @@ type Result<T> = std::result::Result<T, Error>;
 ///         |              |           |          |         |
 ///         |              |<----------|          |         |
 /// ```
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub enum PCMState {
     #[default]
     #[doc(alias = "VIRTIO_SND_R_PCM_SET_PARAMS")]
@@ -280,5 +280,226 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         log::trace!("dropping buffer {:?}", self);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vhost_user_backend::{VringRwLock, VringT};
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
+    use vm_memory::{
+        Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    };
+
+    use super::*;
+    use crate::SoundDescriptorChain;
+
+    // Prepares a single chain of descriptors for request queue
+    fn prepare_desc_chain<R: ByteValued>(
+        start_addr: GuestAddress,
+        hdr: R,
+        response_len: u32,
+    ) -> SoundDescriptorChain {
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
+        let mut next_addr = vq.desc_table().total_size() + 0x100;
+        let mut index = 0;
+
+        let desc_out = Descriptor::new(
+            next_addr,
+            std::mem::size_of::<R>() as u32,
+            VRING_DESC_F_NEXT as u16,
+            index + 1,
+        );
+
+        mem.write_obj::<R>(hdr, desc_out.addr()).unwrap();
+        vq.desc_table().store(index, desc_out).unwrap();
+        next_addr += desc_out.len() as u64;
+        index += 1;
+
+        // In response descriptor
+        let desc_in = Descriptor::new(next_addr, response_len, VRING_DESC_F_WRITE as u16, 0);
+        vq.desc_table().store(index, desc_in).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    fn iomsg() -> IOMessage {
+        let hdr = VirtioSndPcmSetParams::default();
+        let memr = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(memr, 0x1000).unwrap();
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
+        let next_addr = vq.desc_table().total_size() + 0x100;
+        IOMessage {
+            vring,
+            status: VIRTIO_SND_S_OK.into(),
+            desc_chain: prepare_desc_chain::<VirtioSndPcmSetParams>(GuestAddress(0), hdr, 1),
+            descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
+        }
+    }
+
+    #[test]
+    fn test_pcm_state_transitions() {
+        let mut state = PCMState::new();
+        assert_eq!(state, PCMState::SetParameters);
+
+        assert!(state.set_parameters().is_ok());
+        state.set_parameters().unwrap();
+        assert_eq!(state, PCMState::SetParameters);
+
+        assert!(state.prepare().is_ok());
+        state.prepare().unwrap();
+        assert_eq!(state, PCMState::Prepare);
+
+        state.release().unwrap();
+        assert_eq!(state, PCMState::Release);
+    }
+
+    #[test]
+    fn test_invalid_state_transition() {
+        let mut state = PCMState::new();
+        assert_eq!(state, PCMState::SetParameters);
+
+        // Attempt to transition from set_params state to Release state
+        let result = state.release();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::SetParameters,
+                PCMState::Release
+            ))
+        );
+
+        let result = state.start();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::SetParameters,
+                PCMState::Start
+            ))
+        );
+
+        let result = state.stop();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::SetParameters,
+                PCMState::Stop
+            ))
+        );
+
+        state.prepare().unwrap();
+        let result = state.stop();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::Prepare,
+                PCMState::Stop
+            ))
+        );
+
+        state.start().unwrap();
+        let result = state.set_parameters();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::Start,
+                PCMState::SetParameters
+            ))
+        );
+
+        let result = state.release();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::Start,
+                PCMState::Release
+            ))
+        );
+
+        let result = state.prepare();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::Start,
+                PCMState::Prepare
+            ))
+        );
+
+        state.stop().unwrap();
+        let result = state.set_parameters();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::Stop,
+                PCMState::SetParameters
+            ))
+        );
+
+        let result = state.prepare();
+        assert!(result.is_err());
+        assert_eq!(
+            result,
+            Err(Error::InvalidStateTransition(
+                PCMState::Stop,
+                PCMState::Prepare
+            ))
+        );
+    }
+
+    #[test]
+    fn test_stream_supports_format() {
+        let stream = Stream::default();
+        assert!(stream.supports_format(VIRTIO_SND_PCM_FMT_S16));
+        assert!(stream.supports_rate(VIRTIO_SND_PCM_RATE_44100));
+    }
+
+    #[test]
+    fn test_pcm_params_default() {
+        let params = PcmParams::default();
+        assert_eq!(params.buffer_bytes, 8192);
+        assert_eq!(params.period_bytes, 4096);
+        assert_eq!(params.features, 0);
+        assert_eq!(params.channels, 1);
+        assert_eq!(params.format, VIRTIO_SND_PCM_FMT_S16);
+        assert_eq!(params.rate, VIRTIO_SND_PCM_RATE_44100);
+    }
+
+    #[test]
+    fn test_buffer_consume() {
+        let msg = iomsg();
+        let message = Arc::new(msg);
+        let desc_msg = iomsg();
+        let buffer = Buffer::new(desc_msg.descriptor, message);
+
+        let mut buf = vec![0; 5];
+        let result = buffer.consume(&mut buf);
+        assert!(result.is_ok());
     }
 }

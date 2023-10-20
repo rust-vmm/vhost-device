@@ -107,7 +107,7 @@ pub enum BackendType {
     Alsa,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct InvalidControlMessage(u32);
 
 impl std::fmt::Display for InvalidControlMessage {
@@ -316,4 +316,67 @@ pub fn start_backend_server(config: SoundConfig) {
 
     // No matter the result, we need to shut down the worker thread.
     backend.send_exit_event();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::*;
+    use crate::ControlMessageKind;
+
+    #[test]
+    fn test_sound_server() {
+        const SOCKET_PATH: &str = "vsound.socket";
+
+        let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
+
+        let backend = Arc::new(VhostUserSoundBackend::new(config.clone()).unwrap());
+        let daemon = VhostUserDaemon::new(
+            String::from("vhost-device-sound"),
+            backend.clone(),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .unwrap();
+
+        let vring_workers = daemon.get_epoll_handlers();
+
+        // VhostUserSoundBackend support a single thread that handles the TX and RX
+        // queues
+        assert_eq!(backend.threads.len(), 1);
+
+        assert_eq!(vring_workers.len(), backend.threads.len());
+    }
+
+    #[test]
+    fn test_control_message_kind_try_from() {
+        assert_eq!(
+            ControlMessageKind::try_from(<u32 as Into<Le32>>::into(VIRTIO_SND_R_JACK_INFO)),
+            Ok(ControlMessageKind::JackInfo)
+        );
+        assert_eq!(
+            ControlMessageKind::try_from(<u32 as Into<Le32>>::into(VIRTIO_SND_R_PCM_INFO)),
+            Ok(ControlMessageKind::PcmInfo)
+        );
+        assert_eq!(
+            ControlMessageKind::try_from(<u32 as Into<Le32>>::into(VIRTIO_SND_R_CHMAP_INFO)),
+            Ok(ControlMessageKind::ChmapInfo)
+        );
+        assert_eq!(
+            ControlMessageKind::try_from(<u32 as Into<Le32>>::into(VIRTIO_SND_R_PCM_SET_PARAMS)),
+            Ok(ControlMessageKind::PcmSetParams)
+        );
+    }
+
+    #[test]
+    fn test_control_message_kind_try_from_invalid() {
+        // Test an invalid value that should result in an InvalidControlMessage error
+        let invalid_value: u32 = 0x1101;
+        assert_eq!(
+            ControlMessageKind::try_from(<u32 as Into<Le32>>::into(invalid_value)),
+            Err(InvalidControlMessage(invalid_value))
+        );
+    }
 }

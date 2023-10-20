@@ -32,7 +32,7 @@ use crate::{
     ControlMessageKind, Error, IOMessage, Result, SoundConfig,
 };
 
-struct VhostUserSoundThread {
+pub struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     event_idx: bool,
     chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>>,
@@ -584,9 +584,9 @@ impl VhostUserSoundThread {
 }
 
 pub struct VhostUserSoundBackend {
-    threads: Vec<RwLock<VhostUserSoundThread>>,
+    pub threads: Vec<RwLock<VhostUserSoundThread>>,
     virtio_cfg: VirtioSoundConfig,
-    exit_event: EventFd,
+    pub exit_event: EventFd,
     audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>>,
 }
 
@@ -818,5 +818,216 @@ impl Drop for ControlMessage {
         if self.vring.signal_used_queue().is_err() {
             log::error!("Couldn't signal used queue");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+    use vm_memory::GuestAddress;
+
+    use super::*;
+    use crate::BackendType;
+
+    const SOCKET_PATH: &str = "vsound.socket";
+
+    #[test]
+    fn test_sound_thread_success() {
+        let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
+
+        let chmaps = Arc::new(RwLock::new(vec![]));
+        let jacks = Arc::new(RwLock::new(vec![]));
+        let queue_indexes = vec![1, 2, 3];
+        let streams = vec![Stream::default()];
+        let streams_no = streams.len();
+        let streams = Arc::new(RwLock::new(streams));
+        let thread =
+            VhostUserSoundThread::new(chmaps, jacks, queue_indexes, streams.clone(), streams_no);
+
+        assert!(thread.is_ok());
+        let mut t = thread.unwrap();
+
+        // Mock memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        t.mem = Some(mem.clone());
+
+        // Mock Vring for queues
+        let vrings = [
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+        ];
+
+        let audio_backend =
+            RwLock::new(alloc_audio_backend(config.audio_backend, streams.clone()).unwrap());
+        assert!(t
+            .handle_event(CONTROL_QUEUE_IDX, &vrings, &audio_backend)
+            .is_ok());
+
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+        assert!(t.process_control(&vring, &audio_backend).is_ok());
+        assert!(t.process_tx(&vring, &audio_backend).is_ok());
+        assert!(t.process_rx(&vring, &audio_backend).is_ok());
+    }
+
+    #[test]
+    fn test_sound_thread_failure() {
+        let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
+
+        let chmaps = Arc::new(RwLock::new(vec![]));
+        let jacks = Arc::new(RwLock::new(vec![]));
+        let queue_indexes = vec![1, 2, 3];
+        let streams = Arc::new(RwLock::new(vec![]));
+        let streams_no = 0;
+        let thread =
+            VhostUserSoundThread::new(chmaps, jacks, queue_indexes, streams.clone(), streams_no);
+
+        let t = thread.unwrap();
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        let audio_backend =
+            RwLock::new(alloc_audio_backend(config.audio_backend, streams.clone()).unwrap());
+
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+        assert!(t.process_control(&vring, &audio_backend).is_err());
+        assert!(t.process_tx(&vring, &audio_backend).is_err());
+    }
+
+    #[test]
+    fn test_sound_backend() {
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+        let socket_path = test_dir.path().join(SOCKET_PATH).display().to_string();
+        let config = SoundConfig::new(socket_path, false, BackendType::Null);
+        let backend = VhostUserSoundBackend::new(config).expect("Could not create backend.");
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES as usize);
+        assert_eq!(backend.max_queue_size(), 64);
+        assert_ne!(backend.features(), 0);
+        assert!(!backend.protocol_features().is_empty());
+        backend.set_event_idx(false);
+
+        // Mock memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        // Mock Vring for queues
+        let vrings = [
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+        ];
+        vrings[CONTROL_QUEUE_IDX as usize]
+            .set_queue_info(0x100, 0x200, 0x300)
+            .unwrap();
+        vrings[CONTROL_QUEUE_IDX as usize].set_queue_ready(true);
+        vrings[EVENT_QUEUE_IDX as usize]
+            .set_queue_info(0x100, 0x200, 0x300)
+            .unwrap();
+        vrings[EVENT_QUEUE_IDX as usize].set_queue_ready(true);
+        vrings[TX_QUEUE_IDX as usize]
+            .set_queue_info(0x1100, 0x1200, 0x1300)
+            .unwrap();
+        vrings[TX_QUEUE_IDX as usize].set_queue_ready(true);
+        vrings[RX_QUEUE_IDX as usize]
+            .set_queue_info(0x100, 0x200, 0x300)
+            .unwrap();
+        vrings[RX_QUEUE_IDX as usize].set_queue_ready(true);
+
+        assert!(backend.update_memory(mem).is_ok());
+
+        let queues_per_thread = backend.queues_per_thread();
+        assert_eq!(queues_per_thread.len(), 1);
+        assert_eq!(queues_per_thread[0], 0xf);
+
+        let config = backend.get_config(0, 8);
+        assert_eq!(config.len(), 8);
+
+        let exit = backend.exit_event(0);
+        assert!(exit.is_some());
+        exit.unwrap().write(1).unwrap();
+
+        let ret = backend.handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        let ret = backend.handle_event(EVENT_QUEUE_IDX, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        let ret = backend.handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        let ret = backend.handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0);
+        assert!(ret.is_ok());
+        assert!(!ret.unwrap());
+
+        test_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_sound_backend_failures() {
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let socket_path = test_dir
+            .path()
+            .join("sound_failures.socket")
+            .display()
+            .to_string();
+        let config = SoundConfig::new(socket_path, false, BackendType::Null);
+        let backend = VhostUserSoundBackend::new(config);
+
+        let backend = backend.unwrap();
+
+        // Mock memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        // Mock Vring for queues
+        let vrings = [
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+        ];
+
+        // Update memory
+        backend.update_memory(mem).unwrap();
+
+        let config = backend.get_config(2, 8);
+        assert_eq!(config.len(), 8);
+
+        let ret = backend.handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0);
+        assert_eq!(
+            ret.unwrap_err().to_string(),
+            Error::DescriptorNotFound.to_string()
+        );
+
+        // Currently handles a single device event, anything higher than 0 will generate
+        // an error.
+        let ret = backend.handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0);
+        assert_eq!(
+            ret.unwrap_err().to_string(),
+            Error::DescriptorNotFound.to_string()
+        );
+
+        // Currently handles EventSet::IN only, otherwise an error is generated.
+        let ret = backend.handle_event(RX_QUEUE_IDX, EventSet::OUT, &vrings, 0);
+        assert_eq!(
+            ret.unwrap_err().to_string(),
+            Error::HandleEventNotEpollIn.to_string()
+        );
+
+        test_dir.close().unwrap();
     }
 }

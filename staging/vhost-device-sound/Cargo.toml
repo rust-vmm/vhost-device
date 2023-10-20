@@ -30,6 +30,7 @@ vm-memory = "0.12"
 vmm-sys-util = "0.11"
 
 [dev-dependencies]
-serial_test = "1.0"
 rstest = "0.18.2"
+tempfile = "3.5"
+virtio-queue = { version = "0.9", features = ["test-utils"] }
 vm-memory = { version = "0.12", features = ["backend-mmap", "backend-atomic"] }

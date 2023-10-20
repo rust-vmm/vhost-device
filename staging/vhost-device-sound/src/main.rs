@@ -41,7 +41,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use rstest::*;
-    use serial_test::serial;
 
     use super::*;
 
@@ -55,7 +54,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_sound_config_setup() {
         let args = SoundArgs::from_args("/tmp/vhost-sound.socket");
 
@@ -67,7 +65,6 @@ mod tests {
     }
 
     #[rstest]
-    #[serial]
     #[case::null_backend("null", BackendType::Null)]
     #[cfg_attr(
         feature = "pw-backend",

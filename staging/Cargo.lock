@@ -977,9 +977,9 @@ checksum = "579a42fc0b8e0c63b76519a339be31bed574929511fa53c1a3acae26eb258f29"
 
 [[package]]
 name = "vhost"
-version = "0.6.1"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6769e8dbf5276b4376439fbf36bb880d203bf614bf7ef444198edc24b5a9f35"
+checksum = "61957aeb36daf0b00b87fff9c10dd28a161bd35ab157553d340d183b3d8756e6"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
@@ -1001,7 +1001,7 @@ dependencies = [
  "thiserror",
  "vhost",
  "vhost-user-backend",
- "virtio-bindings 0.2.1",
+ "virtio-bindings",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
@@ -1009,24 +1009,18 @@ dependencies = [
 
 [[package]]
 name = "vhost-user-backend"
-version = "0.8.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f237b91db4ac339d639fb43398b52d785fa51e3c7760ac9425148863c1f4303"
+checksum = "ab069cdedaf18a0673766eb0a07a0f4ee3ed1b8e17fbfe4aafe5b988e2de1d01"
 dependencies = [
  "libc",
  "log",
  "vhost",
- "virtio-bindings 0.1.0",
+ "virtio-bindings",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
 ]
-
-[[package]]
-name = "virtio-bindings"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff512178285488516ed85f15b5d0113a7cdb89e9e8a760b269ae4f02b84bd6b"
 
 [[package]]
 name = "virtio-bindings"
@@ -1036,24 +1030,27 @@ checksum = "c18d7b74098a946470ea265b5bacbbf877abc3373021388454de0d47735a5b98"
 
 [[package]]
 name = "virtio-queue"
-version = "0.7.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ba81e2bcc21c0d2fc5e6683e79367e26ad219197423a498df801d79d5ba77bd"
+checksum = "35aca00da06841bd99162c381ec65893cace23ca0fb89254302cfe4bec4c300f"
 dependencies = [
  "log",
- "virtio-bindings 0.1.0",
+ "virtio-bindings",
  "vm-memory",
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vm-memory"
-version = "0.10.0"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "688a70366615b45575a424d9c665561c1b5ab2224d494f706b6a6812911a827c"
+checksum = "9dc276f0d00c17b9aeb584da0f1e1c673df0d183cc2539e3636ec8cbc5eae99b"
 dependencies = [
  "arc-swap",
+ "bitflags 1.3.2",
  "libc",
+ "thiserror",
+ "vmm-sys-util",
  "winapi",
 ]
 

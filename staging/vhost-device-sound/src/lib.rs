@@ -65,6 +65,8 @@ pub enum Error {
     SoundReqMissingData,
     #[error("Audio backend not supported")]
     AudioBackendNotSupported,
+    #[error("No memory configured")]
+    NoMemoryConfigured,
     #[error("Invalid virtio_snd_hdr size, expected: {0}, found: {1}")]
     UnexpectedSoundHeaderSize(usize, u32),
     #[error("Received unexpected write only descriptor at index {0}")]

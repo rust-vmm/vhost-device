@@ -42,6 +42,30 @@ use virtio_queue::DescriptorChain;
 pub type SoundDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Stream direction.
+///
+/// Equivalent to `VIRTIO_SND_D_OUTPUT` and `VIRTIO_SND_D_INPUT`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Direction {
+    /// [`VIRTIO_SND_D_OUTPUT`](crate::virtio_sound::VIRTIO_SND_D_OUTPUT)
+    Output = VIRTIO_SND_D_OUTPUT,
+    /// [`VIRTIO_SND_D_INPUT`](crate::virtio_sound::VIRTIO_SND_D_INPUT)
+    Input = VIRTIO_SND_D_INPUT,
+}
+
+impl TryFrom<u8> for Direction {
+    type Error = Error;
+
+    fn try_from(val: u8) -> std::result::Result<Self, Self::Error> {
+        Ok(match val {
+            virtio_sound::VIRTIO_SND_D_OUTPUT => Self::Output,
+            virtio_sound::VIRTIO_SND_D_INPUT => Self::Input,
+            other => return Err(Error::InvalidMessageValue(stringify!(Direction), other)),
+        })
+    }
+}
+
 /// Custom error types
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -59,6 +83,8 @@ pub enum Error {
     HandleUnknownEvent,
     #[error("Invalid control message code {0}")]
     InvalidControlMessage(u32),
+    #[error("Invalid value in {0}: {1}")]
+    InvalidMessageValue(&'static str, u8),
     #[error("Failed to create a new EventFd")]
     EventFdCreate(IoError),
     #[error("Request missing data buffer")]
@@ -248,36 +274,41 @@ impl SoundConfig {
 
 pub struct IOMessage {
     status: std::sync::atomic::AtomicU32,
+    pub used_len: std::sync::atomic::AtomicU32,
+    pub latency_bytes: std::sync::atomic::AtomicU32,
     desc_chain: SoundDescriptorChain,
-    descriptor: virtio_queue::Descriptor,
+    response_descriptor: virtio_queue::Descriptor,
     vring: VringRwLock,
 }
 
 impl Drop for IOMessage {
     fn drop(&mut self) {
-        log::trace!("dropping IOMessage");
         let resp = VirtioSoundPcmStatus {
             status: self.status.load(std::sync::atomic::Ordering::SeqCst).into(),
-            latency_bytes: 0.into(),
+            latency_bytes: self
+                .latency_bytes
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .into(),
         };
+        let used_len: u32 = self.used_len.load(std::sync::atomic::Ordering::SeqCst);
+        log::trace!("dropping IOMessage {:?}", resp);
 
         if let Err(err) = self
             .desc_chain
             .memory()
-            .write_obj(resp, self.descriptor.addr())
+            .write_obj(resp, self.response_descriptor.addr())
         {
             log::error!("Error::DescriptorWriteFailed: {}", err);
             return;
         }
-        if self
-            .vring
-            .add_used(self.desc_chain.head_index(), resp.as_slice().len() as u32)
-            .is_err()
-        {
-            log::error!("Couldn't add used");
+        if let Err(err) = self.vring.add_used(
+            self.desc_chain.head_index(),
+            resp.as_slice().len() as u32 + used_len,
+        ) {
+            log::error!("Couldn't add used bytes count to vring: {}", err);
         }
-        if self.vring.signal_used_queue().is_err() {
-            log::error!("Couldn't signal used queue");
+        if let Err(err) = self.vring.signal_used_queue() {
+            log::error!("Couldn't signal used queue: {}", err);
         }
     }
 }
@@ -285,7 +316,7 @@ impl Drop for IOMessage {
 /// This is the public API through which an external program starts the
 /// vhost-device-sound backend server.
 pub fn start_backend_server(config: SoundConfig) {
-    log::trace!("Using config {:?}", &config);
+    log::trace!("Using config {:?}.", &config);
     let listener = Listener::new(config.get_socket_path(), true).unwrap();
     let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
 
@@ -296,12 +327,12 @@ pub fn start_backend_server(config: SoundConfig) {
     )
     .unwrap();
 
-    log::trace!("Starting daemon");
+    log::trace!("Starting daemon.");
     daemon.start(listener).unwrap();
 
     match daemon.wait() {
         Ok(()) => {
-            info!("Stopping cleanly");
+            info!("Stopping cleanly.");
         }
         Err(vhost_user_backend::Error::HandleRequest(vhost_user::Error::PartialMessage)) => {
             info!(

@@ -4,9 +4,9 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use thiserror::Error as ThisError;
-use vm_memory::{Address, Bytes, Le32, Le64};
+use vm_memory::{Bytes, Le32, Le64};
 
-use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
+use crate::{virtio_sound::*, Direction, IOMessage, Result, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
 #[derive(Debug, ThisError, PartialEq)]
@@ -15,11 +15,7 @@ pub enum Error {
     InvalidStateTransition(PCMState, PCMState),
     #[error("Guest requested an invalid stream id: {0}")]
     InvalidStreamId(u32),
-    #[error("Descriptor read failed")]
-    DescriptorReadFailed,
 }
-
-type Result<T> = std::result::Result<T, Error>;
 
 /// PCM stream state machine.
 ///
@@ -108,12 +104,11 @@ pub enum PCMState {
 
 macro_rules! set_new_state {
     ($new_state_fn:ident, $new_state:expr, $($valid_source_states:tt)*) => {
-        pub fn $new_state_fn(&mut self) -> Result<()> {
-            if !matches!(self, $($valid_source_states)*) {
-                return Err(Error::InvalidStateTransition(*self, $new_state));
+        pub fn $new_state_fn(&mut self) {
+            if !matches!(*self, $($valid_source_states)*) {
+                log::error!("{}", Error::InvalidStateTransition(*self, $new_state));
             }
             *self = $new_state;
-            Ok(())
         }
     };
 }
@@ -172,7 +167,7 @@ pub struct Stream {
     pub params: PcmParams,
     pub formats: Le64,
     pub rates: Le64,
-    pub direction: u8,
+    pub direction: Direction,
     pub channels_min: u8,
     pub channels_max: u8,
     pub state: PCMState,
@@ -183,7 +178,7 @@ impl Default for Stream {
     fn default() -> Self {
         Self {
             id: 0,
-            direction: VIRTIO_SND_D_OUTPUT,
+            direction: Direction::Output,
             formats: SUPPORTED_FORMATS.into(),
             rates: SUPPORTED_RATES.into(),
             params: PcmParams::default(),
@@ -236,50 +231,99 @@ impl Default for PcmParams {
 }
 
 pub struct Buffer {
-    // TODO: to make private and add len usize
-    pub data_descriptor: virtio_queue::Descriptor,
+    pub bytes: Vec<u8>,
     pub pos: usize,
+    data_descriptor: virtio_queue::Descriptor,
     pub message: Arc<IOMessage>,
+    populated: bool,
+    direction: Direction,
 }
 
 impl std::fmt::Debug for Buffer {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         fmt.debug_struct(stringify!(Buffer))
+            .field("bytes", &self.bytes.len())
             .field("pos", &self.pos)
+            .field("populated", &self.populated)
+            .field("direction", &self.direction)
             .field("message", &Arc::as_ptr(&self.message))
             .finish()
     }
 }
 
 impl Buffer {
-    pub fn new(data_descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
+    pub fn new(
+        data_descriptor: virtio_queue::Descriptor,
+        message: Arc<IOMessage>,
+        direction: Direction,
+    ) -> Self {
         Self {
+            bytes: vec![],
             pos: 0,
             data_descriptor,
+            populated: false,
             message,
+            direction,
         }
     }
 
-    pub fn consume(&self, buf: &mut [u8]) -> Result<u32> {
-        let addr = self.data_descriptor.addr();
-        let offset = self.pos as u64;
-        let len = self
+    pub fn prepare_output(&mut self) -> Result<()> {
+        if self.populated {
+            return Ok(());
+        }
+        self.bytes = vec![0; self.data_descriptor.len() as usize];
+        let bytes_read = self
             .message
             .desc_chain
             .memory()
-            .read(
-                buf,
-                addr.checked_add(offset)
-                    .expect("invalid guest memory address"),
-            )
-            .map_err(|_| Error::DescriptorReadFailed)?;
-        Ok(len as u32)
+            .read(&mut self.bytes, self.data_descriptor.addr())
+            .map_err(|_| crate::Error::DescriptorReadFailed)?;
+        self.bytes.truncate(bytes_read);
+        self.populated = true;
+
+        Ok(())
+    }
+
+    pub fn prepare_input(&mut self) {
+        if self.populated {
+            return;
+        }
+        self.bytes = vec![0; self.data_descriptor.len() as usize];
+        self.populated = true;
     }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        log::trace!("dropping buffer {:?}", self);
+        match self.direction {
+            Direction::Input => {
+                if let Err(err) = self
+                    .message
+                    .desc_chain
+                    .memory()
+                    .write(&self.bytes[..self.pos], self.data_descriptor.addr())
+                {
+                    log::error!("Could not write {} RX bytes: {}", self.pos, err);
+                }
+                let len = if self.populated {
+                    self.bytes.len() as u32
+                } else {
+                    self.data_descriptor.len()
+                };
+                self.message
+                    .used_len
+                    .fetch_add(len, std::sync::atomic::Ordering::SeqCst);
+                self.message
+                    .latency_bytes
+                    .fetch_add(len, std::sync::atomic::Ordering::SeqCst);
+            }
+            Direction::Output => {
+                self.message
+                    .latency_bytes
+                    .fetch_add(self.bytes.len() as u32, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        log::trace!("dropping {:?} buffer {:?}", self.direction, self);
     }
 }
 

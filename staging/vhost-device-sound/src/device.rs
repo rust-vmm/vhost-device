@@ -19,6 +19,7 @@ use virtio_bindings::{
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+    Le32,
 };
 use vmm_sys_util::{
     epoll::EventSet,
@@ -29,7 +30,7 @@ use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
     stream::{Buffer, Error as StreamError, Stream},
     virtio_sound::{self, *},
-    ControlMessageKind, Error, IOMessage, Result, SoundConfig,
+    ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
 };
 
 pub struct VhostUserSoundThread {
@@ -102,8 +103,8 @@ impl VhostUserSoundThread {
                 match queue_idx {
                     CONTROL_QUEUE_IDX => self.process_control(vring, audio_backend),
                     EVENT_QUEUE_IDX => self.process_event(vring),
-                    TX_QUEUE_IDX => self.process_tx(vring, audio_backend),
-                    RX_QUEUE_IDX => self.process_rx(vring, audio_backend),
+                    TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
+                    RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
                     _ => Err(Error::HandleUnknownEvent.into()),
                 }?;
                 if !vring.enable_notification().unwrap() {
@@ -115,8 +116,8 @@ impl VhostUserSoundThread {
             match queue_idx {
                 CONTROL_QUEUE_IDX => self.process_control(vring, audio_backend),
                 EVENT_QUEUE_IDX => self.process_event(vring),
-                TX_QUEUE_IDX => self.process_tx(vring, audio_backend),
-                RX_QUEUE_IDX => self.process_rx(vring, audio_backend),
+                TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
+                RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
                 _ => Err(Error::HandleUnknownEvent.into()),
             }?;
         }
@@ -291,7 +292,7 @@ impl VhostUserSoundThread {
                             p.features = s.params.features;
                             p.formats = s.formats;
                             p.rates = s.rates;
-                            p.direction = s.direction;
+                            p.direction = s.direction as u8;
                             p.channels_min = s.channels_min;
                             p.channels_max = s.channels_max;
                             buf.extend_from_slice(p.as_slice());
@@ -448,10 +449,11 @@ impl VhostUserSoundThread {
         Ok(false)
     }
 
-    fn process_tx(
+    fn process_io(
         &self,
         vring: &VringRwLock,
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
+        direction: Direction,
     ) -> IoResult<bool> {
         let Some(ref atomic_mem) = self.mem else {
             return Err(Error::NoMemoryConfigured.into());
@@ -467,31 +469,44 @@ impl VhostUserSoundThread {
             return Ok(true);
         }
 
+        // Instead of counting descriptor chain lengths, encode the "parsing" logic in
+        // an enumeration. Then, the compiler will complain about any unhandled
+        // match {} cases if any part of the code is changed. This makes invalid
+        // states unrepresentable in the source code.
         #[derive(Copy, Clone, PartialEq, Debug)]
-        enum TxState {
+        enum IoState {
             Ready,
             WaitingBufferForStreamId(u32),
             Done,
         }
 
+        // Keep log of stream IDs to wake up, in case the guest has queued more than
+        // one.
         let mut stream_ids = BTreeSet::default();
 
         for desc_chain in requests {
-            let mut state = TxState::Ready;
+            let mut state = IoState::Ready;
             let mut buffers = vec![];
             let descriptors: Vec<_> = desc_chain.clone().collect();
             let message = Arc::new(IOMessage {
                 vring: vring.clone(),
                 status: VIRTIO_SND_S_OK.into(),
+                used_len: 0.into(),
+                latency_bytes: 0.into(),
                 desc_chain: desc_chain.clone(),
-                descriptor: descriptors.last().cloned().unwrap(),
+                response_descriptor: descriptors.last().cloned().ok_or_else(|| {
+                    log::error!("Received IO request with an empty descriptor chain.");
+                    Error::UnexpectedDescriptorCount(0)
+                })?,
             });
             for descriptor in &descriptors {
                 match state {
-                    TxState::Done => {
+                    IoState::Done => {
                         return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
                     }
-                    TxState::Ready if descriptor.is_write_only() => {
+                    IoState::Ready
+                        if matches!(direction, Direction::Output) && descriptor.is_write_only() =>
+                    {
                         if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
                             return Err(Error::UnexpectedDescriptorSize(
                                 size_of::<VirtioSoundPcmStatus>(),
@@ -499,23 +514,18 @@ impl VhostUserSoundThread {
                             )
                             .into());
                         }
-                        state = TxState::Done;
+                        state = IoState::Done;
                     }
-                    TxState::WaitingBufferForStreamId(stream_id) if descriptor.is_write_only() => {
-                        if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
-                            return Err(Error::UnexpectedDescriptorSize(
-                                size_of::<VirtioSoundPcmStatus>(),
-                                descriptor.len(),
-                            )
-                            .into());
-                        }
+                    IoState::WaitingBufferForStreamId(stream_id)
+                        if descriptor.len() as usize == size_of::<VirtioSoundPcmStatus>() =>
+                    {
                         let mut streams = self.streams.write().unwrap();
                         for b in std::mem::take(&mut buffers) {
                             streams[stream_id as usize].buffers.push_back(b);
                         }
-                        state = TxState::Done;
+                        state = IoState::Done;
                     }
-                    TxState::Ready
+                    IoState::Ready
                         if descriptor.len() as usize != size_of::<VirtioSoundPcmXfer>() =>
                     {
                         return Err(Error::UnexpectedDescriptorSize(
@@ -524,7 +534,7 @@ impl VhostUserSoundThread {
                         )
                         .into());
                     }
-                    TxState::Ready => {
+                    IoState::Ready => {
                         let xfer = desc_chain
                             .memory()
                             .read_obj::<VirtioSoundPcmXfer>(descriptor.addr())
@@ -532,32 +542,32 @@ impl VhostUserSoundThread {
                         let stream_id: u32 = xfer.stream_id.into();
                         stream_ids.insert(stream_id);
 
-                        state = TxState::WaitingBufferForStreamId(stream_id);
+                        state = IoState::WaitingBufferForStreamId(stream_id);
                     }
-                    TxState::WaitingBufferForStreamId(stream_id)
+                    IoState::WaitingBufferForStreamId(stream_id)
                         if descriptor.len() as usize == size_of::<VirtioSoundPcmXfer>() =>
                     {
                         return Err(Error::UnexpectedDescriptorSize(
                             u32::from(
                                 self.streams.read().unwrap()[stream_id as usize]
                                     .params
-                                    .buffer_bytes,
+                                    .period_bytes,
                             ) as usize,
                             descriptor.len(),
                         )
                         .into());
                     }
-                    TxState::WaitingBufferForStreamId(_stream_id) => {
-                        /*
-                        Rather than copying the content of a descriptor, buffer keeps a pointer to it.
-                        When we copy just after the request is enqueued, the guest's userspace may or
-                        may not have updated the buffer contents. Guest driver simply moves buffers
-                        from the used ring to the available ring without knowing whether the content
-                        has been updated. The device only reads the buffer from guest memory when the
-                        audio engine requires it, which is about after a period thus ensuring that the
-                        buffer is up-to-date.
-                        */
-                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message)));
+                    IoState::WaitingBufferForStreamId(_) => {
+                        // In the case of TX/Playback:
+                        //
+                        // Rather than copying the content of a descriptor, buffer keeps a pointer
+                        // to it. When we copy just after the request is enqueued, the guest's
+                        // userspace may or may not have updated the buffer contents. Guest driver
+                        // simply moves buffers from the used ring to the available ring without
+                        // knowing whether the content has been updated. The device only reads the
+                        // buffer from guest memory when the audio engine requires it, which is
+                        // about after a period thus ensuring that the buffer is up-to-date.
+                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message), direction));
                     }
                 }
             }
@@ -565,20 +575,20 @@ impl VhostUserSoundThread {
 
         if !stream_ids.is_empty() {
             let b = audio_backend.write().unwrap();
-            for id in stream_ids {
-                b.write(id).unwrap();
+            match direction {
+                Direction::Output => {
+                    for id in stream_ids {
+                        b.write(id).unwrap();
+                    }
+                }
+                Direction::Input => {
+                    for id in stream_ids {
+                        b.read(id).unwrap();
+                    }
+                }
             }
         }
 
-        Ok(false)
-    }
-
-    fn process_rx(
-        &self,
-        _vring: &VringRwLock,
-        _audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
-    ) -> IoResult<bool> {
-        log::trace!("process_rx");
         Ok(false)
     }
 }
@@ -595,12 +605,12 @@ impl VhostUserSoundBackend {
         let streams = vec![
             Stream {
                 id: 0,
-                direction: VIRTIO_SND_D_OUTPUT,
+                direction: Direction::Output,
                 ..Stream::default()
             },
             Stream {
                 id: 1,
-                direction: VIRTIO_SND_D_INPUT,
+                direction: Direction::Input,
                 ..Stream::default()
             },
         ];
@@ -625,7 +635,7 @@ impl VhostUserSoundBackend {
             },
         ];
         let chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>> = Arc::new(RwLock::new(chmaps_info));
-        log::trace!("VhostUserSoundBackend::new config {:?}", &config);
+        log::trace!("VhostUserSoundBackend::new(config = {:?})", &config);
         let threads = if config.multi_thread {
             vec![
                 RwLock::new(VhostUserSoundThread::new(
@@ -671,7 +681,7 @@ impl VhostUserSoundBackend {
             threads,
             virtio_cfg: VirtioSoundConfig {
                 jacks: 0.into(),
-                streams: 1.into(),
+                streams: Le32::from(streams_no as u32),
                 chmaps: 1.into(),
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
@@ -690,7 +700,10 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 
     fn max_queue_size(&self) -> usize {
-        // TODO: Investigate if an alternative value makes any difference.
+        // The linux kernel driver does no checks for queue length and fails silently if
+        // a queue is filled up. In this case, adding an element to the queue
+        // returns ENOSPC and the element is not queued for a later attempt and
+        // is lost. `64` is a "good enough" value from our observations.
         64
     }
 

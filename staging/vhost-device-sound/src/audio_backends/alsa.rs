@@ -364,16 +364,20 @@ impl AlsaBackend {
                         );
                         continue;
                     };
-
-                    let start_result = streams.write().unwrap()[stream_id].state.start();
-                    if let Err(err) = start_result {
-                        log::error!("Stream {} start {}", stream_id, err);
-                    } else {
-                        let pcm = &pcms[stream_id];
-                        let lck = pcm.lock().unwrap();
-                        match lck.state() {
-                            State::Running => {}
-                            _ => lck.start()?,
+                    if let Err(err) = streams.write().unwrap()[stream_id].state.start() {
+                        log::error!("Stream {}: {}", stream_id, err);
+                        continue;
+                    }
+                    let pcm = &pcms[stream_id];
+                    let lck = pcm.lock().unwrap();
+                    if !matches!(lck.state(), State::Running) {
+                        // Fail gracefully if Start does not succeed.
+                        if let Err(err) = lck.start() {
+                            log::error!(
+                                "Could not start stream {}; ALSA returned: {}",
+                                stream_id,
+                                err
+                            );
                         }
                     }
                 }
@@ -402,15 +406,20 @@ impl AlsaBackend {
                         );
                         continue;
                     };
-                    let prepare_result = streams.write().unwrap()[stream_id].state.prepare();
-                    if let Err(err) = prepare_result {
-                        log::error!("Stream {} prepare {}", stream_id, err);
-                    } else {
-                        let pcm = &pcms[stream_id];
-                        let lck = pcm.lock().unwrap();
-                        match lck.state() {
-                            State::Running => {}
-                            _ => lck.prepare()?,
+                    if let Err(err) = streams.write().unwrap()[stream_id].state.prepare() {
+                        log::error!("Stream {}: {}", stream_id, err);
+                        continue;
+                    }
+                    let pcm = &pcms[stream_id];
+                    let lck = pcm.lock().unwrap();
+                    if !matches!(lck.state(), State::Running) {
+                        // Fail gracefully if Prepare does not succeed.
+                        if let Err(err) = lck.prepare() {
+                            log::error!(
+                                "Could not prepare stream {}; ALSA returned: {}",
+                                stream_id,
+                                err
+                            );
                         }
                     }
                 }
@@ -425,12 +434,16 @@ impl AlsaBackend {
                         msg.code = VIRTIO_SND_S_BAD_MSG;
                         continue;
                     };
-                    if let Err(err) = streams.write().unwrap()[stream_id].state.release() {
-                        log::error!("Stream {} release {}", stream_id, err);
-                        msg.code = VIRTIO_SND_S_BAD_MSG;
-                    }
+                    // Stop the worker.
                     senders[stream_id].send(false).unwrap();
                     let mut streams = streams.write().unwrap();
+                    if let Err(err) = streams[stream_id].state.release() {
+                        log::error!("Stream {}: {}", stream_id, err);
+                        msg.code = VIRTIO_SND_S_BAD_MSG;
+                    }
+                    // Release buffers even if state transition is invalid. If it is invalid, we
+                    // won't be in a valid device state anyway so better to get rid of them and
+                    // free the virt queue.
                     std::mem::take(&mut streams[stream_id].buffers);
                 }
                 AlsaAction::SetParameters(stream_id, mut msg) => {

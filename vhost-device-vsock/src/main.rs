@@ -234,13 +234,13 @@ pub(crate) fn start_backend_server(
         )
         .map_err(BackendError::CouldNotCreateDaemon)?;
 
-        let mut vring_workers = daemon.get_epoll_handlers();
+        let mut epoll_handlers = daemon.get_epoll_handlers();
 
         for thread in backend.threads.iter() {
             thread
                 .lock()
                 .unwrap()
-                .set_vring_worker(Some(vring_workers.remove(0)));
+                .register_listeners(epoll_handlers.remove(0));
         }
 
         daemon.start(listener).unwrap();

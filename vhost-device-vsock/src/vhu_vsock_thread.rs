@@ -63,8 +63,6 @@ pub(crate) struct VhostUserVsockThread {
     host_sock_path: String,
     /// Listener listening for new connections on the host.
     host_listener: UnixListener,
-    /// Instance of VringWorker.
-    vring_worker: Option<Arc<VringEpollHandler<ArcVhostBknd, VringRwLock, ()>>>,
     /// epoll fd to which new host connections are added.
     epoll_file: File,
     /// VsockThreadBackend instance.
@@ -151,7 +149,6 @@ impl VhostUserVsockThread {
             host_sock: host_sock.as_raw_fd(),
             host_sock_path: uds_path,
             host_listener: host_sock,
-            vring_worker: None,
             epoll_file,
             thread_backend,
             guest_cid,
@@ -242,20 +239,15 @@ impl VhostUserVsockThread {
         self.epoll_file.as_raw_fd()
     }
 
-    /// Set self's VringWorker.
-    pub fn set_vring_worker(
+    /// Register our listeners in the VringEpollHandler
+    pub fn register_listeners(
         &mut self,
-        vring_worker: Option<Arc<VringEpollHandler<ArcVhostBknd, VringRwLock, ()>>>,
+        epoll_handler: Arc<VringEpollHandler<ArcVhostBknd, VringRwLock, ()>>,
     ) {
-        self.vring_worker = vring_worker;
-        self.vring_worker
-            .as_ref()
-            .unwrap()
+        epoll_handler
             .register_listener(self.get_epoll_fd(), EventSet::IN, u64::from(BACKEND_EVENT))
             .unwrap();
-        self.vring_worker
-            .as_ref()
-            .unwrap()
+        epoll_handler
             .register_listener(
                 self.sibling_event_fd.as_raw_fd(),
                 EventSet::IN,

@@ -148,7 +148,8 @@ fn write_samples_direct(
         if !matches!(stream.state, PCMState::Start) {
             return Ok(false);
         }
-        let mut buf = vec![0; buffer.data_descriptor.len() as usize];
+        let n_bytes = buffer.data_descriptor.len() as usize - buffer.pos;
+        let mut buf = vec![0; n_bytes];
         let read_bytes = match buffer.consume(&mut buf) {
             Err(err) => {
                 log::error!(
@@ -209,10 +210,14 @@ fn write_samples_io(
                 stream.buffers.pop_front();
                 return 0;
             }
-            let mut data = vec![0; buffer.data_descriptor.len() as usize];
+
+            let n_bytes = std::cmp::min(
+                buf.len(),
+                buffer.data_descriptor.len() as usize - buffer.pos,
+            );
             // consume() always reads (buffer.data_descriptor.len() -
             // buffer.pos) bytes
-            let read_bytes = match buffer.consume(&mut data) {
+            let read_bytes = match buffer.consume(&mut buf[0..n_bytes]) {
                 Ok(v) => v,
                 Err(err) => {
                     log::error!("Could not read TX buffer, dropping it immediately: {}", err);
@@ -221,18 +226,11 @@ fn write_samples_io(
                 }
             };
 
-            let mut iter = data[0..read_bytes as usize].iter().cloned();
-
-            let mut written_bytes = 0;
-            for (sample, byte) in buf.iter_mut().zip(&mut iter) {
-                *sample = byte;
-                written_bytes += 1;
-            }
-            buffer.pos += written_bytes as usize;
+            buffer.pos += read_bytes as usize;
             if buffer.pos >= buffer.data_descriptor.len() as usize {
                 stream.buffers.pop_front();
             }
-            p.bytes_to_frames(written_bytes)
+            p.bytes_to_frames(read_bytes as isize)
                 .try_into()
                 .unwrap_or_default()
         })?;

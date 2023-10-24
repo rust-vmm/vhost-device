@@ -75,6 +75,8 @@ impl PwBackend {
     pub fn new(stream_params: Arc<RwLock<Vec<Stream>>>) -> Self {
         pw::init();
 
+        // SAFETY: safe as the thread loop cannot access objects associated
+        // with the loop while the lock is held
         let thread_loop = unsafe { ThreadLoop::new(Some("Pipewire thread loop")).unwrap() };
 
         let lock_guard = thread_loop.lock();
@@ -336,8 +338,10 @@ impl AudioBackend for PwBackend {
                             }
                             let p = &mut slice[0..n_bytes];
                             if avail <= 0 {
-                                // pad with silence
+                                // SAFETY: We have assured above that the pointer is not null
+                                // safe to zero-initialize the pointer.
                                 unsafe {
+                                    // pad with silence
                                     ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
                                 }
                             } else {

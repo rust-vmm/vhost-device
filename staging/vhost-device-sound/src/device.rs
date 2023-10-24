@@ -779,6 +779,7 @@ impl VhostUserBackend<VringRwLock, ()> for VhostUserSoundBackend {
     }
 }
 
+#[cfg_attr(test, derive(Clone))]
 pub struct ControlMessage {
     pub kind: ControlMessageKind,
     pub code: u32,

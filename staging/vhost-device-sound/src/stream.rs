@@ -353,10 +353,11 @@ mod tests {
         let vq = MockSplitQueue::new(mem, 16);
         let next_addr = vq.desc_table().total_size() + 0x100;
         IOMessage {
-            vring,
             status: VIRTIO_SND_S_OK.into(),
+            latency_bytes: 0.into(),
             desc_chain: prepare_desc_chain::<VirtioSndPcmSetParams>(GuestAddress(0), hdr, 1),
-            descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
+            response_descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
+            vring,
         }
     }
 
@@ -500,7 +501,10 @@ mod tests {
         let msg = iomsg();
         let message = Arc::new(msg);
         let desc_msg = iomsg();
-        let buffer = Buffer::new(desc_msg.descriptor, message);
+        let buffer = Buffer::new(
+            desc_msg.desc_chain.clone().readable().next().unwrap(),
+            message,
+        );
 
         let mut buf = vec![0; 5];
         let result = buffer.consume(&mut buf);

@@ -498,7 +498,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{ControlMessageKind, SoundDescriptorChain};
+    use crate::{ControlMessageKind, SoundDescriptorChain, VirtioSoundHeader};
 
     // Prepares a single chain of descriptors for request queue
     fn prepare_desc_chain<R: ByteValued>(
@@ -589,47 +589,39 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Stream does not exist")]
-    fn test_pipewire_backend_panics() {
+    fn test_pipewire_backend_invalid_stream() {
         let stream_params = Arc::new(RwLock::new(vec![]));
 
         let pw_backend = PwBackend::new(stream_params);
 
         let msg = ctrlmsg();
-        let _ = pw_backend.set_parameters(0, msg);
-        let _ = pw_backend.prepare(0);
-    }
 
-    #[test]
-    #[should_panic]
-    fn test_pipewire_prepare_panics() {
-        let stream_params = Arc::new(RwLock::new(vec![]));
-        let pw_backend = PwBackend::new(stream_params);
-        let _ = pw_backend.prepare(0);
-    }
+        _ = pw_backend.set_parameters(0, msg.clone());
+        let resp: VirtioSoundHeader = msg
+            .desc_chain
+            .memory()
+            .read_obj(msg.descriptor.addr())
+            .unwrap();
+        assert_eq!(resp.code, VIRTIO_SND_S_BAD_MSG);
 
-    #[test]
-    #[should_panic]
-    fn test_pipewire_start_panics() {
-        let stream_params = Arc::new(RwLock::new(vec![]));
-        let pw_backend = PwBackend::new(stream_params);
-        let _ = pw_backend.start(0);
-    }
+        for res in [
+            pw_backend.prepare(0),
+            pw_backend.start(0),
+            pw_backend.stop(0),
+        ] {
+            assert_eq!(
+                res.unwrap_err().to_string(),
+                Error::StreamWithIdNotFound(0).to_string()
+            );
+        }
 
-    #[test]
-    #[should_panic]
-    fn test_pipewire_stop_panics() {
-        let stream_params = Arc::new(RwLock::new(vec![]));
-        let pw_backend = PwBackend::new(stream_params);
-        let _ = pw_backend.stop(0);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_pipewire_release_panics() {
-        let stream_params = Arc::new(RwLock::new(vec![]));
-        let pw_backend = PwBackend::new(stream_params);
         let msg = ctrlmsg();
-        let _ = pw_backend.release(0, msg);
+        _ = pw_backend.release(0, msg.clone());
+        let resp: VirtioSoundHeader = msg
+            .desc_chain
+            .memory()
+            .read_obj(msg.descriptor.addr())
+            .unwrap();
+        assert_eq!(resp.code, VIRTIO_SND_S_BAD_MSG);
     }
 }

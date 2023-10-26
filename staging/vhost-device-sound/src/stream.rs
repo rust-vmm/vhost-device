@@ -236,8 +236,7 @@ impl Default for PcmParams {
 }
 
 pub struct Buffer {
-    // TODO: to make private and add len usize
-    pub data_descriptor: virtio_queue::Descriptor,
+    data_descriptor: virtio_queue::Descriptor,
     pub pos: usize,
     pub message: Arc<IOMessage>,
 }
@@ -275,14 +274,19 @@ impl Buffer {
             .map_err(|_| Error::DescriptorReadFailed)?;
         Ok(len as u32)
     }
+
+    #[inline]
+    /// Returns the length of the sound data [`virtio_queue::Descriptor`].
+    pub fn desc_len(&self) -> u32 {
+        self.data_descriptor.len()
+    }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        self.message.latency_bytes.fetch_add(
-            self.data_descriptor.len(),
-            std::sync::atomic::Ordering::SeqCst,
-        );
+        self.message
+            .latency_bytes
+            .fetch_add(self.desc_len(), std::sync::atomic::Ordering::SeqCst);
         log::trace!("dropping buffer {:?}", self);
     }
 }

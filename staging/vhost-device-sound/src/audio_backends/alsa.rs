@@ -205,7 +205,7 @@ fn write_samples_direct(
         if !matches!(stream.state, PCMState::Start) {
             return Ok(false);
         }
-        let n_bytes = buffer.data_descriptor.len() as usize - buffer.pos;
+        let n_bytes = buffer.desc_len() as usize - buffer.pos;
         let mut buf = vec![0; n_bytes];
         let read_bytes = match buffer.consume(&mut buf) {
             Err(err) => {
@@ -225,7 +225,7 @@ fn write_samples_direct(
         if let Ok(written_bytes) = usize::try_from(written_bytes) {
             buffer.pos += written_bytes;
         }
-        if buffer.pos >= buffer.data_descriptor.len() as usize {
+        if buffer.pos >= buffer.desc_len() as usize {
             stream.buffers.pop_front();
         }
     }
@@ -271,12 +271,8 @@ fn write_samples_io(
                 return 0;
             }
 
-            let n_bytes = std::cmp::min(
-                buf.len(),
-                buffer.data_descriptor.len() as usize - buffer.pos,
-            );
-            // consume() always reads (buffer.data_descriptor.len() -
-            // buffer.pos) bytes
+            let n_bytes = std::cmp::min(buf.len(), buffer.desc_len() as usize - buffer.pos);
+            // consume() always reads (buffer.desc_len() - buffer.pos) bytes
             let read_bytes = match buffer.consume(&mut buf[0..n_bytes]) {
                 Ok(v) => v,
                 Err(err) => {
@@ -287,7 +283,7 @@ fn write_samples_io(
             };
 
             buffer.pos += read_bytes as usize;
-            if buffer.pos >= buffer.data_descriptor.len() as usize {
+            if buffer.pos >= buffer.desc_len() as usize {
                 stream.buffers.pop_front();
             }
             p.bytes_to_frames(read_bytes as isize)

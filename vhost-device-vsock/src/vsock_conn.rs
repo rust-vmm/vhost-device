@@ -264,12 +264,14 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                 )
                 .is_err()
                 {
-                    VhostUserVsockThread::epoll_register(
+                    if let Err(e) = VhostUserVsockThread::epoll_register(
                         self.epoll_fd,
                         self.stream.as_raw_fd(),
                         epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                    )
-                    .unwrap();
+                    ) {
+                        // TODO: let's move this logic out of this func, and handle it properly
+                        error!("epoll_register failed: {:?}, but proceed further.", e);
+                    }
                 };
             }
             VSOCK_OP_CREDIT_REQUEST => {

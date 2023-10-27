@@ -6,7 +6,7 @@ use std::{collections::VecDeque, sync::Arc};
 use thiserror::Error as ThisError;
 use vm_memory::{Address, Bytes, Le32, Le64};
 
-use crate::{virtio_sound::*, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
+use crate::{virtio_sound::*, Direction, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
 #[derive(Debug, ThisError, PartialEq)]
@@ -17,6 +17,8 @@ pub enum Error {
     InvalidStreamId(u32),
     #[error("Descriptor read failed")]
     DescriptorReadFailed,
+    #[error("Descriptor write failed")]
+    DescriptorWriteFailed,
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -172,7 +174,7 @@ pub struct Stream {
     pub params: PcmParams,
     pub formats: Le64,
     pub rates: Le64,
-    pub direction: u8,
+    pub direction: Direction,
     pub channels_min: u8,
     pub channels_max: u8,
     pub state: PCMState,
@@ -183,7 +185,7 @@ impl Default for Stream {
     fn default() -> Self {
         Self {
             id: 0,
-            direction: VIRTIO_SND_D_OUTPUT,
+            direction: Direction::Output,
             formats: SUPPORTED_FORMATS.into(),
             rates: SUPPORTED_RATES.into(),
             params: PcmParams::default(),
@@ -236,27 +238,33 @@ impl Default for PcmParams {
 }
 
 pub struct Buffer {
-    // TODO: to make private and add len usize
-    pub data_descriptor: virtio_queue::Descriptor,
+    data_descriptor: virtio_queue::Descriptor,
     pub pos: usize,
     pub message: Arc<IOMessage>,
+    direction: Direction,
 }
 
 impl std::fmt::Debug for Buffer {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         fmt.debug_struct(stringify!(Buffer))
             .field("pos", &self.pos)
+            .field("direction", &self.direction)
             .field("message", &Arc::as_ptr(&self.message))
             .finish()
     }
 }
 
 impl Buffer {
-    pub fn new(data_descriptor: virtio_queue::Descriptor, message: Arc<IOMessage>) -> Self {
+    pub fn new(
+        data_descriptor: virtio_queue::Descriptor,
+        message: Arc<IOMessage>,
+        direction: Direction,
+    ) -> Self {
         Self {
             pos: 0,
             data_descriptor,
             message,
+            direction,
         }
     }
 
@@ -275,15 +283,53 @@ impl Buffer {
             .map_err(|_| Error::DescriptorReadFailed)?;
         Ok(len as u32)
     }
+
+    pub fn write_input(&mut self, buf: &[u8]) -> Result<u32> {
+        if self.desc_len() <= self.pos as u32 {
+            return Ok(0);
+        }
+        let addr = self.data_descriptor.addr();
+        let offset = self.pos as u64;
+        let len = self
+            .message
+            .desc_chain
+            .memory()
+            .write(
+                buf,
+                addr.checked_add(offset)
+                    .expect("invalid guest memory address"),
+            )
+            .map_err(|_| Error::DescriptorWriteFailed)?;
+        self.pos += len;
+        Ok(len as u32)
+    }
+
+    #[inline]
+    /// Returns the length of the sound data [`virtio_queue::Descriptor`].
+    pub fn desc_len(&self) -> u32 {
+        self.data_descriptor.len()
+    }
 }
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        self.message.latency_bytes.fetch_add(
-            self.data_descriptor.len(),
-            std::sync::atomic::Ordering::SeqCst,
-        );
-        log::trace!("dropping buffer {:?}", self);
+        match self.direction {
+            Direction::Input => {
+                let used_len = std::cmp::min(self.pos as u32, self.desc_len());
+                self.message
+                    .used_len
+                    .fetch_add(used_len, std::sync::atomic::Ordering::SeqCst);
+                self.message
+                    .latency_bytes
+                    .fetch_add(used_len, std::sync::atomic::Ordering::SeqCst);
+            }
+            Direction::Output => {
+                self.message
+                    .latency_bytes
+                    .fetch_add(self.desc_len(), std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        log::trace!("dropping {:?} buffer {:?}", self.direction, self);
     }
 }
 
@@ -355,6 +401,7 @@ mod tests {
         IOMessage {
             status: VIRTIO_SND_S_OK.into(),
             latency_bytes: 0.into(),
+            used_len: 0.into(),
             desc_chain: prepare_desc_chain::<VirtioSndPcmSetParams>(GuestAddress(0), hdr, 1),
             response_descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
             vring,
@@ -504,6 +551,7 @@ mod tests {
         let buffer = Buffer::new(
             desc_msg.desc_chain.clone().readable().next().unwrap(),
             message,
+            Direction::Output,
         );
 
         let mut buf = vec![0; 5];

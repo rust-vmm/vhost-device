@@ -42,6 +42,30 @@ use virtio_queue::DescriptorChain;
 pub type SoundDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Stream direction.
+///
+/// Equivalent to `VIRTIO_SND_D_OUTPUT` and `VIRTIO_SND_D_INPUT`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Direction {
+    /// [`VIRTIO_SND_D_OUTPUT`](crate::virtio_sound::VIRTIO_SND_D_OUTPUT)
+    Output = VIRTIO_SND_D_OUTPUT,
+    /// [`VIRTIO_SND_D_INPUT`](crate::virtio_sound::VIRTIO_SND_D_INPUT)
+    Input = VIRTIO_SND_D_INPUT,
+}
+
+impl TryFrom<u8> for Direction {
+    type Error = Error;
+
+    fn try_from(val: u8) -> std::result::Result<Self, Self::Error> {
+        Ok(match val {
+            virtio_sound::VIRTIO_SND_D_OUTPUT => Self::Output,
+            virtio_sound::VIRTIO_SND_D_INPUT => Self::Input,
+            other => return Err(Error::InvalidMessageValue(stringify!(Direction), other)),
+        })
+    }
+}
+
 /// Custom error types
 #[derive(Debug, ThisError)]
 pub enum Error {
@@ -59,6 +83,8 @@ pub enum Error {
     HandleUnknownEvent,
     #[error("Invalid control message code {0}")]
     InvalidControlMessage(u32),
+    #[error("Invalid value in {0}: {1}")]
+    InvalidMessageValue(&'static str, u8),
     #[error("Failed to create a new EventFd")]
     EventFdCreate(IoError),
     #[error("Request missing data buffer")]
@@ -248,6 +274,7 @@ impl SoundConfig {
 
 pub struct IOMessage {
     status: std::sync::atomic::AtomicU32,
+    pub used_len: std::sync::atomic::AtomicU32,
     pub latency_bytes: std::sync::atomic::AtomicU32,
     desc_chain: SoundDescriptorChain,
     response_descriptor: virtio_queue::Descriptor,
@@ -263,6 +290,7 @@ impl Drop for IOMessage {
                 .load(std::sync::atomic::Ordering::SeqCst)
                 .into(),
         };
+        let used_len: u32 = self.used_len.load(std::sync::atomic::Ordering::SeqCst);
         log::trace!("dropping IOMessage {:?}", resp);
 
         if let Err(err) = self
@@ -273,10 +301,10 @@ impl Drop for IOMessage {
             log::error!("Error::DescriptorWriteFailed: {}", err);
             return;
         }
-        if let Err(err) = self
-            .vring
-            .add_used(self.desc_chain.head_index(), resp.as_slice().len() as u32)
-        {
+        if let Err(err) = self.vring.add_used(
+            self.desc_chain.head_index(),
+            resp.as_slice().len() as u32 + used_len,
+        ) {
             log::error!("Couldn't add used bytes count to vring: {}", err);
         }
         if let Err(err) = self.vring.signal_used_queue() {

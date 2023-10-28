@@ -39,7 +39,7 @@ Examples section below.
       Example: --device-list "i915 gmbus dpd:32:21,DPDDC-D:10:23"
 
   Here,
-      bus-name: is adatper's name. e.g. value of /sys/bus/i2c/devices/i2c-0/name.
+      bus-name: is adapter's name. e.g. value of /sys/bus/i2c/devices/i2c-0/name.
       client_addr (decimal): address for client device, 32 == 0x20.
 
 ## Examples

@@ -206,7 +206,7 @@ fn write_samples_direct(
         }
         let n_bytes = buffer.desc_len() as usize - buffer.pos;
         let mut buf = vec![0; n_bytes];
-        let read_bytes = match buffer.consume(&mut buf) {
+        let read_bytes = match buffer.read_output(&mut buf) {
             Err(err) => {
                 log::error!(
                     "Could not read TX buffer from guest, dropping it immediately: {}",
@@ -317,8 +317,8 @@ fn write_samples_io(
             }
 
             let n_bytes = std::cmp::min(buf.len(), buffer.desc_len() as usize - buffer.pos);
-            // consume() always reads (buffer.desc_len() - buffer.pos) bytes
-            let read_bytes = match buffer.consume(&mut buf[0..n_bytes]) {
+            // read_output() always reads (buffer.desc_len() - buffer.pos) bytes
+            let read_bytes = match buffer.read_output(&mut buf[0..n_bytes]) {
                 Ok(v) => v,
                 Err(err) => {
                     log::error!("Could not read TX buffer, dropping it immediately: {}", err);

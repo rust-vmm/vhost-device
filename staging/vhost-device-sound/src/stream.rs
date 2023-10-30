@@ -268,7 +268,7 @@ impl Buffer {
         }
     }
 
-    pub fn consume(&self, buf: &mut [u8]) -> Result<u32> {
+    pub fn read_output(&self, buf: &mut [u8]) -> Result<u32> {
         let addr = self.data_descriptor.addr();
         let offset = self.pos as u64;
         let len = self
@@ -544,7 +544,7 @@ mod tests {
     }
 
     #[test]
-    fn test_buffer_consume() {
+    fn test_buffer_read_output() {
         let msg = iomsg();
         let message = Arc::new(msg);
         let desc_msg = iomsg();
@@ -555,7 +555,7 @@ mod tests {
         );
 
         let mut buf = vec![0; 5];
-        let result = buffer.consume(&mut buf);
+        let result = buffer.read_output(&mut buf);
         assert!(result.is_ok());
     }
 }

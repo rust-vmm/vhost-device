@@ -841,12 +841,51 @@ impl Drop for ControlMessage {
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
-    use vm_memory::GuestAddress;
+    use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
     use crate::BackendType;
 
     const SOCKET_PATH: &str = "vsound.socket";
+
+    fn setup_descs(descs: &[Descriptor]) -> (VringRwLock, GuestMemoryAtomic<GuestMemoryMmap>) {
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap(),
+        );
+        let mem_handle = mem.memory();
+
+        let queue = MockSplitQueue::new(&*mem_handle, 16);
+
+        // The `build_desc_chain` function will populate the `NEXT` related flags and
+        // field
+        queue.build_desc_chain(descs).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position
+        mem.memory()
+            .write_obj(0u16, queue.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1
+        mem.memory()
+            .write_obj(1u16, queue.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        let vring = VringRwLock::new(mem.clone(), 16).unwrap();
+
+        vring.set_queue_size(16);
+        vring
+            .set_queue_info(
+                queue.desc_table_addr().0,
+                queue.avail_addr().0,
+                queue.used_addr().0,
+            )
+            .unwrap();
+        vring.set_queue_ready(true);
+
+        (vring, mem)
+    }
 
     #[test]
     fn test_sound_thread_success() {
@@ -902,7 +941,7 @@ mod tests {
         let thread =
             VhostUserSoundThread::new(chmaps, jacks, queue_indexes, streams.clone(), streams_no);
 
-        let t = thread.unwrap();
+        let mut t = thread.unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );
@@ -916,6 +955,52 @@ mod tests {
         t.process_control(&vring, &audio_backend).unwrap_err();
         t.process_io(&vring, &audio_backend, Direction::Output)
             .unwrap_err();
+
+        // single descriptor request shall fail
+        let descs = [
+            Descriptor::new(0, 0, 0, 0), // request
+        ];
+        let (vring, mem) = setup_descs(&descs);
+        t.mem = Some(mem);
+        t.process_control(&vring, &audio_backend).unwrap_err();
+
+        // a request with the first descriptor write-only shall fail
+        let descs = [
+            Descriptor::new(0, 0, VRING_DESC_F_WRITE as u16, 0),
+            Descriptor::new(0, 0, VRING_DESC_F_WRITE as u16, 0),
+        ];
+        let (vring, mem) = setup_descs(&descs);
+        t.mem = Some(mem);
+        t.process_control(&vring, &audio_backend).unwrap_err();
+
+        // a request with the second descriptor read-only shall fail
+        let descs = [Descriptor::new(0, 0, 0, 0), Descriptor::new(0, 0, 0, 0)];
+        let (vring, mem) = setup_descs(&descs);
+        t.mem = Some(mem);
+        t.process_control(&vring, &audio_backend).unwrap_err();
+
+        // control msgs in ctrl_mgs_three_descs require three descriptors otherwise fail
+        let ctrl_mgs_three_descs = [
+            ControlMessageKind::PcmInfo,
+            ControlMessageKind::ChmapInfo,
+            ControlMessageKind::JackInfo,
+        ];
+        for code in ctrl_mgs_three_descs {
+            let req = VirtioSoundHeader {
+                code: Le32::from(code as u32),
+            };
+            let addr_req = 0x10_0000;
+            let descs = [
+                Descriptor::new(addr_req, 0x100, 0, 0), // request
+                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0), // response
+            ];
+            let (vring, mem) = setup_descs(&descs);
+            mem.memory()
+                .write_obj(req, GuestAddress(addr_req))
+                .expect("writing to succeed");
+            t.mem = Some(mem.clone());
+            t.process_control(&vring, &audio_backend).unwrap_err();
+        }
     }
 
     #[test]

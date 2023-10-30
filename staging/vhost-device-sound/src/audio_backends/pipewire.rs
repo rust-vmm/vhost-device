@@ -299,12 +299,23 @@ impl AudioBackend for PwBackend {
 
             let mut param = [Pod::from_bytes(&values).unwrap()];
 
-            let props = properties! {
-                *pw::keys::MEDIA_TYPE => "Audio",
-                *pw::keys::MEDIA_CATEGORY => "Playback",
+            let direction = stream_params[stream_id as usize].direction;
+
+            let media_category = match direction {
+                Direction::Input => "Capture",
+                Direction::Output => "Playback",
+            };
+            let stream_name = match direction {
+                Direction::Input => "audio-input",
+                Direction::Output => "audio-output",
             };
 
-            let stream = pw::stream::Stream::new(&self.core, "audio-output", props)
+            let props = properties! {
+                *pw::keys::MEDIA_TYPE => "Audio",
+                *pw::keys::MEDIA_CATEGORY => media_category,
+            };
+
+            let stream = pw::stream::Stream::new(&self.core, stream_name, props)
                 .expect("could not create new stream");
 
             let streams = self.stream_params.clone();
@@ -331,56 +342,103 @@ impl AudioBackend for PwBackend {
                 .process(move |stream, _data| match stream.dequeue_buffer() {
                     None => debug!("No buffer recieved"),
                     Some(mut buf) => {
-                        let datas = buf.datas_mut();
-                        let frame_size = info.channels * size_of::<i16>() as u32;
-                        let data = &mut datas[0];
-                        let n_bytes = if let Some(slice) = data.data() {
-                            let mut n_bytes = slice.len();
-                            let mut streams = streams.write().unwrap();
-                            let streams = streams
-                                .get_mut(stream_id as usize)
-                                .expect("Stream does not exist");
-                            let Some(buffer) = streams.buffers.front_mut() else {
-                                return;
-                            };
+                        match direction {
+                            Direction::Input => {
+                                let datas = buf.datas_mut();
+                                let data = &mut datas[0];
+                                let mut n_samples = data.chunk().size() as usize;
+                                let Some(slice) = data.data() else {
+                                    return;
+                                };
+                                let mut streams = streams.write().unwrap();
+                                let stream = streams
+                                    .get_mut(stream_id as usize)
+                                    .expect("Stream does not exist");
 
-                            let mut start = buffer.pos;
+                                let mut start = 0;
+                                while n_samples > 0 {
+                                    let Some(buffer) = stream.buffers.front_mut() else {
+                                        return;
+                                    };
 
-                            let avail = (buffer.desc_len() - start as u32) as i32;
+                                    let mut buf_pos = buffer.pos;
+                                    let avail = (buffer.desc_len() as usize - buf_pos) as i32;
+                                    let n_bytes = n_samples.min(avail.try_into().unwrap());
+                                    let p = &slice[start..start + n_bytes];
 
-                            if avail < n_bytes as i32 {
-                                n_bytes = avail.try_into().unwrap();
-                            }
-                            let p = &mut slice[0..n_bytes];
-                            if avail <= 0 {
-                                // SAFETY: We have assured above that the pointer is not null
-                                // safe to zero-initialize the pointer.
-                                unsafe {
-                                    // pad with silence
-                                    ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
+                                    if buffer
+                                        .write_input(p)
+                                        .expect("Could not write data to guest memory")
+                                        == 0
+                                    {
+                                        break;
+                                    }
+
+                                    buf_pos += n_bytes;
+                                    buffer.pos = buf_pos;
+                                    n_samples -= n_bytes;
+                                    start += n_bytes;
+
+                                    if buf_pos >= buffer.desc_len() as usize {
+                                        stream.buffers.pop_front();
+                                    }
                                 }
-                            } else {
-                                // read_output() always reads (buffer.desc_len() - buffer.pos) bytes
-                                buffer
-                                    .read_output(p)
-                                    .expect("failed to read buffer from guest");
-
-                                start += n_bytes;
-
-                                buffer.pos = start;
-
-                                if start >= buffer.desc_len() as usize {
-                                    streams.buffers.pop_front();
-                                }
                             }
-                            n_bytes
-                        } else {
-                            0
+                            Direction::Output => {
+                                let datas = buf.datas_mut();
+                                let frame_size = info.channels * size_of::<i16>() as u32;
+                                let data = &mut datas[0];
+                                let n_bytes = if let Some(slice) = data.data() {
+                                    let mut n_bytes = slice.len();
+                                    let mut streams = streams.write().unwrap();
+                                    let streams = streams
+                                        .get_mut(stream_id as usize)
+                                        .expect("Stream does not exist");
+                                    let Some(buffer) = streams.buffers.front_mut() else {
+                                        return;
+                                    };
+
+                                    let mut start = buffer.pos;
+
+                                    let avail = (buffer.desc_len() - start as u32) as i32;
+
+                                    if avail < n_bytes as i32 {
+                                        n_bytes = avail.try_into().unwrap();
+                                    }
+                                    let p = &mut slice[0..n_bytes];
+                                    if avail <= 0 {
+                                        // SAFETY: We have assured above that the pointer is not
+                                        // null
+                                        // safe to zero-initialize the pointer.
+                                        unsafe {
+                                            // pad with silence
+                                            ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
+                                        }
+                                    } else {
+                                        // read_output() always reads (buffer.desc_len() -
+                                        // buffer.pos) bytes
+                                        buffer
+                                            .read_output(p)
+                                            .expect("failed to read buffer from guest");
+
+                                        start += n_bytes;
+
+                                        buffer.pos = start;
+
+                                        if start >= buffer.desc_len() as usize {
+                                            streams.buffers.pop_front();
+                                        }
+                                    }
+                                    n_bytes
+                                } else {
+                                    0
+                                };
+                                let chunk = data.chunk_mut();
+                                *chunk.offset_mut() = 0;
+                                *chunk.stride_mut() = frame_size as _;
+                                *chunk.size_mut() = n_bytes as _;
+                            }
                         };
-                        let chunk = data.chunk_mut();
-                        *chunk.offset_mut() = 0;
-                        *chunk.stride_mut() = frame_size as _;
-                        *chunk.size_mut() = n_bytes as _;
                     }
                 })
                 .register()

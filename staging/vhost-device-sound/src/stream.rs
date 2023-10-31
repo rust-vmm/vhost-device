@@ -9,7 +9,7 @@ use vm_memory::{Address, Bytes, Le32, Le64};
 use crate::{virtio_sound::*, Direction, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
 /// Stream errors.
-#[derive(Debug, ThisError, PartialEq)]
+#[derive(Debug, ThisError, PartialEq, Eq)]
 pub enum Error {
     #[error("Guest driver request an invalid stream state transition from {0} to {1}.")]
     InvalidStateTransition(PCMState, PCMState),
@@ -93,7 +93,7 @@ type Result<T> = std::result::Result<T, Error>;
 ///         |              |           |          |         |
 ///         |              |<----------|          |         |
 /// ```
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum PCMState {
     #[default]
     #[doc(alias = "VIRTIO_SND_R_PCM_SET_PARAMS")]
@@ -365,7 +365,7 @@ mod tests {
 
         mem.write_obj::<R>(hdr, desc_out.addr()).unwrap();
         vq.desc_table().store(index, desc_out).unwrap();
-        next_addr += desc_out.len() as u64;
+        next_addr += u64::from(desc_out.len());
         index += 1;
 
         // In response descriptor
@@ -413,11 +413,9 @@ mod tests {
         let mut state = PCMState::new();
         assert_eq!(state, PCMState::SetParameters);
 
-        assert!(state.set_parameters().is_ok());
         state.set_parameters().unwrap();
         assert_eq!(state, PCMState::SetParameters);
 
-        assert!(state.prepare().is_ok());
         state.prepare().unwrap();
         assert_eq!(state, PCMState::Prepare);
 
@@ -432,7 +430,6 @@ mod tests {
 
         // Attempt to transition from set_params state to Release state
         let result = state.release();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -442,7 +439,6 @@ mod tests {
         );
 
         let result = state.start();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -452,7 +448,6 @@ mod tests {
         );
 
         let result = state.stop();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -463,7 +458,6 @@ mod tests {
 
         state.prepare().unwrap();
         let result = state.stop();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -474,7 +468,6 @@ mod tests {
 
         state.start().unwrap();
         let result = state.set_parameters();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -484,7 +477,6 @@ mod tests {
         );
 
         let result = state.release();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -494,7 +486,6 @@ mod tests {
         );
 
         let result = state.prepare();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -505,7 +496,6 @@ mod tests {
 
         state.stop().unwrap();
         let result = state.set_parameters();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -515,7 +505,6 @@ mod tests {
         );
 
         let result = state.prepare();
-        assert!(result.is_err());
         assert_eq!(
             result,
             Err(Error::InvalidStateTransition(
@@ -555,7 +544,6 @@ mod tests {
         );
 
         let mut buf = vec![0; 5];
-        let result = buffer.read_output(&mut buf);
-        assert!(result.is_ok());
+        buffer.read_output(&mut buf).unwrap();
     }
 }

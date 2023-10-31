@@ -360,8 +360,10 @@ impl AudioBackend for PwBackend {
                                     ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
                                 }
                             } else {
-                                // consume() always reads (buffer.desc_len() - buffer.pos) bytes
-                                buffer.consume(p).expect("failed to read buffer from guest");
+                                // read_output() always reads (buffer.desc_len() - buffer.pos) bytes
+                                buffer
+                                    .read_output(p)
+                                    .expect("failed to read buffer from guest");
 
                                 start += n_bytes;
 

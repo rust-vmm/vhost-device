@@ -6,7 +6,7 @@ use std::{
     os::unix::prelude::{AsRawFd, RawFd},
 };
 
-use log::info;
+use log::{error, info};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
 
@@ -174,11 +174,22 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                         pkt.set_op(VSOCK_OP_RW).set_len(read_cnt as u32);
 
                         // Re-register the stream file descriptor for read and write events
-                        VhostUserVsockThread::epoll_register(
+                        if VhostUserVsockThread::epoll_modify(
                             self.epoll_fd,
                             self.stream.as_raw_fd(),
                             epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                        )?;
+                        )
+                        .is_err()
+                        {
+                            if let Err(e) = VhostUserVsockThread::epoll_register(
+                                self.epoll_fd,
+                                self.stream.as_raw_fd(),
+                                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                            ) {
+                                // TODO: let's move this logic out of this func, and handle it properly
+                                error!("epoll_register failed: {:?}, but proceed further.", e);
+                            }
+                        };
                     }
 
                     // Update the rx_cnt with the amount of data in the vsock packet.
@@ -253,12 +264,14 @@ impl<S: AsRawFd + Read + Write> VsockConnection<S> {
                 )
                 .is_err()
                 {
-                    VhostUserVsockThread::epoll_register(
+                    if let Err(e) = VhostUserVsockThread::epoll_register(
                         self.epoll_fd,
                         self.stream.as_raw_fd(),
                         epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                    )
-                    .unwrap();
+                    ) {
+                        // TODO: let's move this logic out of this func, and handle it properly
+                        error!("epoll_register failed: {:?}, but proceed further.", e);
+                    }
                 };
             }
             VSOCK_OP_CREDIT_REQUEST => {
@@ -680,13 +693,15 @@ mod tests {
         );
 
         // VSOCK_OP_RW: finite data read from stream/file
-        conn_local.stream.write_all(b"hello").unwrap();
+        let payload = b"hello";
+        conn_local.stream.write_all(payload).unwrap();
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_zero_read = conn_local.recv_pkt(&mut pkt);
-        // below error due to epoll add
-        assert!(op_zero_read.is_err());
+        assert!(op_zero_read.is_ok());
         assert_eq!(pkt.op(), VSOCK_OP_RW);
         assert!(!conn_local.rx_queue.pending_rx());
+        assert_eq!(conn_local.rx_cnt, Wrapping(payload.len() as u32));
+        assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
         assert_eq!(pkt.len(), 5);
         let buf = &mut [0u8; 5];
         assert!(pkt.data_slice().unwrap().read_slice(buf, 0).is_ok());

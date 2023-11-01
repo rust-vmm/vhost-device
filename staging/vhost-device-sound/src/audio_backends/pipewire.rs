@@ -557,6 +557,11 @@ impl AudioBackend for PwBackend {
 }
 
 #[cfg(test)]
+/// Utilities for building a temporary Dbus session and a pipewire instance for
+/// testing.
+mod test_utils;
+
+#[cfg(test)]
 mod tests {
     use vhost_user_backend::{VringRwLock, VringT};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
@@ -565,7 +570,7 @@ mod tests {
         Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     };
 
-    use super::*;
+    use super::{test_utils::PipewireTestHarness, *};
     use crate::{ControlMessageKind, SoundDescriptorChain, VirtioSoundHeader};
 
     // Prepares a single chain of descriptors for request queue
@@ -638,6 +643,8 @@ mod tests {
         let streams = Arc::new(RwLock::new(vec![Stream::default()]));
         let stream_params = streams.clone();
 
+        let _test_harness = PipewireTestHarness::new();
+
         let pw_backend = PwBackend::new(stream_params);
         assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
         assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
@@ -659,6 +666,8 @@ mod tests {
     #[test]
     fn test_pipewire_backend_invalid_stream() {
         let stream_params = Arc::new(RwLock::new(vec![]));
+
+        let _test_harness = PipewireTestHarness::new();
 
         let pw_backend = PwBackend::new(stream_params);
 

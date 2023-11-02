@@ -124,6 +124,7 @@ impl VhostUserSoundThread {
         Ok(false)
     }
 
+    #[allow(clippy::cognitive_complexity)]
     fn process_control(
         &self,
         vring: &VringRwLock,
@@ -209,6 +210,7 @@ impl VhostUserSoundThread {
                         for i in chmaps.iter().skip(start_id).take(count) {
                             buf.extend_from_slice(i.as_slice());
                         }
+                        drop(chmaps);
                         desc_chain
                             .memory()
                             .write_slice(&buf, desc_response.addr())
@@ -244,6 +246,7 @@ impl VhostUserSoundThread {
                         for i in jacks.iter().skip(start_id).take(count) {
                             buf.extend_from_slice(i.as_slice());
                         }
+                        drop(jacks);
                         desc_chain
                             .memory()
                             .write_slice(&buf, desc_response.addr())
@@ -297,6 +300,7 @@ impl VhostUserSoundThread {
                             p.channels_max = s.channels_max;
                             buf.extend_from_slice(p.as_slice());
                         }
+                        drop(streams);
                         desc_chain
                             .memory()
                             .write_slice(&buf, desc_response.addr())
@@ -519,10 +523,9 @@ impl VhostUserSoundThread {
                     IoState::WaitingBufferForStreamId(stream_id)
                         if descriptor.len() as usize == size_of::<VirtioSoundPcmStatus>() =>
                     {
-                        let mut streams = self.streams.write().unwrap();
-                        for b in std::mem::take(&mut buffers) {
-                            streams[stream_id as usize].buffers.push_back(b);
-                        }
+                        self.streams.write().unwrap()[stream_id as usize]
+                            .buffers
+                            .extend(std::mem::take(&mut buffers).into_iter());
                         state = IoState::Done;
                     }
                     IoState::Ready
@@ -574,7 +577,7 @@ impl VhostUserSoundThread {
         }
 
         if !stream_ids.is_empty() {
-            let b = audio_backend.write().unwrap();
+            let b = audio_backend.read().unwrap();
             match direction {
                 Direction::Output => {
                     for id in stream_ids {
@@ -653,8 +656,8 @@ impl VhostUserSoundBackend {
                     streams_no,
                 )?),
                 RwLock::new(VhostUserSoundThread::new(
-                    chmaps.clone(),
-                    jacks.clone(),
+                    chmaps,
+                    jacks,
                     vec![RX_QUEUE_IDX],
                     streams.clone(),
                     streams_no,
@@ -662,8 +665,8 @@ impl VhostUserSoundBackend {
             ]
         } else {
             vec![RwLock::new(VhostUserSoundThread::new(
-                chmaps.clone(),
-                jacks.clone(),
+                chmaps,
+                jacks,
                 vec![
                     CONTROL_QUEUE_IDX,
                     EVENT_QUEUE_IDX,
@@ -858,7 +861,6 @@ mod tests {
         let thread =
             VhostUserSoundThread::new(chmaps, jacks, queue_indexes, streams.clone(), streams_no);
 
-        assert!(thread.is_ok());
         let mut t = thread.unwrap();
 
         // Mock memory
@@ -874,21 +876,18 @@ mod tests {
         ];
 
         let audio_backend =
-            RwLock::new(alloc_audio_backend(config.audio_backend, streams.clone()).unwrap());
-        assert!(t
-            .handle_event(CONTROL_QUEUE_IDX, &vrings, &audio_backend)
-            .is_ok());
+            RwLock::new(alloc_audio_backend(config.audio_backend, streams).unwrap());
+        t.handle_event(CONTROL_QUEUE_IDX, &vrings, &audio_backend)
+            .unwrap();
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
         vring.set_queue_ready(true);
-        assert!(t.process_control(&vring, &audio_backend).is_ok());
-        assert!(t
-            .process_io(&vring, &audio_backend, Direction::Output)
-            .is_ok());
-        assert!(t
-            .process_io(&vring, &audio_backend, Direction::Input)
-            .is_ok());
+        t.process_control(&vring, &audio_backend).unwrap();
+        t.process_io(&vring, &audio_backend, Direction::Output)
+            .unwrap();
+        t.process_io(&vring, &audio_backend, Direction::Input)
+            .unwrap();
     }
 
     #[test]
@@ -909,15 +908,14 @@ mod tests {
         );
 
         let audio_backend =
-            RwLock::new(alloc_audio_backend(config.audio_backend, streams.clone()).unwrap());
+            RwLock::new(alloc_audio_backend(config.audio_backend, streams).unwrap());
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
         vring.set_queue_ready(true);
-        assert!(t.process_control(&vring, &audio_backend).is_err());
-        assert!(t
-            .process_io(&vring, &audio_backend, Direction::Output)
-            .is_err());
+        t.process_control(&vring, &audio_backend).unwrap_err();
+        t.process_io(&vring, &audio_backend, Direction::Output)
+            .unwrap_err();
     }
 
     #[test]
@@ -962,7 +960,7 @@ mod tests {
             .unwrap();
         vrings[RX_QUEUE_IDX as usize].set_queue_ready(true);
 
-        assert!(backend.update_memory(mem).is_ok());
+        backend.update_memory(mem).unwrap();
 
         let queues_per_thread = backend.queues_per_thread();
         assert_eq!(queues_per_thread.len(), 1);
@@ -976,19 +974,15 @@ mod tests {
         exit.unwrap().write(1).unwrap();
 
         let ret = backend.handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
         let ret = backend.handle_event(EVENT_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
         let ret = backend.handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
         let ret = backend.handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
         assert!(!ret.unwrap());
 
         test_dir.close().unwrap();

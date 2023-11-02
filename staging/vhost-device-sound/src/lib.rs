@@ -1,34 +1,5 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-//
-#![deny(
-    /* groups */
-    clippy::correctness,
-    clippy::suspicious,
-    clippy::complexity,
-    clippy::perf,
-    clippy::style,
-    clippy::nursery,
-    //* restriction */
-    clippy::dbg_macro,
-    clippy::rc_buffer,
-    clippy::as_underscore,
-    clippy::assertions_on_result_states,
-    //* pedantic */
-    clippy::cast_lossless,
-    clippy::cast_possible_wrap,
-    clippy::ptr_as_ptr,
-    clippy::bool_to_int_with_if,
-    clippy::borrow_as_ptr,
-    clippy::case_sensitive_file_extension_comparisons,
-    clippy::cast_lossless,
-    clippy::cast_ptr_alignment,
-    clippy::naive_bytecount
-)]
-#![allow(
-    clippy::significant_drop_in_scrutinee,
-    clippy::significant_drop_tightening
-)]
 
 pub mod audio_backends;
 pub mod device;
@@ -162,7 +133,7 @@ pub enum BackendType {
     Alsa,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct InvalidControlMessage(u32);
 
 impl std::fmt::Display for InvalidControlMessage {
@@ -282,7 +253,7 @@ pub struct SoundConfig {
 impl SoundConfig {
     /// Create a new instance of the SoundConfig struct, containing the
     /// parameters to be fed into the sound-backend server.
-    pub const fn new(socket: String, multi_thread: bool, audio_backend: BackendType) -> Self {
+    pub fn new(socket: String, multi_thread: bool, audio_backend: BackendType) -> Self {
         Self {
             socket,
             multi_thread,
@@ -296,7 +267,7 @@ impl SoundConfig {
         String::from(&self.socket)
     }
 
-    pub const fn get_audio_backend(&self) -> BackendType {
+    pub fn get_audio_backend(&self) -> BackendType {
         self.audio_backend
     }
 }
@@ -393,7 +364,7 @@ mod tests {
 
         let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
 
-        let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
+        let backend = Arc::new(VhostUserSoundBackend::new(config.clone()).unwrap());
         let daemon = VhostUserDaemon::new(
             String::from("vhost-device-sound"),
             backend.clone(),

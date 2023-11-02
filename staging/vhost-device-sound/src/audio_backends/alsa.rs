@@ -164,7 +164,7 @@ fn update_pcm(
 
             let period_frames = period_bytes / frame_size;
 
-            hwp.set_period_size(i64::from(period_frames), alsa::ValueOr::Less)?;
+            hwp.set_period_size(period_frames as i64, alsa::ValueOr::Less)?;
 
             // Online ALSA driver recommendations seem to be that the buffer should be at
             // least 2 * period_size.
@@ -177,7 +177,7 @@ fn update_pcm(
             // > as well as the parameters set in the snd_pcm_hardware structure (in the driver).
             //
             // So, if the operation fails let's assume the ALSA runtime has set a better value.
-            if let Err(err) = hwp.set_buffer_size_near(2 * i64::from(period_frames)) {
+            if let Err(err) = hwp.set_buffer_size_near(2 * period_frames as i64) {
                 log::error!("could not set buffer size {}: {}", 2 * period_frames, err);
             }
 
@@ -287,7 +287,7 @@ fn write_samples_io(
     p: &alsa::PCM,
     streams: &Arc<RwLock<Vec<Stream>>>,
     stream_id: usize,
-    io: &alsa::pcm::IO<u8>,
+    io: &mut alsa::pcm::IO<u8>,
 ) -> AResult<bool> {
     let avail = match p.avail_update() {
         Ok(n) => n,
@@ -331,7 +331,7 @@ fn write_samples_io(
             if buffer.pos as u32 >= buffer.desc_len() {
                 stream.buffers.pop_front();
             }
-            p.bytes_to_frames(isize::try_from(read_bytes).unwrap())
+            p.bytes_to_frames(read_bytes as isize)
                 .try_into()
                 .unwrap_or_default()
         })?;
@@ -352,7 +352,7 @@ fn read_samples_io(
     p: &alsa::PCM,
     streams: &Arc<RwLock<Vec<Stream>>>,
     stream_id: usize,
-    io: &alsa::pcm::IO<u8>,
+    io: &mut alsa::pcm::IO<u8>,
 ) -> AResult<bool> {
     let avail = match p.avail_update() {
         Ok(n) => n,
@@ -394,8 +394,7 @@ fn read_samples_io(
         .map(std::num::NonZeroUsize::get)
     {
         frames_read += frames;
-        let n_bytes =
-            usize::try_from(p.frames_to_bytes(frames.try_into().unwrap())).unwrap_or_default();
+        let n_bytes = usize::try_from(p.frames_to_bytes(frames as i64)).unwrap_or_default();
         if buffer
             .write_input(&intermediate_buf[0..n_bytes])
             .expect("Could not write data to guest memory")
@@ -405,7 +404,7 @@ fn read_samples_io(
         }
     }
 
-    let bytes_read = p.frames_to_bytes(frames_read.try_into().unwrap());
+    let bytes_read = p.frames_to_bytes(frames_read as i64);
     if buffer.pos as u32 >= buffer.desc_len() || bytes_read == 0 {
         stream.buffers.pop_front();
     }
@@ -457,9 +456,9 @@ fn alsa_worker(
                                     continue 'empty_buffers;
                                 }
                             } else {
-                                let io = lck.io_bytes();
+                                let mut io = lck.io_bytes();
                                 // Direct mode unavailable, use alsa-lib's mmap emulation instead
-                                if write_samples_io(&lck, &streams, stream_id, &io)? {
+                                if write_samples_io(&lck, &streams, stream_id, &mut io)? {
                                     continue 'empty_buffers;
                                 }
                             }
@@ -476,8 +475,8 @@ fn alsa_worker(
                                     continue 'empty_buffers;
                                 }
                             } else {
-                                let io = lck.io_bytes();
-                                if read_samples_io(&lck, &streams, stream_id, &io)? {
+                                let mut io = lck.io_bytes();
+                                if read_samples_io(&lck, &streams, stream_id, &mut io)? {
                                     continue 'empty_buffers;
                                 }
                             }
@@ -506,7 +505,6 @@ impl AlsaBackend {
         Self { sender, streams }
     }
 
-    #[allow(clippy::cognitive_complexity)]
     fn run(
         streams: Arc<RwLock<Vec<Stream>>>,
         receiver: Receiver<AlsaAction>,

@@ -70,8 +70,6 @@ unsafe impl Send for PwBackend {}
 // is protected with a lock.
 unsafe impl Sync for PwBackend {}
 
-// FIXME: make PwBackend impl Send on all fields.
-#[allow(clippy::non_send_fields_in_send_ty)]
 pub struct PwBackend {
     pub stream_params: Arc<RwLock<Vec<Stream>>>,
     thread_loop: ThreadLoop,
@@ -276,7 +274,7 @@ impl AudioBackend for PwBackend {
                     _ => 44100,
                 },
                 flags: 0,
-                channels: u32::from(params.channels),
+                channels: params.channels as u32,
                 position: pos,
             };
 
@@ -441,8 +439,8 @@ impl AudioBackend for PwBackend {
                                 };
                                 let chunk = data.chunk_mut();
                                 *chunk.offset_mut() = 0;
-                                *chunk.stride_mut() = i32::try_from(frame_size).unwrap();
-                                *chunk.size_mut() = u32::try_from(n_bytes).unwrap();
+                                *chunk.stride_mut() = frame_size as _;
+                                *chunk.size_mut() = n_bytes as _;
                             }
                         };
                     }
@@ -588,7 +586,7 @@ mod tests {
 
         mem.write_obj::<R>(hdr, desc_out.addr()).unwrap();
         vq.desc_table().store(index, desc_out).unwrap();
-        next_addr += u64::from(desc_out.len());
+        next_addr += desc_out.len() as u64;
         index += 1;
 
         // In response descriptor
@@ -641,19 +639,19 @@ mod tests {
         let pw_backend = PwBackend::new(stream_params);
         assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
         assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
-        pw_backend.prepare(0).unwrap();
-        pw_backend.start(0).unwrap();
-        pw_backend.stop(0).unwrap();
+        assert!(pw_backend.prepare(0).is_ok());
+        assert!(pw_backend.start(0).is_ok());
+        assert!(pw_backend.stop(0).is_ok());
         let msg = ctrlmsg();
-        pw_backend.set_parameters(0, msg).unwrap();
+        assert!(pw_backend.set_parameters(0, msg).is_ok());
         let release_msg = ctrlmsg();
-        pw_backend.release(0, release_msg).unwrap();
-        pw_backend.write(0).unwrap();
+        assert!(pw_backend.release(0, release_msg).is_ok());
+        assert!(pw_backend.write(0).is_ok());
 
         let streams = streams.read().unwrap();
         assert_eq!(streams[0].buffers.len(), 0);
 
-        pw_backend.read(0).unwrap();
+        assert!(pw_backend.read(0).is_ok());
     }
 
     #[test]

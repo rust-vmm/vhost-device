@@ -37,7 +37,7 @@ mod tests {
         let streams = Arc::new(RwLock::new(vec![Stream::default()]));
         let null_backend = NullBackend::new(streams.clone());
 
-        null_backend.write(0).unwrap();
+        assert!(null_backend.write(0).is_ok());
 
         let streams = streams.read().unwrap();
         assert_eq!(streams[0].buffers.len(), 0);
@@ -48,7 +48,7 @@ mod tests {
         let streams = Arc::new(RwLock::new(vec![Stream::default()]));
         let null_backend = NullBackend::new(streams.clone());
 
-        null_backend.read(0).unwrap();
+        assert!(null_backend.read(0).is_ok());
 
         // buffer lengths should remain unchanged
         let streams = streams.read().unwrap();

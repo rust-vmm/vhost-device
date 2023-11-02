@@ -3,7 +3,7 @@
 
 use std::{
     collections::HashMap,
-    convert::TryFrom,
+    convert::TryInto,
     mem::size_of,
     ptr,
     sync::{Arc, RwLock},
@@ -362,10 +362,8 @@ impl AudioBackend for PwBackend {
                                     };
 
                                     let mut buf_pos = buffer.pos;
-                                    let avail = usize::try_from(buffer.desc_len())
-                                        .unwrap()
-                                        .saturating_sub(buf_pos);
-                                    let n_bytes = n_samples.min(avail);
+                                    let avail = (buffer.desc_len() as usize - buf_pos) as i32;
+                                    let n_bytes = n_samples.min(avail.try_into().unwrap());
                                     let p = &slice[start..start + n_bytes];
 
                                     if buffer
@@ -402,15 +400,13 @@ impl AudioBackend for PwBackend {
 
                                     let mut start = buffer.pos;
 
-                                    let avail = usize::try_from(buffer.desc_len())
-                                        .unwrap()
-                                        .saturating_sub(start);
+                                    let avail = (buffer.desc_len() - start as u32) as i32;
 
-                                    if avail < n_bytes {
-                                        n_bytes = avail;
+                                    if avail < n_bytes as i32 {
+                                        n_bytes = avail.try_into().unwrap();
                                     }
                                     let p = &mut slice[0..n_bytes];
-                                    if avail == 0 {
+                                    if avail <= 0 {
                                         // SAFETY: We have assured above that the pointer is not
                                         // null
                                         // safe to zero-initialize the pointer.

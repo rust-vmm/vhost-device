@@ -320,6 +320,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
@@ -554,12 +555,19 @@ mod tests {
         )
         .unwrap();
 
-        let vring_workers = daemon.get_epoll_handlers();
+        let mut epoll_handlers = daemon.get_epoll_handlers();
 
         // VhostUserVsockBackend support a single thread that handles the TX and RX queues
         assert_eq!(backend.threads.len(), 1);
 
-        assert_eq!(vring_workers.len(), backend.threads.len());
+        assert_eq!(epoll_handlers.len(), backend.threads.len());
+
+        for thread in backend.threads.iter() {
+            thread
+                .lock()
+                .unwrap()
+                .register_listeners(epoll_handlers.remove(0));
+        }
 
         test_dir.close().unwrap();
     }
@@ -603,8 +611,48 @@ mod tests {
             ),
         ];
 
-        start_backend_servers(&configs).unwrap_err();
+        let error = start_backend_servers(&configs).unwrap_err();
+        assert_matches!(
+            error,
+            BackendError::CouldNotCreateBackend(vhu_vsock::Error::CidAlreadyInUse)
+        );
+        assert_eq!(
+            format!("{error:?}"),
+            "CouldNotCreateBackend(CidAlreadyInUse)"
+        );
 
         test_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_main_structs() {
+        let error = parse_vm_params("").unwrap_err();
+        assert_matches!(error, VmArgsParseError::BadArgument);
+        assert_eq!(format!("{error:?}"), "BadArgument");
+
+        let args = VsockArgs {
+            param: None,
+            vm: None,
+            config: None,
+        };
+        let error = Vec::<VsockConfig>::try_from(args).unwrap_err();
+        assert_matches!(error, CliError::NoArgsProvided);
+        assert_eq!(format!("{error:?}"), "NoArgsProvided");
+
+        let args = VsockArgs::from_args(0, "", "", 0, "");
+        assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, groups: \"\" }), vm: None, config: None }");
+
+        let param = args.param.unwrap().clone();
+        assert_eq!(format!("{param:?}"), "VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, groups: \"\" }");
+
+        let config = ConfigFileVsockParam {
+            guest_cid: None,
+            socket: String::new(),
+            uds_path: String::new(),
+            tx_buffer_size: None,
+            groups: None,
+        }
+        .clone();
+        assert_eq!(format!("{config:?}"), "ConfigFileVsockParam { guest_cid: None, socket: \"\", uds_path: \"\", tx_buffer_size: None, groups: None }");
     }
 }

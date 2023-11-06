@@ -230,4 +230,14 @@ mod tests {
             assert_eq!(cmp_vec, data[..n]);
         }
     }
+
+    #[test]
+    fn test_txbuf_debug() {
+        let loc_tx_buf = LocalTxBuf::new(1);
+
+        assert_eq!(
+            format!("{loc_tx_buf:?}"),
+            "LocalTxBuf { buf: [0], head: 0, tail: 0 }"
+        );
+    }
 }

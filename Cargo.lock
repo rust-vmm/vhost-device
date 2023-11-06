@@ -963,6 +963,7 @@ dependencies = [
 name = "vhost-device-vsock"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "byteorder",
  "clap",
  "config",

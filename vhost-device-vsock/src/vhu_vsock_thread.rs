@@ -730,6 +730,7 @@ impl Drop for VhostUserVsockThread {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::io::Write;
     use tempfile::tempdir;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
@@ -806,6 +807,21 @@ mod tests {
             .push_back(ConnMapKey::new(0, 0));
         assert!(t.process_rx(&vring, false).is_ok());
         assert!(t.process_rx(&vring, true).is_ok());
+        assert!(t.process_raw_pkts(&vring, false).is_ok());
+        assert!(t.process_raw_pkts(&vring, true).is_ok());
+
+        VhostUserVsockThread::vring_handle_event(EventData {
+            vring: vring.clone(),
+            event_idx: false,
+            head_idx: 0,
+            used_len: 0,
+        });
+        VhostUserVsockThread::vring_handle_event(EventData {
+            vring,
+            event_idx: true,
+            head_idx: 0,
+            used_len: 0,
+        });
 
         dummy_fd.write(1).unwrap();
 
@@ -874,6 +890,46 @@ mod tests {
         let t2 =
             VhostUserVsockThread::new(vsock_socket_path2, 3, CONN_TX_BUF_SIZE, groups, cid_map);
         assert!(t2.is_err());
+
+        test_dir.close().unwrap();
+    }
+    #[test]
+    fn test_vsock_thread_unix() {
+        let groups: Vec<String> = vec![String::from("default")];
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+        let vsock_path = test_dir
+            .path()
+            .join("test_vsock_thread.vsock")
+            .display()
+            .to_string();
+
+        let t = VhostUserVsockThread::new(vsock_path.clone(), 3, CONN_TX_BUF_SIZE, groups, cid_map);
+
+        let mut t = t.unwrap();
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        t.mem = Some(mem.clone());
+
+        let mut uds = UnixStream::connect(vsock_path).unwrap();
+        t.process_backend_evt(EventSet::empty());
+
+        uds.write_all(b"CONNECT 1234\n").unwrap();
+        t.process_backend_evt(EventSet::empty());
+
+        // Write and read something from the Unix socket
+        uds.write_all(b"some data").unwrap();
+
+        let mut buf = vec![0u8; 16];
+        uds.set_nonblocking(true).unwrap();
+        // There isn't any peer responding, so we don't expect data
+        uds.read(&mut buf).unwrap_err();
+
+        t.process_backend_evt(EventSet::empty());
 
         test_dir.close().unwrap();
     }

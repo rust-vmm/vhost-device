@@ -22,7 +22,6 @@ use crate::{
     vhu_vsock_thread::VhostUserVsockThread,
 };
 
-#[derive(Debug)]
 pub(crate) struct VsockConnection<S> {
     /// Host-side stream corresponding to this vsock connection.
     pub stream: S,
@@ -519,7 +518,8 @@ mod tests {
     #[test]
     fn test_vsock_conn_init() {
         // new locally inititated connection
-        let dummy_file = VsockDummySocket::new();
+        let mut dummy_file = VsockDummySocket::new();
+        assert!(dummy_file.flush().is_ok());
         let mut conn_local = VsockConnection::new_local_init(
             dummy_file,
             VSOCK_HOST_CID,

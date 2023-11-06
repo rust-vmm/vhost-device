@@ -26,6 +26,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_rxops() {
+        let rx = RxOps::Request;
+        // Increase coverage testing Clone and Debug traits
+        assert_eq!(rx, rx.clone());
+        assert_eq!(format!("{rx:?}"), "Request");
+    }
+
+    #[test]
     fn test_bitmask() {
         assert_eq!(1, RxOps::Request.bitmask());
         assert_eq!(2, RxOps::Rw.bitmask());

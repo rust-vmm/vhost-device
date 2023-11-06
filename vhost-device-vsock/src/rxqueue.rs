@@ -154,4 +154,11 @@ mod tests {
         rxqueue.queue = 1;
         assert!(rxqueue.pending_rx());
     }
+
+    #[test]
+    fn test_debug() {
+        let rxqueue = RxQueue::new();
+
+        assert_eq!(format!("{rxqueue:?}"), "RxQueue { queue: 0 }");
+    }
 }

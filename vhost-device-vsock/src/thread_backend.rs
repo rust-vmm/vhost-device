@@ -419,6 +419,9 @@ mod tests {
 
         assert!(vtp.recv_pkt(&mut packet).is_ok());
 
+        // TODO: it is a nop for now
+        vtp.enq_rst();
+
         // cleanup
         let _ = std::fs::remove_file(&vsock_peer_path);
         let _ = std::fs::remove_file(&vsock_socket_path);
@@ -430,6 +433,7 @@ mod tests {
     fn test_vsock_thread_backend_sibling_vms() {
         const CID: u64 = 3;
         const SIBLING_CID: u64 = 4;
+        const SIBLING2_CID: u64 = 5;
         const SIBLING_LISTENING_PORT: u32 = 1234;
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
@@ -449,6 +453,16 @@ mod tests {
             .join("test_vsock_thread_backend_sibling.vsock")
             .display()
             .to_string();
+        let sibling2_vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_thread_backend_sibling2.socket")
+            .display()
+            .to_string();
+        let sibling2_vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_thread_backend_sibling2.vsock")
+            .display()
+            .to_string();
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
@@ -463,8 +477,18 @@ mod tests {
                 .collect(),
         );
 
+        let sibling2_config = VsockConfig::new(
+            SIBLING2_CID,
+            sibling2_vhost_socket_path,
+            sibling2_vsock_socket_path,
+            CONN_TX_BUF_SIZE,
+            vec!["group1"].into_iter().map(String::from).collect(),
+        );
+
         let sibling_backend =
             Arc::new(VhostUserVsockBackend::new(sibling_config, cid_map.clone()).unwrap());
+        let sibling2_backend =
+            Arc::new(VhostUserVsockBackend::new(sibling2_config, cid_map.clone()).unwrap());
 
         let epoll_fd = epoll::create(false).unwrap();
 
@@ -508,6 +532,15 @@ mod tests {
 
         assert!(vtp.send_pkt(&packet).is_ok());
         assert!(sibling_backend.threads[0]
+            .lock()
+            .unwrap()
+            .thread_backend
+            .pending_raw_pkts());
+
+        packet.set_dst_cid(SIBLING2_CID);
+        assert!(vtp.send_pkt(&packet).is_ok());
+        // packet should be discarded since sibling2 is not in the same group
+        assert!(!sibling2_backend.threads[0]
             .lock()
             .unwrap()
             .thread_backend

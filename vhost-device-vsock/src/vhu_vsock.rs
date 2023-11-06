@@ -540,4 +540,28 @@ mod tests {
 
         test_dir.close().unwrap();
     }
+
+    #[test]
+    fn test_vhu_vsock_structs() {
+        let config = VsockConfig::new(0, String::new(), String::new(), 0, vec![String::new()]);
+
+        assert_eq!(format!("{config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, groups: [\"\"] }");
+
+        let conn_map = ConnMapKey::new(0, 0);
+        assert_eq!(
+            format!("{conn_map:?}"),
+            "ConnMapKey { local_port: 0, peer_port: 0 }"
+        );
+        assert_eq!(conn_map, conn_map.clone());
+
+        let virtio_config = VirtioVsockConfig::default();
+        assert_eq!(
+            format!("{virtio_config:?}"),
+            "VirtioVsockConfig { guest_cid: Le64(0) }"
+        );
+        assert_eq!(virtio_config, virtio_config.clone());
+
+        let error = Error::HandleEventNotEpollIn;
+        assert_eq!(format!("{error:?}"), "HandleEventNotEpollIn");
+    }
 }

@@ -922,7 +922,59 @@ mod tests {
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
         vring.set_queue_ready(true);
-        t.process_control(&vring, &audio_backend).unwrap();
+
+        // Test control msgs with three descriptors
+        let ctrl_msg_descs = [
+            ControlMessageKind::PcmInfo,
+            ControlMessageKind::ChmapInfo,
+            ControlMessageKind::JackInfo,
+        ];
+        for code in ctrl_msg_descs {
+            let req = VirtioSoundHeader {
+                code: Le32::from(code as u32),
+            };
+            let addr_req = 0x10_0000;
+            let descs = [
+                Descriptor::new(addr_req, 0x100, 0, 0), // request
+                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0),
+                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0), // response
+            ];
+
+            let (vring, mem) = setup_descs(&descs);
+            mem.memory()
+                .write_obj(req, GuestAddress(addr_req))
+                .expect("writing to succeed");
+            t.mem = Some(mem.clone());
+            t.process_control(&vring, &audio_backend).unwrap();
+        }
+
+        // Test control msgs with two descriptors
+        let ctrl_descs = [
+            ControlMessageKind::JackRemap,
+            ControlMessageKind::PcmSetParams,
+            ControlMessageKind::PcmPrepare,
+            ControlMessageKind::PcmRelease,
+            ControlMessageKind::PcmStart,
+            ControlMessageKind::PcmStop,
+        ];
+        for code in ctrl_descs {
+            let req = VirtioSoundHeader {
+                code: Le32::from(code as u32),
+            };
+            let addr_req = 0x10_0000;
+            let descs = [
+                Descriptor::new(addr_req, 0x100, 0, 0), // request
+                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0),
+            ];
+
+            let (vring, mem) = setup_descs(&descs);
+            mem.memory()
+                .write_obj(req, GuestAddress(addr_req))
+                .expect("writing to succeed");
+            t.mem = Some(mem.clone());
+            t.process_control(&vring, &audio_backend).unwrap();
+        }
+
         t.process_io(&vring, &audio_backend, Direction::Output)
             .unwrap();
         t.process_io(&vring, &audio_backend, Direction::Input)

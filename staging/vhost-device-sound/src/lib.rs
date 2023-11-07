@@ -212,6 +212,7 @@ impl TryFrom<Le32> for ControlMessageKind {
     }
 }
 
+#[cfg_attr(test, derive(Clone))]
 pub struct ControlMessage {
     pub kind: ControlMessageKind,
     pub code: u32,
@@ -382,10 +383,77 @@ pub fn start_backend_server(config: SoundConfig) {
 mod tests {
     use std::sync::Arc;
 
-    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+    use vhost_user_backend::{VringRwLock, VringT};
+    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
+    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
+    use vm_memory::{
+        Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    };
 
     use super::*;
-    use crate::ControlMessageKind;
+    use crate::{ControlMessageKind, SoundDescriptorChain};
+
+    // Prepares a single chain of descriptors
+    fn prepare_desc_chain<R: ByteValued>(
+        start_addr: GuestAddress,
+        hdr: R,
+        response_len: u32,
+    ) -> SoundDescriptorChain {
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
+        let mut next_addr = vq.desc_table().total_size() + 0x100;
+        let mut index = 0;
+
+        let desc_out = Descriptor::new(
+            next_addr,
+            std::mem::size_of::<R>() as u32,
+            VRING_DESC_F_NEXT as u16,
+            index + 1,
+        );
+
+        mem.write_obj::<R>(hdr, desc_out.addr()).unwrap();
+        vq.desc_table().store(index, desc_out).unwrap();
+        next_addr += u64::from(desc_out.len());
+        index += 1;
+
+        // In response descriptor
+        let desc_in = Descriptor::new(next_addr, response_len, VRING_DESC_F_WRITE as u16, 0);
+        vq.desc_table().store(index, desc_in).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 1.
+        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
+            .unwrap();
+
+        // Create descriptor chain from pre-filled memory
+        vq.create_queue::<Queue>()
+            .unwrap()
+            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
+            .unwrap()
+            .next()
+            .unwrap()
+    }
+
+    fn ctrl_msg() -> ControlMessage {
+        let hdr = VirtioSndPcmSetParams::default();
+        let memr = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(memr, 0x1000).unwrap();
+        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let vq = MockSplitQueue::new(mem, 16);
+        let next_addr = vq.desc_table().total_size() + 0x100;
+        ControlMessage {
+            kind: ControlMessageKind::JackInfo,
+            code: 0,
+            desc_chain: prepare_desc_chain::<VirtioSndPcmSetParams>(GuestAddress(0), hdr, 1),
+            descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
+            vring,
+        }
+    }
 
     #[test]
     fn test_sound_server() {
@@ -438,5 +506,42 @@ mod tests {
             ControlMessageKind::try_from(<u32 as Into<Le32>>::into(invalid_value)),
             Err(InvalidControlMessage(invalid_value))
         );
+    }
+
+    #[test]
+    fn test_try_from_valid_output() {
+        let val = virtio_sound::VIRTIO_SND_D_OUTPUT;
+        assert_eq!(Direction::try_from(val).unwrap(), Direction::Output);
+
+        let val = virtio_sound::VIRTIO_SND_D_INPUT;
+        assert_eq!(Direction::try_from(val).unwrap(), Direction::Input);
+
+        let val = 42;
+        Direction::try_from(val).unwrap_err();
+    }
+
+    #[test]
+    fn test_display() {
+        let error = InvalidControlMessage(42);
+        let formatted_error = format!("{}", error);
+        assert_eq!(formatted_error, "Invalid control message code 42");
+    }
+
+    #[test]
+    fn test_into_error() {
+        let error = InvalidControlMessage(42);
+        let _error: Error = error.into();
+
+        // Test from stream Error
+        let stream_error = stream::Error::DescriptorReadFailed;
+        let _error: Error = stream_error.into();
+    }
+
+    #[test]
+    fn test_debug_format() {
+        let ctrl_msg = ctrl_msg();
+        let debug_output = format!("{:?}", ctrl_msg);
+        let expected_output = "ControlMessage { kind: JackInfo, code: 0 }".to_string();
+        assert_eq!(debug_output, expected_output);
     }
 }

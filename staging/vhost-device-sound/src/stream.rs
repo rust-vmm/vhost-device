@@ -335,6 +335,8 @@ impl Drop for Buffer {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write;
+
     use vhost_user_backend::{VringRwLock, VringT};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
@@ -406,6 +408,28 @@ mod tests {
             response_descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
             vring,
         }
+    }
+
+    #[test]
+    fn test_display_fmt() {
+        assert_eq!(&PCMState::Stop.to_string(), "VIRTIO_SND_R_PCM_STOP");
+    }
+
+    #[test]
+    fn test_logging() {
+        let data_descriptor = Descriptor::new(0, 0, 0, 0);
+        let msg = iomsg();
+        let message = Arc::new(msg);
+        let direction = Direction::Input;
+        let buffer = Buffer::new(data_descriptor, message, direction);
+        assert_eq!(format!("{direction:?}"), "Input");
+        assert_eq!(
+            format!("{buffer:?}"),
+            format!(
+                "Buffer {{ pos: 0, direction: Input, message: {:?} }}",
+                &Arc::as_ptr(&buffer.message)
+            )
+        );
     }
 
     #[test]
@@ -545,5 +569,48 @@ mod tests {
 
         let mut buf = vec![0; 5];
         buffer.read_output(&mut buf).unwrap();
+    }
+
+    #[test]
+    fn test_buffer_write_input() {
+        let msg = iomsg();
+        let message = Arc::new(msg);
+        let desc_msg = iomsg();
+        let mut buffer = Buffer::new(
+            desc_msg.desc_chain.clone().readable().next().unwrap(),
+            message,
+            Direction::Input,
+        );
+
+        let buf = vec![0; 5];
+        buffer.write_input(&buf).unwrap();
+    }
+
+    #[test]
+    fn test_buffer_fn() {
+        let data_descriptor = Descriptor::new(0, 0, 0, 0);
+        let msg = iomsg();
+        let message = Arc::new(msg);
+        let direction = Direction::Input;
+        let buffer = Buffer::new(data_descriptor, message, direction);
+
+        assert_eq!(buffer.desc_len() as usize, buffer.pos);
+        assert_eq!(buffer.desc_len(), 0);
+        assert_eq!(buffer.direction, Direction::Input);
+
+        // Test debug format representation for Buffer
+        let mut debug_output = String::new();
+
+        // Format the Debug representation into the String.
+        write!(&mut debug_output, "{:?}", buffer).unwrap();
+
+        let expected_debug = format!(
+            "Buffer {{ pos: {}, direction: {:?}, message: {:?} }}",
+            buffer.pos,
+            buffer.direction,
+            Arc::as_ptr(&buffer.message)
+        );
+
+        assert_eq!(debug_output, expected_debug);
     }
 }

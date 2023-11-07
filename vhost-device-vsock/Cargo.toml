@@ -21,8 +21,8 @@ log = "0.4"
 thiserror = "1.0"
 vhost = { version = "0.8", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.10"
-virtio-bindings = "0.2.1"
-virtio-queue = "0.9"
+virtio-bindings = "0.2.2"
+virtio-queue = "0.10"
 virtio-vsock = "0.3.1"
 vm-memory = "0.12"
 vmm-sys-util = "0.11"
@@ -31,5 +31,5 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 
 [dev-dependencies]
-virtio-queue = { version = "0.9", features = ["test-utils"] }
-tempfile = "3.6.0"
+virtio-queue = { version = "0.10", features = ["test-utils"] }
+tempfile = "3.8.1"

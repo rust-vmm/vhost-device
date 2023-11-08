@@ -16,12 +16,12 @@ itertools = "0.11"
 log = "0.4"
 thiserror = "1.0"
 vhost = { version = "0.8", features = ["vhost-user-slave"] }
-vhost-user-backend = "0.10"
+vhost-user-backend = "0.11"
 virtio-bindings = "0.2"
-virtio-queue = "0.9"
-vm-memory = "0.12"
+virtio-queue = "0.10"
+vm-memory = "0.13"
 vmm-sys-util = "0.11"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.9", features = ["test-utils"] }
+virtio-queue = { version = "0.10", features = ["test-utils"] }

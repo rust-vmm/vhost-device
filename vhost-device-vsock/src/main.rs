@@ -621,7 +621,11 @@ mod tests {
             "CouldNotCreateBackend(CidAlreadyInUse)"
         );
 
-        test_dir.close().unwrap();
+        // In slow systems it can happen that one thread is exiting due to
+        // an error and another thread is creating files (Unix socket),
+        // so sometimes this call fails because after deleting all the
+        // files it finds more. So let's discard eventual errors.
+        let _ = test_dir.close();
     }
 
     #[test]

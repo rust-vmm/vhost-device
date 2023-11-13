@@ -381,8 +381,10 @@ mod tests {
 
     use super::*;
     use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
+    use std::collections::VecDeque;
     use std::io::Result as IoResult;
     use std::ops::Deref;
+    use std::sync::{Arc, Mutex};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, DescriptorChain, Queue, QueueOwnedT};
     use vm_memory::{
@@ -481,21 +483,49 @@ mod tests {
     }
 
     struct VsockDummySocket {
-        data: Vec<u8>,
+        read_buffer: Arc<Mutex<VecDeque<u8>>>,
+        write_buffer: Arc<Mutex<VecDeque<u8>>>,
     }
 
     impl VsockDummySocket {
-        fn new() -> Self {
-            Self { data: Vec::new() }
+        // Creates an open-ended socket.
+        //
+        // While one can use it to test reading and writing from it, reads will
+        // always be empty and writes will never be readable by anyone else.
+        fn new() -> VsockDummySocket {
+            let read_buffer = Arc::new(Mutex::new(VecDeque::new()));
+            let write_buffer = Arc::new(Mutex::new(VecDeque::new()));
+
+            VsockDummySocket {
+                read_buffer,
+                write_buffer,
+            }
+        }
+
+        // Creates a socket pair
+        //
+        // The read buffer of one socket is the write socket of the other (and vice versa).
+        // One socket can be passed to the backend while the other can be used to fake writes
+        // or to verify data that the backend wrote.
+        fn pair() -> (VsockDummySocket, VsockDummySocket) {
+            let buf1 = Arc::new(Mutex::new(VecDeque::new()));
+            let buf2 = Arc::new(Mutex::new(VecDeque::new()));
+            (
+                VsockDummySocket {
+                    read_buffer: buf1.clone(),
+                    write_buffer: buf2.clone(),
+                },
+                VsockDummySocket {
+                    read_buffer: buf2.clone(),
+                    write_buffer: buf1.clone(),
+                },
+            )
         }
     }
 
     impl Write for VsockDummySocket {
         fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
-            self.data.clear();
-            self.data.extend_from_slice(buf);
-
-            Ok(buf.len())
+            self.write_buffer.lock().unwrap().write(buf)
         }
         fn flush(&mut self) -> IoResult<()> {
             Ok(())
@@ -504,8 +534,7 @@ mod tests {
 
     impl Read for VsockDummySocket {
         fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-            buf[..self.data.len()].copy_from_slice(&self.data);
-            Ok(self.data.len())
+            self.read_buffer.lock().unwrap().read(buf)
         }
     }
 
@@ -599,7 +628,6 @@ mod tests {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 10);
 
-        // new locally inititated connection
         let dummy_file = VsockDummySocket::new();
         let conn_local = VsockConnection::new_local_init(
             dummy_file,
@@ -635,10 +663,9 @@ mod tests {
         // parameters for packet head construction
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
 
-        // new locally inititated connection
-        let dummy_file = VsockDummySocket::new();
+        let (mut host_socket, backend_socket) = VsockDummySocket::pair();
         let mut conn_local = VsockConnection::new_local_init(
-            dummy_file,
+            backend_socket,
             VSOCK_HOST_CID,
             5000,
             3,
@@ -694,7 +721,7 @@ mod tests {
 
         // VSOCK_OP_RW: finite data read from stream/file
         let payload = b"hello";
-        conn_local.stream.write_all(payload).unwrap();
+        host_socket.write_all(payload).unwrap();
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_zero_read = conn_local.recv_pkt(&mut pkt);
         assert!(op_zero_read.is_ok());
@@ -734,9 +761,9 @@ mod tests {
         let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
 
         // new locally inititated connection
-        let dummy_file = VsockDummySocket::new();
+        let (mut host_socket, backend_socket) = VsockDummySocket::pair();
         let mut conn_local = VsockConnection::new_local_init(
-            dummy_file,
+            backend_socket,
             VSOCK_HOST_CID,
             5000,
             3,
@@ -763,12 +790,13 @@ mod tests {
 
         // VSOCK_OP_RESPONSE
         pkt.set_op(VSOCK_OP_RESPONSE);
+        assert_eq!(conn_local.peer_port, 5001);
         let peer_response = conn_local.send_pkt(&pkt);
         assert!(peer_response.is_ok());
         assert!(conn_local.connect);
         let mut resp_buf = vec![0; 8];
-        conn_local.stream.read_exact(&mut resp_buf).unwrap();
-        assert_eq!(resp_buf, b"OK 5001\n");
+        host_socket.read_exact(&mut resp_buf).unwrap();
+        assert_eq!(&resp_buf, b"OK 5001\n");
 
         // VSOCK_OP_RW
         pkt.set_op(VSOCK_OP_RW);
@@ -777,7 +805,7 @@ mod tests {
         let rw_response = conn_local.send_pkt(&pkt);
         assert!(rw_response.is_ok());
         let mut resp_buf = vec![0; 5];
-        conn_local.stream.read_exact(&mut resp_buf).unwrap();
+        host_socket.read_exact(&mut resp_buf).unwrap();
         assert_eq!(resp_buf, b"hello");
 
         // VSOCK_OP_CREDIT_REQUEST

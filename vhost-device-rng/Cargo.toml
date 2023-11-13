@@ -23,7 +23,7 @@ tempfile = "3.5"
 thiserror = "1.0"
 vhost = { version = "0.8", features = ["vhost-user-slave"] }
 vhost-user-backend = "0.10"
-virtio-bindings = "0.2.1"
+virtio-bindings = "0.2.2"
 virtio-queue = "0.9"
 vm-memory = "0.12"
 vmm-sys-util = "0.11"

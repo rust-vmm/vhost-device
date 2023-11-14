@@ -17,8 +17,8 @@ alsa-backend = ["dep:alsa"]
 pw-backend = ["pw"]
 
 [dependencies]
-alsa = { version = "0.7", optional = true }
-clap = { version = "4.1", features = ["derive"] }
+alsa = { version = "0.8", optional = true }
+clap = { version = "4.4", features = ["derive"] }
 env_logger = "0.10"
 log = "0.4"
 pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "5fe090b3ac8f6fed756c4871ac18f26edda3ac89", optional = true }
@@ -32,6 +32,6 @@ vmm-sys-util = "0.11"
 
 [dev-dependencies]
 rstest = "0.18.2"
-tempfile = "3.5"
+tempfile = "3.8"
 virtio-queue = { version = "0.10", features = ["test-utils"] }
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic"] }

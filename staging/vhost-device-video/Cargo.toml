@@ -37,6 +37,6 @@ v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "110fd77", optional = 
 [dev-dependencies]
 assert_matches = "1.5"
 rstest = "0.18.2"
-tempfile = "3.8.0"
+tempfile = "3.8.1"
 virtio-queue = { version = "0.10", features = ["test-utils"] }
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic"] }

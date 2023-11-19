@@ -146,7 +146,7 @@ impl PCMState {
 
 impl std::fmt::Display for PCMState {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use PCMState::*;
+        use PCMState::{Prepare, Release, SetParameters, Start, Stop};
         match *self {
             SetParameters => {
                 write!(fmt, "VIRTIO_SND_R_PCM_SET_PARAMS")

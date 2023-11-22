@@ -118,6 +118,10 @@ pub enum Error {
     SoundReqMissingData,
     #[error("Audio backend not supported")]
     AudioBackendNotSupported,
+    #[error("Audio backend unexpected error: {0}")]
+    UnexpectedAudioBackendError(String),
+    #[error("Audio backend configuration not supported")]
+    UnexpectedAudioBackendConfiguration,
     #[error("No memory configured")]
     NoMemoryConfigured,
     #[error("Invalid virtio_snd_hdr size, expected: {0}, found: {1}")]

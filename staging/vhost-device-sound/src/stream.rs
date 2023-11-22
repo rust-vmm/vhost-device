@@ -11,6 +11,8 @@ use crate::{virtio_sound::*, Direction, IOMessage, SUPPORTED_FORMATS, SUPPORTED_
 /// Stream errors.
 #[derive(Debug, ThisError, PartialEq, Eq)]
 pub enum Error {
+    #[error("Guest driver request {0} in an invalid stream state {1}")]
+    InvalidState(&'static str, PCMState),
     #[error("Guest driver request an invalid stream state transition from {0} to {1}.")]
     InvalidStateTransition(PCMState, PCMState),
     #[error("Guest requested an invalid stream id: {0}")]

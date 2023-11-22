@@ -15,14 +15,12 @@ use alsa::{
     pcm::{Access, Format, HwParams, State, PCM},
     PollDescriptors, ValueOr,
 };
-use virtio_queue::Descriptor;
-use vm_memory::Bytes;
 
 use super::AudioBackend;
 use crate::{
     device::ControlMessage,
     stream::{PCMState, Stream},
-    virtio_sound::{self, VirtioSndPcmSetParams, VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP},
+    virtio_sound::{self, VirtioSndPcmSetParams, VIRTIO_SND_S_BAD_MSG},
     Direction, Error, Result as CrateResult,
 };
 
@@ -650,35 +648,22 @@ impl AudioBackend for AlsaBackend {
         Ok(())
     }
 
-    fn set_parameters(&self, stream_id: u32, mut msg: ControlMessage) -> CrateResult<()> {
+    fn set_parameters(&self, stream_id: u32, request: VirtioSndPcmSetParams) -> CrateResult<()> {
         if stream_id >= self.streams.read().unwrap().len() as u32 {
             log::error!(
                 "Received SetParameters action for stream id {} but there are only {} PCM streams.",
                 stream_id,
                 self.streams.read().unwrap().len() as u32
             );
-            msg.code = VIRTIO_SND_S_BAD_MSG;
-            drop(msg);
             return Err(Error::StreamWithIdNotFound(stream_id));
         }
-        let descriptors: Vec<Descriptor> = msg.desc_chain.clone().collect();
-        let desc_request = &descriptors[0];
-        let request = msg
-            .desc_chain
-            .memory()
-            .read_obj::<VirtioSndPcmSetParams>(desc_request.addr())
-            .unwrap();
         {
             let mut streams = self.streams.write().unwrap();
             let st = &mut streams[stream_id as usize];
             if let Err(err) = st.state.set_parameters() {
                 log::error!("Stream {} set_parameters {}", stream_id, err);
-                msg.code = VIRTIO_SND_S_BAD_MSG;
-                drop(msg);
                 return Err(Error::Stream(err));
             } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
-                msg.code = VIRTIO_SND_S_NOT_SUPP;
-                drop(msg);
                 return Err(Error::UnexpectedAudioBackendConfiguration);
             } else {
                 st.params.buffer_bytes = request.buffer_bytes;
@@ -688,8 +673,6 @@ impl AudioBackend for AlsaBackend {
                 st.params.format = request.format;
                 st.params.rate = request.rate;
             }
-            // Manually drop msg for faster response: the kernel has a timeout.
-            drop(msg);
         }
         update_pcm(
             &self.pcms[stream_id as usize],

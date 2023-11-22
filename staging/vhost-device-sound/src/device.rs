@@ -322,21 +322,8 @@ impl VhostUserSoundThread {
                         audio_backend
                             .read()
                             .unwrap()
-                            .set_parameters(
-                                stream_id,
-                                ControlMessage {
-                                    kind: code,
-                                    code: VIRTIO_SND_S_OK,
-                                    desc_chain,
-                                    descriptor: desc_hdr,
-                                    vring: vring.clone(),
-                                },
-                            )
+                            .set_parameters(stream_id, request)
                             .unwrap();
-
-                        // PcmSetParams needs check valid formats/rates; the audio backend will
-                        // reply when it drops the ControlMessage.
-                        continue;
                     }
                 }
                 ControlMessageKind::PcmPrepare => {

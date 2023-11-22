@@ -36,6 +36,7 @@ use vm_memory::Bytes;
 use super::AudioBackend;
 use crate::{
     device::ControlMessage,
+    stream::PCMState,
     virtio_sound::{
         VirtioSndPcmSetParams, VIRTIO_SND_PCM_FMT_A_LAW, VIRTIO_SND_PCM_FMT_FLOAT,
         VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW, VIRTIO_SND_PCM_FMT_S16,
@@ -130,12 +131,28 @@ impl PwBackend {
 }
 
 impl AudioBackend for PwBackend {
-    fn write(&self, _stream_id: u32) -> Result<()> {
+    fn write(&self, stream_id: u32) -> Result<()> {
+        if !matches!(
+            self.stream_params.read().unwrap()[stream_id as usize].state,
+            PCMState::Start | PCMState::Prepare
+        ) {
+            return Err(Error::Stream(crate::stream::Error::InvalidState(
+                self.stream_params.read().unwrap()[stream_id as usize].state,
+            )));
+        }
         Ok(())
     }
 
-    fn read(&self, _stream_id: u32) -> Result<()> {
-        log::trace!("PipewireBackend read stream_id {}", _stream_id);
+    fn read(&self, stream_id: u32) -> Result<()> {
+        log::trace!("PipewireBackend read stream_id {}", stream_id);
+        if !matches!(
+            self.stream_params.read().unwrap()[stream_id as usize].state,
+            PCMState::Start | PCMState::Prepare
+        ) {
+            return Err(Error::Stream(crate::stream::Error::InvalidState(
+                self.stream_params.read().unwrap()[stream_id as usize].state,
+            )));
+        }
         Ok(())
     }
 
@@ -154,8 +171,12 @@ impl AudioBackend for PwBackend {
                 if let Err(err) = st.state.set_parameters() {
                     log::error!("Stream {} set_parameters {}", stream_id, err);
                     msg.code = VIRTIO_SND_S_BAD_MSG;
+                    drop(msg);
+                    return Err(Error::Stream(err));
                 } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
                     msg.code = VIRTIO_SND_S_NOT_SUPP;
+                    drop(msg);
+                    return Err(Error::UnexpectedAudioBackendConfiguration);
                 } else {
                     st.params.features = request.features;
                     st.params.buffer_bytes = request.buffer_bytes;
@@ -166,6 +187,8 @@ impl AudioBackend for PwBackend {
                 }
             } else {
                 msg.code = VIRTIO_SND_S_BAD_MSG;
+                drop(msg);
+                return Err(Error::StreamWithIdNotFound(stream_id));
             }
         }
         drop(msg);
@@ -185,6 +208,7 @@ impl AudioBackend for PwBackend {
             .prepare();
         if let Err(err) = prepare_result {
             log::error!("Stream {} prepare {}", stream_id, err);
+            return Err(Error::Stream(err));
         } else {
             let mut stream_hash = self.stream_hash.write().unwrap();
             let mut stream_listener = self.stream_listener.write().unwrap();
@@ -489,7 +513,7 @@ impl AudioBackend for PwBackend {
         if let Err(err) = release_result {
             log::error!("Stream {} release {}", stream_id, err);
             msg.code = VIRTIO_SND_S_BAD_MSG;
-            return Ok(());
+            return Err(Error::Stream(err));
         }
         let lock_guard = self.thread_loop.lock();
         let mut stream_hash = self.stream_hash.write().unwrap();
@@ -520,7 +544,7 @@ impl AudioBackend for PwBackend {
         if let Err(err) = start_result {
             // log the error and continue
             log::error!("Stream {} start {}", stream_id, err);
-            return Ok(());
+            return Err(Error::Stream(err));
         }
         let lock_guard = self.thread_loop.lock();
         let stream_hash = self.stream_hash.read().unwrap();
@@ -544,7 +568,7 @@ impl AudioBackend for PwBackend {
             .stop();
         if let Err(err) = stop_result {
             log::error!("Stream {} stop {}", stream_id, err);
-            return Ok(());
+            return Err(Error::Stream(err));
         }
         let lock_guard = self.thread_loop.lock();
         let stream_hash = self.stream_hash.read().unwrap();

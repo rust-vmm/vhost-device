@@ -23,7 +23,7 @@ use crate::{
     device::ControlMessage,
     stream::{PCMState, Stream},
     virtio_sound::{self, VirtioSndPcmSetParams, VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP},
-    Direction, Result as CrateResult,
+    Direction, Error, Result as CrateResult,
 };
 
 impl From<Direction> for alsa::Direction {
@@ -536,12 +536,17 @@ impl AudioBackend for AlsaBackend {
                 stream_id,
                 self.streams.read().unwrap().len()
             );
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
         if matches!(
-            self.streams.write().unwrap()[stream_id as usize].state,
+            self.streams.read().unwrap()[stream_id as usize].state,
             PCMState::Start | PCMState::Prepare
         ) {
             self.senders[stream_id as usize].send(true).unwrap();
+        } else {
+            return Err(Error::Stream(crate::stream::Error::InvalidState(
+                self.streams.read().unwrap()[stream_id as usize].state,
+            )));
         }
         Ok(())
     }
@@ -553,12 +558,17 @@ impl AudioBackend for AlsaBackend {
                 stream_id,
                 self.streams.read().unwrap().len()
             );
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
         if matches!(
-            self.streams.write().unwrap()[stream_id as usize].state,
+            self.streams.read().unwrap()[stream_id as usize].state,
             PCMState::Start | PCMState::Prepare
         ) {
             self.senders[stream_id as usize].send(true).unwrap();
+        } else {
+            return Err(Error::Stream(crate::stream::Error::InvalidState(
+                self.streams.read().unwrap()[stream_id as usize].state,
+            )));
         }
         Ok(())
     }
@@ -570,12 +580,13 @@ impl AudioBackend for AlsaBackend {
                 stream_id,
                 self.streams.read().unwrap().len()
             );
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
         if let Err(err) = self.streams.write().unwrap()[stream_id as usize]
             .state
             .start()
         {
-            log::error!("Stream {}: {}", stream_id, err);
+            return Err(Error::Stream(err));
         }
         let pcm = &self.pcms[stream_id as usize];
         let lck = pcm.lock().unwrap();
@@ -587,6 +598,7 @@ impl AudioBackend for AlsaBackend {
                     stream_id,
                     err
                 );
+                return Err(Error::UnexpectedAudioBackendError);
             }
         }
         self.senders[stream_id as usize].send(true).unwrap();
@@ -600,12 +612,14 @@ impl AudioBackend for AlsaBackend {
                 stream_id,
                 self.streams.read().unwrap().len() as u32
             );
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
         if let Err(err) = self.streams.write().unwrap()[stream_id as usize]
             .state
             .prepare()
         {
             log::error!("Stream {}: {}", stream_id, err);
+            return Err(Error::Stream(err));
         }
         let pcm = &self.pcms[stream_id as usize];
         let lck = pcm.lock().unwrap();
@@ -617,6 +631,7 @@ impl AudioBackend for AlsaBackend {
                     stream_id,
                     err
                 );
+                return Err(Error::UnexpectedAudioBackendError);
             }
         }
         Ok(())
@@ -643,6 +658,8 @@ impl AudioBackend for AlsaBackend {
                 self.streams.read().unwrap().len() as u32
             );
             msg.code = VIRTIO_SND_S_BAD_MSG;
+            drop(msg);
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
         let descriptors: Vec<Descriptor> = msg.desc_chain.clone().collect();
         let desc_request = &descriptors[0];
@@ -657,8 +674,12 @@ impl AudioBackend for AlsaBackend {
             if let Err(err) = st.state.set_parameters() {
                 log::error!("Stream {} set_parameters {}", stream_id, err);
                 msg.code = VIRTIO_SND_S_BAD_MSG;
+                drop(msg);
+                return Err(Error::Stream(err));
             } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
                 msg.code = VIRTIO_SND_S_NOT_SUPP;
+                drop(msg);
+                return Err(Error::UnexpectedAudioBackendConfiguration);
             } else {
                 st.params.buffer_bytes = request.buffer_bytes;
                 st.params.period_bytes = request.period_bytes;
@@ -687,14 +708,18 @@ impl AudioBackend for AlsaBackend {
                 self.streams.read().unwrap().len() as u32
             );
             msg.code = VIRTIO_SND_S_BAD_MSG;
+            drop(msg);
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
-        // Stop worker thread
-        self.senders[stream_id as usize].send(false).unwrap();
         let mut streams = self.streams.write().unwrap();
         if let Err(err) = streams[stream_id as usize].state.release() {
             log::error!("Stream {}: {}", stream_id, err);
             msg.code = VIRTIO_SND_S_BAD_MSG;
+            drop(msg);
+            return Err(Error::Stream(err));
         }
+        // Stop worker thread
+        self.senders[stream_id as usize].send(false).unwrap();
         // Drop pending stream buffers to complete pending I/O messages
         //
         // This will release buffers even if state transition is invalid. If it is

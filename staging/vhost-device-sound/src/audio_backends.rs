@@ -15,14 +15,14 @@ use self::alsa::AlsaBackend;
 use self::null::NullBackend;
 #[cfg(feature = "pw-backend")]
 use self::pipewire::PwBackend;
-use crate::{stream::Stream, BackendType, ControlMessage, Result};
+use crate::{stream::Stream, BackendType, ControlMessage, Result, VirtioSndPcmSetParams};
 
 pub trait AudioBackend {
     fn write(&self, stream_id: u32) -> Result<()>;
 
     fn read(&self, stream_id: u32) -> Result<()>;
 
-    fn set_parameters(&self, _stream_id: u32, _: ControlMessage) -> Result<()> {
+    fn set_parameters(&self, _stream_id: u32, _: VirtioSndPcmSetParams) -> Result<()> {
         Ok(())
     }
 

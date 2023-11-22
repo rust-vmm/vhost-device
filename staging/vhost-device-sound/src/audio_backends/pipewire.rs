@@ -30,8 +30,6 @@ use spa::{
         SPA_AUDIO_FORMAT_UNKNOWN,
     },
 };
-use virtio_queue::Descriptor;
-use vm_memory::Bytes;
 
 use super::AudioBackend;
 use crate::{
@@ -49,7 +47,6 @@ use crate::{
         VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100, VIRTIO_SND_PCM_RATE_48000,
         VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000, VIRTIO_SND_PCM_RATE_8000,
         VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000, VIRTIO_SND_S_BAD_MSG,
-        VIRTIO_SND_S_NOT_SUPP,
     },
     ControlMessage, Direction, Error, Result, Stream,
 };
@@ -163,42 +160,26 @@ impl AudioBackend for PwBackend {
         Ok(())
     }
 
-    fn set_parameters(&self, stream_id: u32, mut msg: ControlMessage) -> Result<()> {
-        let descriptors: Vec<Descriptor> = msg.desc_chain.clone().collect();
-        let desc_request = &descriptors[0];
-        let request = msg
-            .desc_chain
-            .memory()
-            .read_obj::<VirtioSndPcmSetParams>(desc_request.addr())
-            .unwrap();
-        {
-            let stream_clone = self.stream_params.clone();
-            let mut stream_params = stream_clone.write().unwrap();
-            if let Some(st) = stream_params.get_mut(stream_id as usize) {
-                if let Err(err) = st.state.set_parameters() {
-                    log::error!("Stream {} set_parameters {}", stream_id, err);
-                    msg.code = VIRTIO_SND_S_BAD_MSG;
-                    drop(msg);
-                    return Err(Error::Stream(err));
-                } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
-                    msg.code = VIRTIO_SND_S_NOT_SUPP;
-                    drop(msg);
-                    return Err(Error::UnexpectedAudioBackendConfiguration);
-                } else {
-                    st.params.features = request.features;
-                    st.params.buffer_bytes = request.buffer_bytes;
-                    st.params.period_bytes = request.period_bytes;
-                    st.params.channels = request.channels;
-                    st.params.format = request.format;
-                    st.params.rate = request.rate;
-                }
+    fn set_parameters(&self, stream_id: u32, request: VirtioSndPcmSetParams) -> Result<()> {
+        let stream_clone = self.stream_params.clone();
+        let mut stream_params = stream_clone.write().unwrap();
+        if let Some(st) = stream_params.get_mut(stream_id as usize) {
+            if let Err(err) = st.state.set_parameters() {
+                log::error!("Stream {} set_parameters {}", stream_id, err);
+                return Err(Error::Stream(err));
+            } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
+                return Err(Error::UnexpectedAudioBackendConfiguration);
             } else {
-                msg.code = VIRTIO_SND_S_BAD_MSG;
-                drop(msg);
-                return Err(Error::StreamWithIdNotFound(stream_id));
+                st.params.features = request.features;
+                st.params.buffer_bytes = request.buffer_bytes;
+                st.params.period_bytes = request.period_bytes;
+                st.params.channels = request.channels;
+                st.params.format = request.format;
+                st.params.rate = request.rate;
             }
+        } else {
+            return Err(Error::StreamWithIdNotFound(stream_id));
         }
-        drop(msg);
 
         Ok(())
     }
@@ -598,7 +579,8 @@ mod tests {
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
     use vm_memory::{
-        Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+        Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+        GuestMemoryMmap,
     };
 
     use super::{test_utils::PipewireTestHarness, *};
@@ -684,8 +666,14 @@ mod tests {
         let pw_backend = PwBackend::new(stream_params);
         assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
         assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
-        let msg = ctrlmsg();
-        pw_backend.set_parameters(0, msg).unwrap();
+        // set up minimal configuration for test
+        let request = VirtioSndPcmSetParams {
+            format: VIRTIO_SND_PCM_FMT_S16,
+            rate: VIRTIO_SND_PCM_RATE_11025,
+            channels: 1,
+            ..Default::default()
+        };
+        pw_backend.set_parameters(0, request).unwrap();
         pw_backend.prepare(0).unwrap();
         pw_backend.start(0).unwrap();
         pw_backend.write(0).unwrap();
@@ -706,15 +694,12 @@ mod tests {
 
         let pw_backend = PwBackend::new(stream_params);
 
-        let msg = ctrlmsg();
-
-        _ = pw_backend.set_parameters(0, msg.clone());
-        let resp: VirtioSoundHeader = msg
-            .desc_chain
-            .memory()
-            .read_obj(msg.descriptor.addr())
-            .unwrap();
-        assert_eq!(resp.code, VIRTIO_SND_S_BAD_MSG);
+        let request = VirtioSndPcmSetParams::default();
+        let res = pw_backend.set_parameters(0, request);
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            Error::StreamWithIdNotFound(0).to_string()
+        );
 
         for res in [
             pw_backend.prepare(0),

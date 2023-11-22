@@ -318,25 +318,23 @@ impl VhostUserSoundThread {
                     if stream_id as usize >= self.streams_no {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
-                    } else {
-                        audio_backend
-                            .read()
-                            .unwrap()
-                            .set_parameters(
-                                stream_id,
-                                ControlMessage {
-                                    kind: code,
-                                    code: VIRTIO_SND_S_OK,
-                                    desc_chain,
-                                    descriptor: desc_hdr,
-                                    vring: vring.clone(),
-                                },
-                            )
-                            .unwrap();
-
-                        // PcmSetParams needs check valid formats/rates; the audio backend will
-                        // reply when it drops the ControlMessage.
-                        continue;
+                    } else if let Err(err) = audio_backend
+                        .read()
+                        .unwrap()
+                        .set_parameters(stream_id, request)
+                    {
+                        match err {
+                            Error::Stream(_) | Error::StreamWithIdNotFound(_) => {
+                                resp.code = VIRTIO_SND_S_BAD_MSG.into()
+                            }
+                            Error::UnexpectedAudioBackendConfiguration => {
+                                resp.code = VIRTIO_SND_S_NOT_SUPP.into()
+                            }
+                            _ => {
+                                log::error!("{}", err);
+                                resp.code = VIRTIO_SND_S_IO_ERR.into()
+                            }
+                        }
                     }
                 }
                 ControlMessageKind::PcmPrepare => {

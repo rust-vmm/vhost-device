@@ -37,19 +37,12 @@ impl From<Direction> for alsa::Direction {
 
 type AResult<T> = std::result::Result<T, alsa::Error>;
 
-#[derive(Clone, Debug)]
+// TODO: to implement Debug
+#[derive(Clone)]
 pub struct AlsaBackend {
-    sender: Arc<Mutex<Sender<AlsaAction>>>,
+    senders: Vec<Sender<bool>>,
     streams: Arc<RwLock<Vec<Stream>>>,
-}
-
-#[derive(Debug)]
-enum AlsaAction {
-    SetParameters(usize, ControlMessage),
-    Prepare(usize),
-    Release(usize, ControlMessage),
-    Start(usize),
-    DoWork(usize),
+    pcms: Vec<Arc<Mutex<PCM>>>,
 }
 
 fn update_pcm(
@@ -493,245 +486,140 @@ fn alsa_worker(
 
 impl AlsaBackend {
     pub fn new(streams: Arc<RwLock<Vec<Stream>>>) -> Self {
-        let (sender, receiver) = channel();
-        let sender = Arc::new(Mutex::new(sender));
-        let streams2 = Arc::clone(&streams);
+        let streams_no = streams.read().unwrap().len();
 
-        thread::spawn(move || {
-            if let Err(err) = Self::run(streams2, receiver) {
-                log::error!("Main thread exited with error: {}", err);
-            }
-        });
+        let mut vec = Vec::with_capacity(streams_no);
+        let mut senders = Vec::with_capacity(streams_no);
 
-        Self { sender, streams }
-    }
+        for i in 0..streams_no {
+            let (sender, receiver) = channel();
+            // Initialize with a dummy value, which will be updated every time we call
+            // `update_pcm`.
+            let pcm = Arc::new(Mutex::new(
+                PCM::new("default", Direction::Output.into(), false).unwrap(),
+            ));
 
-    #[allow(clippy::cognitive_complexity)]
-    fn run(
-        streams: Arc<RwLock<Vec<Stream>>>,
-        receiver: Receiver<AlsaAction>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let streams_no: usize;
+            let mtx = Arc::clone(&pcm);
+            let streams = Arc::clone(&streams);
+            // create worker
+            thread::spawn(move || {
+                while let Err(err) = alsa_worker(mtx.clone(), streams.clone(), &receiver, i) {
+                    log::error!(
+                        "Worker thread exited with error: {}, sleeping for 500ms",
+                        err
+                    );
+                    sleep(Duration::from_millis(500));
+                }
+            });
 
-        let (mut pcms, senders) = {
-            streams_no = streams.read().unwrap().len();
-            let mut vec = Vec::with_capacity(streams_no);
-            let mut senders = Vec::with_capacity(streams_no);
-            for i in 0..streams_no {
-                let (sender, receiver) = channel();
-
-                // Initialize with a dummy value, which will be updated every time we call
-                // `update_pcm`.
-                let pcm = Arc::new(Mutex::new(PCM::new(
-                    "default",
-                    Direction::Output.into(),
-                    false,
-                )?));
-
-                let mtx = Arc::clone(&pcm);
-                let streams = Arc::clone(&streams);
-                thread::spawn(move || {
-                    // TODO: exponential backoff? send fatal error to daemon?
-                    while let Err(err) = alsa_worker(mtx.clone(), streams.clone(), &receiver, i) {
-                        log::error!(
-                            "Worker thread exited with error: {}, sleeping for 500ms",
-                            err
-                        );
-                        sleep(Duration::from_millis(500));
-                    }
-                });
-
-                senders.push(sender);
-                vec.push(pcm);
-            }
-            (vec, senders)
-        };
-        for (i, pcm) in pcms.iter_mut().enumerate() {
-            update_pcm(pcm, i, &streams)?;
+            vec.push(pcm);
+            senders.push(sender);
         }
 
-        while let Ok(action) = receiver.recv() {
-            match action {
-                AlsaAction::DoWork(stream_id) => {
-                    if stream_id >= streams_no {
-                        log::error!(
-                            "Received DoWork action for stream id {} but there are only {} PCM \
-                             streams.",
-                            stream_id,
-                            pcms.len()
-                        );
-                        continue;
-                    };
-                    if matches!(
-                        streams.write().unwrap()[stream_id].state,
-                        PCMState::Start | PCMState::Prepare
-                    ) {
-                        senders[stream_id].send(true).unwrap();
-                    }
-                }
-                AlsaAction::Start(stream_id) => {
-                    if stream_id >= streams_no {
-                        log::error!(
-                            "Received Start action for stream id {} but there are only {} PCM \
-                             streams.",
-                            stream_id,
-                            pcms.len()
-                        );
-                        continue;
-                    };
-                    if let Err(err) = streams.write().unwrap()[stream_id].state.start() {
-                        log::error!("Stream {}: {}", stream_id, err);
-                        continue;
-                    }
-                    let pcm = &pcms[stream_id];
-                    let lck = pcm.lock().unwrap();
-                    if !matches!(lck.state(), State::Running) {
-                        // Fail gracefully if Start does not succeed.
-                        if let Err(err) = lck.start() {
-                            log::error!(
-                                "Could not start stream {}; ALSA returned: {}",
-                                stream_id,
-                                err
-                            );
-                        }
-                    }
-                    senders[stream_id].send(true).unwrap();
-                }
-                AlsaAction::Prepare(stream_id) => {
-                    if stream_id >= streams_no {
-                        log::error!(
-                            "Received Prepare action for stream id {} but there are only {} PCM \
-                             streams.",
-                            stream_id,
-                            pcms.len()
-                        );
-                        continue;
-                    };
-                    if let Err(err) = streams.write().unwrap()[stream_id].state.prepare() {
-                        log::error!("Stream {}: {}", stream_id, err);
-                        continue;
-                    }
-                    let pcm = &pcms[stream_id];
-                    let lck = pcm.lock().unwrap();
-                    if !matches!(lck.state(), State::Running) {
-                        // Fail gracefully if Prepare does not succeed.
-                        if let Err(err) = lck.prepare() {
-                            log::error!(
-                                "Could not prepare stream {}; ALSA returned: {}",
-                                stream_id,
-                                err
-                            );
-                        }
-                    }
-                }
-                AlsaAction::Release(stream_id, mut msg) => {
-                    if stream_id >= streams_no {
-                        log::error!(
-                            "Received Release action for stream id {} but there are only {} PCM \
-                             streams.",
-                            stream_id,
-                            pcms.len()
-                        );
-                        msg.code = VIRTIO_SND_S_BAD_MSG;
-                        continue;
-                    };
-                    // Stop worker thread
-                    senders[stream_id].send(false).unwrap();
-                    let mut streams = streams.write().unwrap();
-                    if let Err(err) = streams[stream_id].state.release() {
-                        log::error!("Stream {}: {}", stream_id, err);
-                        msg.code = VIRTIO_SND_S_BAD_MSG;
-                    }
-                    // Drop pending stream buffers to complete pending I/O messages
-                    //
-                    // This will release buffers even if state transition is invalid. If it is
-                    // invalid, we won't be in a valid device state anyway so better to get rid of
-                    // them and free the virt queue.
-                    std::mem::take(&mut streams[stream_id].buffers);
-                }
-                AlsaAction::SetParameters(stream_id, mut msg) => {
-                    if stream_id >= streams_no {
-                        log::error!(
-                            "Received SetParameters action for stream id {} but there are only {} \
-                             PCM streams.",
-                            stream_id,
-                            pcms.len()
-                        );
-                        msg.code = VIRTIO_SND_S_BAD_MSG;
-                        continue;
-                    };
-                    let descriptors: Vec<Descriptor> = msg.desc_chain.clone().collect();
-                    let desc_request = &descriptors[0];
-                    let request = msg
-                        .desc_chain
-                        .memory()
-                        .read_obj::<VirtioSndPcmSetParams>(desc_request.addr())
-                        .unwrap();
-                    {
-                        let mut streams = streams.write().unwrap();
-                        let st = &mut streams[stream_id];
-                        if let Err(err) = st.state.set_parameters() {
-                            log::error!("Stream {} set_parameters {}", stream_id, err);
-                            msg.code = VIRTIO_SND_S_BAD_MSG;
-                            continue;
-                        } else if !st.supports_format(request.format)
-                            || !st.supports_rate(request.rate)
-                        {
-                            msg.code = VIRTIO_SND_S_NOT_SUPP;
-                            continue;
-                        } else {
-                            st.params.buffer_bytes = request.buffer_bytes;
-                            st.params.period_bytes = request.period_bytes;
-                            st.params.features = request.features;
-                            st.params.channels = request.channels;
-                            st.params.format = request.format;
-                            st.params.rate = request.rate;
-                        }
-                        // Manually drop msg for faster response: the kernel has a timeout.
-                        drop(msg);
-                    }
-                    update_pcm(&pcms[stream_id], stream_id, &streams)?;
-                }
-            }
+        for (i, pcm) in vec.iter_mut().enumerate() {
+            update_pcm(pcm, i, &streams).unwrap();
         }
 
-        Ok(())
-    }
-}
-
-macro_rules! send_action {
-    ($($fn_name:ident $action:tt),+$(,)?) => {
-        $(
-            fn $fn_name(&self, id: u32) -> CrateResult<()> {
-                self.sender
-                    .lock()
-                    .unwrap()
-                    .send(AlsaAction::$action(id as usize))
-                    .unwrap();
-                Ok(())
-            }
-        )*
-    };
-    ($(ctrl $fn_name:ident $action:tt),+$(,)?) => {
-        $(
-            fn $fn_name(&self, id: u32, msg: ControlMessage) -> CrateResult<()> {
-                self.sender
-                    .lock()
-                    .unwrap()
-                    .send(AlsaAction::$action(id as usize, msg))
-                    .unwrap();
-                Ok(())
-            }
-        )*
+        Self {
+            senders,
+            streams,
+            pcms: vec,
+        }
     }
 }
 
 impl AudioBackend for AlsaBackend {
-    send_action! {
-        write DoWork,
-        read DoWork,
-        prepare Prepare,
-        start Start,
+    fn read(&self, stream_id: u32) -> CrateResult<()> {
+        if stream_id >= self.streams.read().unwrap().len() as u32 {
+            log::error!(
+                "Received DoWork action for stream id {} but there are only {} PCM streams.",
+                stream_id,
+                self.streams.read().unwrap().len()
+            );
+        }
+        if matches!(
+            self.streams.write().unwrap()[stream_id as usize].state,
+            PCMState::Start | PCMState::Prepare
+        ) {
+            self.senders[stream_id as usize].send(true).unwrap();
+        }
+        Ok(())
+    }
+
+    fn write(&self, stream_id: u32) -> CrateResult<()> {
+        if stream_id >= self.streams.read().unwrap().len() as u32 {
+            log::error!(
+                "Received DoWork action for stream id {} but there are only {} PCM streams.",
+                stream_id,
+                self.streams.read().unwrap().len()
+            );
+        }
+        if matches!(
+            self.streams.write().unwrap()[stream_id as usize].state,
+            PCMState::Start | PCMState::Prepare
+        ) {
+            self.senders[stream_id as usize].send(true).unwrap();
+        }
+        Ok(())
+    }
+
+    fn start(&self, stream_id: u32) -> CrateResult<()> {
+        if stream_id >= self.streams.read().unwrap().len() as u32 {
+            log::error!(
+                "Received Start action for stream id {} but there are only {} PCM streams.",
+                stream_id,
+                self.streams.read().unwrap().len()
+            );
+        }
+        if let Err(err) = self.streams.write().unwrap()[stream_id as usize]
+            .state
+            .start()
+        {
+            log::error!("Stream {}: {}", stream_id, err);
+        }
+        let pcm = &self.pcms[stream_id as usize];
+        let lck = pcm.lock().unwrap();
+        if !matches!(lck.state(), State::Running) {
+            // Fail gracefully if Start does not succeed.
+            if let Err(err) = lck.start() {
+                log::error!(
+                    "Could not start stream {}; ALSA returned: {}",
+                    stream_id,
+                    err
+                );
+            }
+        }
+        self.senders[stream_id as usize].send(true).unwrap();
+        Ok(())
+    }
+
+    fn prepare(&self, stream_id: u32) -> CrateResult<()> {
+        if stream_id >= self.streams.read().unwrap().len() as u32 {
+            log::error!(
+                "Received Prepare action for stream id {} but there are only {} PCM streams.",
+                stream_id,
+                self.streams.read().unwrap().len() as u32
+            );
+        }
+        if let Err(err) = self.streams.write().unwrap()[stream_id as usize]
+            .state
+            .prepare()
+        {
+            log::error!("Stream {}: {}", stream_id, err);
+        }
+        let pcm = &self.pcms[stream_id as usize];
+        let lck = pcm.lock().unwrap();
+        if !matches!(lck.state(), State::Running) {
+            // Fail gracefully if Prepare does not succeed.
+            if let Err(err) = lck.prepare() {
+                log::error!(
+                    "Could not prepare stream {}; ALSA returned: {}",
+                    stream_id,
+                    err
+                );
+            }
+        }
+        Ok(())
     }
 
     fn stop(&self, id: u32) -> CrateResult<()> {
@@ -747,8 +635,72 @@ impl AudioBackend for AlsaBackend {
         Ok(())
     }
 
-    send_action! {
-        ctrl set_parameters SetParameters,
-        ctrl release Release,
+    fn set_parameters(&self, stream_id: u32, mut msg: ControlMessage) -> CrateResult<()> {
+        if stream_id >= self.streams.read().unwrap().len() as u32 {
+            log::error!(
+                "Received SetParameters action for stream id {} but there are only {} PCM streams.",
+                stream_id,
+                self.streams.read().unwrap().len() as u32
+            );
+            msg.code = VIRTIO_SND_S_BAD_MSG;
+        }
+        let descriptors: Vec<Descriptor> = msg.desc_chain.clone().collect();
+        let desc_request = &descriptors[0];
+        let request = msg
+            .desc_chain
+            .memory()
+            .read_obj::<VirtioSndPcmSetParams>(desc_request.addr())
+            .unwrap();
+        {
+            let mut streams = self.streams.write().unwrap();
+            let st = &mut streams[stream_id as usize];
+            if let Err(err) = st.state.set_parameters() {
+                log::error!("Stream {} set_parameters {}", stream_id, err);
+                msg.code = VIRTIO_SND_S_BAD_MSG;
+            } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
+                msg.code = VIRTIO_SND_S_NOT_SUPP;
+            } else {
+                st.params.buffer_bytes = request.buffer_bytes;
+                st.params.period_bytes = request.period_bytes;
+                st.params.features = request.features;
+                st.params.channels = request.channels;
+                st.params.format = request.format;
+                st.params.rate = request.rate;
+            }
+            // Manually drop msg for faster response: the kernel has a timeout.
+            drop(msg);
+        }
+        update_pcm(
+            &self.pcms[stream_id as usize],
+            stream_id as usize,
+            &self.streams,
+        )
+        .unwrap();
+        Ok(())
+    }
+
+    fn release(&self, stream_id: u32, mut msg: ControlMessage) -> CrateResult<()> {
+        if stream_id >= self.streams.read().unwrap().len() as u32 {
+            log::error!(
+                "Received Release action for stream id {} but there are only {} PCM streams.",
+                stream_id,
+                self.streams.read().unwrap().len() as u32
+            );
+            msg.code = VIRTIO_SND_S_BAD_MSG;
+        }
+        // Stop worker thread
+        self.senders[stream_id as usize].send(false).unwrap();
+        let mut streams = self.streams.write().unwrap();
+        if let Err(err) = streams[stream_id as usize].state.release() {
+            log::error!("Stream {}: {}", stream_id, err);
+            msg.code = VIRTIO_SND_S_BAD_MSG;
+        }
+        // Drop pending stream buffers to complete pending I/O messages
+        //
+        // This will release buffers even if state transition is invalid. If it is
+        // invalid, we won't be in a valid device state anyway so better to get rid of
+        // them and free the virt queue.
+        std::mem::take(&mut streams[stream_id as usize].buffers);
+        Ok(())
     }
 }

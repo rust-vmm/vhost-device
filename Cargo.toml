@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "vhost-device-gpio",
     "vhost-device-i2c",
+    "vhost-device-input",
     "vhost-device-rng",
     "vhost-device-scsi",
     "vhost-device-scmi",

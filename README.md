@@ -16,6 +16,7 @@ Here is the list of device backends that we support:
 
 - [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-gpio/README.md)
 - [I2C](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-i2c/README.md)
+- [Input](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-input/README.md)
 - [RNG](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-rng/README.md)
 - [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scmi/README.md)
 - [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)

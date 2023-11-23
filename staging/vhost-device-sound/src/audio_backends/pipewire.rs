@@ -46,9 +46,9 @@ use crate::{
         VIRTIO_SND_PCM_RATE_192000, VIRTIO_SND_PCM_RATE_22050, VIRTIO_SND_PCM_RATE_32000,
         VIRTIO_SND_PCM_RATE_384000, VIRTIO_SND_PCM_RATE_44100, VIRTIO_SND_PCM_RATE_48000,
         VIRTIO_SND_PCM_RATE_5512, VIRTIO_SND_PCM_RATE_64000, VIRTIO_SND_PCM_RATE_8000,
-        VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000, VIRTIO_SND_S_BAD_MSG,
+        VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000,
     },
-    ControlMessage, Direction, Error, Result, Stream,
+    Direction, Error, Result, Stream,
 };
 
 impl From<Direction> for spa::Direction {
@@ -485,22 +485,18 @@ impl AudioBackend for PwBackend {
         Ok(())
     }
 
-    fn release(&self, stream_id: u32, mut msg: ControlMessage) -> Result<()> {
+    fn release(&self, stream_id: u32) -> Result<()> {
         debug!("pipewire backend, release function");
         let release_result = self
             .stream_params
             .write()
             .unwrap()
             .get_mut(stream_id as usize)
-            .ok_or_else(|| {
-                msg.code = VIRTIO_SND_S_BAD_MSG;
-                Error::StreamWithIdNotFound(stream_id)
-            })?
+            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
             .state
             .release();
         if let Err(err) = release_result {
             log::error!("Stream {} release {}", stream_id, err);
-            msg.code = VIRTIO_SND_S_BAD_MSG;
             return Err(Error::Stream(err));
         }
         let lock_guard = self.thread_loop.lock();
@@ -575,86 +571,7 @@ mod test_utils;
 
 #[cfg(test)]
 mod tests {
-    use vhost_user_backend::{VringRwLock, VringT};
-    use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
-    use vm_memory::{
-        Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-        GuestMemoryMmap,
-    };
-
     use super::{test_utils::PipewireTestHarness, *};
-    use crate::{ControlMessageKind, SoundDescriptorChain, VirtioSoundHeader};
-
-    // Prepares a single chain of descriptors for request queue
-    fn prepare_desc_chain<R: ByteValued>(
-        start_addr: GuestAddress,
-        hdr: R,
-        response_len: u32,
-    ) -> SoundDescriptorChain {
-        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(mem, 16);
-        let mut next_addr = vq.desc_table().total_size() + 0x100;
-        let mut index = 0;
-
-        let desc_out = Descriptor::new(
-            next_addr,
-            size_of::<R>() as u32,
-            VRING_DESC_F_NEXT as u16,
-            index + 1,
-        );
-
-        mem.write_obj::<R>(hdr, desc_out.addr()).unwrap();
-        vq.desc_table().store(index, desc_out).unwrap();
-        next_addr += u64::from(desc_out.len());
-        index += 1;
-
-        // In response descriptor
-        let desc_in = Descriptor::new(next_addr, response_len, VRING_DESC_F_WRITE as u16, 0);
-        vq.desc_table().store(index, desc_in).unwrap();
-
-        // Put the descriptor index 0 in the first available ring position.
-        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
-            .unwrap();
-
-        // Set `avail_idx` to 1.
-        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
-            .unwrap();
-
-        // Create descriptor chain from pre-filled memory
-        vq.create_queue::<Queue>()
-            .unwrap()
-            .iter(GuestMemoryAtomic::new(mem.clone()).memory())
-            .unwrap()
-            .next()
-            .unwrap()
-    }
-
-    fn ctrlmsg() -> ControlMessage {
-        // set up minimal configuration for test
-        let hdr = VirtioSndPcmSetParams {
-            format: VIRTIO_SND_PCM_FMT_S16,
-            rate: VIRTIO_SND_PCM_RATE_11025,
-            channels: 1,
-            ..Default::default()
-        };
-        let resp_len: u32 = 1;
-        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
-        let memr = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
-        );
-        let vq = MockSplitQueue::new(mem, 16);
-        let next_addr = vq.desc_table().total_size() + 0x100;
-        let index = 0;
-        let vring = VringRwLock::new(memr, 0x1000).unwrap();
-        ControlMessage {
-            kind: ControlMessageKind::PcmInfo,
-            code: 0,
-            desc_chain: prepare_desc_chain::<VirtioSndPcmSetParams>(GuestAddress(0), hdr, resp_len),
-            descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, index + 1),
-            vring,
-        }
-    }
 
     #[test]
     fn test_pipewire_backend_success() {
@@ -679,9 +596,7 @@ mod tests {
         pw_backend.write(0).unwrap();
         pw_backend.read(0).unwrap();
         pw_backend.stop(0).unwrap();
-        let release_msg = ctrlmsg();
-        pw_backend.release(0, release_msg).unwrap();
-
+        pw_backend.release(0).unwrap();
         let streams = streams.read().unwrap();
         assert_eq!(streams[0].buffers.len(), 0);
     }
@@ -712,13 +627,10 @@ mod tests {
             );
         }
 
-        let msg = ctrlmsg();
-        _ = pw_backend.release(0, msg.clone());
-        let resp: VirtioSoundHeader = msg
-            .desc_chain
-            .memory()
-            .read_obj(msg.descriptor.addr())
-            .unwrap();
-        assert_eq!(resp.code, VIRTIO_SND_S_BAD_MSG);
+        let res = pw_backend.release(0);
+        assert_eq!(
+            res.unwrap_err().to_string(),
+            Error::StreamWithIdNotFound(0).to_string()
+        );
     }
 }

@@ -30,7 +30,7 @@ use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
     stream::{Buffer, Error as StreamError, Stream},
     virtio_sound::*,
-    ControlMessage, ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
+    ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
 };
 
 pub struct VhostUserSoundThread {
@@ -361,25 +361,16 @@ impl VhostUserSoundThread {
                     if stream_id as usize >= self.streams_no {
                         log::error!("{}", Error::from(StreamError::InvalidStreamId(stream_id)));
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
-                    } else {
-                        audio_backend
-                            .write()
-                            .unwrap()
-                            .release(
-                                stream_id,
-                                ControlMessage {
-                                    kind: code,
-                                    code: VIRTIO_SND_S_OK,
-                                    desc_chain,
-                                    descriptor: desc_hdr,
-                                    vring: vring.clone(),
-                                },
-                            )
-                            .unwrap();
-
-                        // PcmRelease needs to flush IO messages; the audio backend will reply when
-                        // it drops the ControlMessage.
-                        continue;
+                    } else if let Err(err) = audio_backend.write().unwrap().release(stream_id) {
+                        match err {
+                            Error::Stream(_) | Error::StreamWithIdNotFound(_) => {
+                                resp.code = VIRTIO_SND_S_BAD_MSG.into()
+                            }
+                            _ => {
+                                log::error!("{}", err);
+                                resp.code = VIRTIO_SND_S_IO_ERR.into()
+                            }
+                        }
                     }
                 }
                 ControlMessageKind::PcmStart => {

@@ -15,7 +15,7 @@ use self::alsa::AlsaBackend;
 use self::null::NullBackend;
 #[cfg(feature = "pw-backend")]
 use self::pipewire::PwBackend;
-use crate::{stream::Stream, BackendType, ControlMessage, Result, VirtioSndPcmSetParams};
+use crate::{stream::Stream, BackendType, Result, VirtioSndPcmSetParams};
 
 pub trait AudioBackend {
     fn write(&self, stream_id: u32) -> Result<()>;
@@ -30,7 +30,7 @@ pub trait AudioBackend {
         Ok(())
     }
 
-    fn release(&self, _stream_id: u32, _: ControlMessage) -> Result<()> {
+    fn release(&self, _stream_id: u32) -> Result<()> {
         Ok(())
     }
 

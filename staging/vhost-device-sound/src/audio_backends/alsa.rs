@@ -18,9 +18,8 @@ use alsa::{
 
 use super::AudioBackend;
 use crate::{
-    device::ControlMessage,
     stream::{PCMState, Stream},
-    virtio_sound::{self, VirtioSndPcmSetParams, VIRTIO_SND_S_BAD_MSG},
+    virtio_sound::{self, VirtioSndPcmSetParams},
     Direction, Error, Result as CrateResult,
 };
 
@@ -683,22 +682,18 @@ impl AudioBackend for AlsaBackend {
         Ok(())
     }
 
-    fn release(&self, stream_id: u32, mut msg: ControlMessage) -> CrateResult<()> {
+    fn release(&self, stream_id: u32) -> CrateResult<()> {
         if stream_id >= self.streams.read().unwrap().len() as u32 {
             log::error!(
                 "Received Release action for stream id {} but there are only {} PCM streams.",
                 stream_id,
                 self.streams.read().unwrap().len() as u32
             );
-            msg.code = VIRTIO_SND_S_BAD_MSG;
-            drop(msg);
             return Err(Error::StreamWithIdNotFound(stream_id));
         }
         let mut streams = self.streams.write().unwrap();
         if let Err(err) = streams[stream_id as usize].state.release() {
             log::error!("Stream {}: {}", stream_id, err);
-            msg.code = VIRTIO_SND_S_BAD_MSG;
-            drop(msg);
             return Err(Error::Stream(err));
         }
         // Stop worker thread

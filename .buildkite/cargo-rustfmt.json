@@ -1,0 +1,9 @@
+{
+  "tests": [
+    {
+      "test_name": "staging: style",
+      "command": "cd staging && cargo +nightly fmt --all -- --config-path rustfmt.toml --check"
+    }
+  ]
+}
+

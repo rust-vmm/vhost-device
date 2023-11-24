@@ -1,7 +1,76 @@
 edition = "2021"
+# Format generated files. A file is considered generated if any of the first
+# five lines contain a @generated comment marker. (default value is true)
 format_generated_files = false
+# Format code snippet included in doc comments. (default value is false)
 format_code_in_doc_comments = true
-format_strings = true
+# Format the metavariable matching patterns in macros. (default value is false)
+format_macro_matchers = true
+# Control the case of the letters in hexadecimal literal values (default value is Preserve)
+hex_literal_case = "Upper"
+match_block_trailing_comma = false
+# Controls how imports are structured in use statements. Imports will be merged
+# or split to the configured level of granularity. (default value is Preserve)
 imports_granularity = "Crate"
+# Unix or Windows line endings (default value is Auto)
+newline_style = "Unix"
+# Convert /* */ comments to // comments where possible. (default value is false)
+normalize_comments = true
+# Convert #![doc] and #[doc] attributes to //! and /// doc comments. (default value is false)
+normalize_doc_attributes = true
+# Reorder impl items. type and const are put first, then macros and methods. (default value is false)
+reorder_impl_items = true
+# Format string literals where necessary. (default value is false)
+format_strings = true
+# Discard existing import groups, and create three groups for:
+#
+#    std, core and alloc,
+#    external crates,
+#    self, super and crate imports.
 group_imports = "StdExternalCrate"
+# Break comments to fit on the line (default value is false)
 wrap_comments = true
+# Minimum number of blank lines which must be put between items. If two items
+# have fewer blank lines between them, additional blank lines are inserted.
+# (default value is 0)
+blank_lines_upper_bound = 1
+# Replace strings of _ wildcards by a single .. in tuple patterns (default value is false)
+condense_wildcard_suffixes = true
+# Use field initialize shorthand if possible. (default value is false)
+use_field_init_shorthand = true
+# Which version of the formatting rules to use. Version::One is
+# backwards-compatible with Rustfmt 1.0. Other versions are only backwards
+# compatible within a major version number. (default value is "One"
+version = "Two"
+
+## Default values
+#
+## Max width for code snippets included in doc comments. Only used if
+## format_code_in_doc_comments is true. (default value)
+#doc_comment_code_block_width = 100
+## Format the bodies of macros. (default value)
+#format_macro_bodies = true
+## Use tab characters for indentation, spaces for alignment. (default value)
+#hard_tabs = false
+## Indent style of imports (default value)
+#imports_indent = "Block"
+## Item layout inside a imports block. (default value)
+#imports_layout = "Mixed"
+## Indent on expressions or items. (default value)
+#indent_style = "Block"
+## (default value)
+#max_width = 100
+## Merge multiple derives into a single one. (default value)
+#merge_derives = true
+## Remove nested parens. (default value)
+#remove_nested_parens = true
+## Number of spaces per tab (default value)
+#tab_spaces = 4
+## How to handle trailing commas for lists (default value)
+#trailing_comma = "Vertical"
+## Add trailing semicolon after break, continue and return. (default value)
+#trailing_semicolon = true
+## Reorder import and extern crate statements alphabetically in groups (a group is separated by a newline). (default value)
+#reorder_imports = true
+## Reorder mod declarations alphabetically in group. (default value)
+#reorder_modules = true

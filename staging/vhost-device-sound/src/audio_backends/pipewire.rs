@@ -503,6 +503,7 @@ impl AudioBackend for PwBackend {
         stream_hash.remove(&stream_id);
         stream_listener.remove(&stream_id);
         lock_guard.unlock();
+        self.thread_loop.stop();
         Ok(())
     }
 

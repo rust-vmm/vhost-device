@@ -698,8 +698,8 @@ impl VhostUserSoundBackend {
 }
 
 impl VhostUserBackend for VhostUserSoundBackend {
-    type Vring = VringRwLock;
     type Bitmap = ();
+    type Vring = VringRwLock;
 
     fn num_queues(&self) -> usize {
         NUM_QUEUES as usize
@@ -1104,7 +1104,7 @@ mod tests {
 
         let queues_per_thread = backend.queues_per_thread();
         assert_eq!(queues_per_thread.len(), 1);
-        assert_eq!(queues_per_thread[0], 0xf);
+        assert_eq!(queues_per_thread[0], 0xF);
 
         let config = backend.get_config(0, 8);
         assert_eq!(config.len(), 8);

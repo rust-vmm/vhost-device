@@ -250,12 +250,12 @@ pub struct VirtioSoundJackInfo {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioSoundJackInfo {}
 
-///If the VIRTIO_SND_JACK_F_REMAP feature bit is set in the jack information
+/// If the VIRTIO_SND_JACK_F_REMAP feature bit is set in the jack information
 /// Remap control request
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundJackRemap {
-    pub hdr: VirtioSoundJackHeader, /* .code = VIRTIO_SND_R_JACK_REMAP */
+    pub hdr: VirtioSoundJackHeader, // .code = VIRTIO_SND_R_JACK_REMAP
     pub association: Le32,
     pub sequence: Le32,
 }
@@ -279,9 +279,9 @@ unsafe impl ByteValued for VirtioSoundPcmHeader {}
 #[repr(C)]
 pub struct VirtioSoundPcmInfo {
     pub hdr: VirtioSoundInfo,
-    pub features: Le32, /* 1 << VIRTIO_SND_PCM_F_XXX */
-    pub formats: Le64,  /* 1 << VIRTIO_SND_PCM_FMT_XXX */
-    pub rates: Le64,    /* 1 << VIRTIO_SND_PCM_RATE_XXX */
+    pub features: Le32, // 1 << VIRTIO_SND_PCM_F_XXX
+    pub formats: Le64,  // 1 << VIRTIO_SND_PCM_FMT_XXX
+    pub rates: Le64,    // 1 << VIRTIO_SND_PCM_RATE_XXX
     pub direction: u8,
     pub channels_min: u8,
     pub channels_max: u8,
@@ -299,7 +299,7 @@ pub struct VirtioSndPcmSetParams {
     pub hdr: VirtioSoundPcmHeader,
     pub buffer_bytes: Le32,
     pub period_bytes: Le32,
-    pub features: Le32, /* 1 << VIRTIO_SND_PCM_F_XXX */
+    pub features: Le32, // 1 << VIRTIO_SND_PCM_F_XXX
     pub channels: u8,
     pub format: u8,
     pub rate: u8,

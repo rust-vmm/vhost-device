@@ -336,7 +336,7 @@ impl AudioBackend for PwBackend {
                     }
                     let mut param = [Pod::from_bytes(&value_clone).unwrap()];
 
-                    //callback to negotiate new set of streams
+                    // callback to negotiate new set of streams
                     stream
                         .update_params(&mut param)
                         .expect("could not update params");

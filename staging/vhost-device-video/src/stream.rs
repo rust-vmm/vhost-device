@@ -442,9 +442,11 @@ mod tests {
         assert!(stream.is_queue_streaming(QueueType::InputQueue));
         assert!(stream.all_resources_state(QueueType::InputQueue, ResourceState::Queued));
         // Resource can be found by index
-        assert!(stream
-            .find_resource_mut_by_index(0, QueueType::InputQueue)
-            .is_some());
+        assert!(
+            stream
+                .find_resource_mut_by_index(0, QueueType::InputQueue)
+                .is_some()
+        );
         {
             let res = stream
                 .find_resource_mut(resource_id, QueueType::InputQueue)

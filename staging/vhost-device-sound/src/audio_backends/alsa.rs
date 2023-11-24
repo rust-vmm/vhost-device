@@ -1,5 +1,4 @@
 /// Alsa backend
-//
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 use std::{
@@ -734,6 +733,11 @@ impl AudioBackend for AlsaBackend {
         start Start,
     }
 
+    send_action! {
+        ctrl set_parameters SetParameters,
+        ctrl release Release,
+    }
+
     fn stop(&self, id: u32) -> CrateResult<()> {
         if let Some(Err(err)) = self
             .streams
@@ -745,10 +749,5 @@ impl AudioBackend for AlsaBackend {
             log::error!("Stream {} stop {}", id, err);
         }
         Ok(())
-    }
-
-    send_action! {
-        ctrl set_parameters SetParameters,
-        ctrl release Release,
     }
 }

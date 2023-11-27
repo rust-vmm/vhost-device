@@ -121,10 +121,6 @@ macro_rules! set_new_state {
 }
 
 impl PCMState {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     set_new_state!(
         set_parameters,
         Self::SetParameters,
@@ -142,6 +138,10 @@ impl PCMState {
     set_new_state!(stop, Self::Stop, Self::Start);
 
     set_new_state!(release, Self::Release, Self::Prepare | Self::Stop);
+
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 impl std::fmt::Display for PCMState {

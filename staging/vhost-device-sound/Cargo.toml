@@ -8,7 +8,7 @@ readme = "README.md"
 keywords = ["vhost", "sound", "virtio-sound", "virtio-snd", "virtio"]
 categories = ["multimedia::audio", "virtualization"]
 license = "Apache-2.0 OR BSD-3-Clause"
-edition = "2018"
+edition = "2021"
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-#![allow(dead_code)] //TODO: remove
+#![allow(dead_code)] // TODO: remove
 // Struct definitions use the kernel-style naming for consistency
 #![allow(non_camel_case_types)]
 
@@ -311,7 +311,7 @@ impl VideoCmd {
     ) -> vhu_video::Result<Self> {
         use self::VideoCmd::*;
         macro_rules! read_body {
-            ($a: expr) => {
+            ($a:expr) => {
                 desc_chain.read_body(0, $a)
             };
         }

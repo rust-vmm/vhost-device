@@ -152,8 +152,8 @@ impl VuVideoBackend {
 
 /// VhostUserBackend trait methods
 impl VhostUserBackendMut for VuVideoBackend {
-    type Vring = VringRwLock;
     type Bitmap = ();
+    type Vring = VringRwLock;
 
     fn num_queues(&self) -> usize {
         NUM_QUEUES

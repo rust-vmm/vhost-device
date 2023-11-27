@@ -632,12 +632,16 @@ mod tests {
     #[rstest]
     fn test_video_poller(dummy_fd: EventFd) {
         let poller = VideoPoller::new().unwrap();
-        assert!(poller
-            .add(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Write, 1))
-            .is_ok());
-        assert!(poller
-            .modify(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Read, 1))
-            .is_ok());
+        assert!(
+            poller
+                .add(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Write, 1))
+                .is_ok()
+        );
+        assert!(
+            poller
+                .modify(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Read, 1))
+                .is_ok()
+        );
 
         // Poller captures a read event.
         dummy_fd.write(1).unwrap();
@@ -786,10 +790,12 @@ mod tests {
         );
         thread.mem = Some(mem.clone());
 
-        assert!(thread
-            .poller
-            .add(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Read, 1))
-            .is_ok());
+        assert!(
+            thread
+                .poller
+                .add(dummy_fd.as_raw_fd(), PollerEvent::new(EventType::Read, 1))
+                .is_ok()
+        );
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();

@@ -398,18 +398,16 @@ impl VideoBackend for V4L2Decoder {
         for resource in stream.queued_resources_mut(queue_type) {
             resource.ready_with(video::BufferFlags::ERR, 0);
         }
-        /*
-         * QUEUE_CLEAR behaviour from virtio-video spec
-         * Return already queued buffers back from the input or the output queue
-         * of the device. The device SHOULD return all of the buffers from the
-         * respective queue as soon as possible without pushing the buffers through
-         * the processing pipeline.
-         *
-         * From v4l2 PoV we issue a VIDIOC_STREAMOFF on the queue which will abort
-         * or finish any DMA in progress, unlocks any user pointer buffers locked
-         * in physical memory, and it removes all buffers from the incoming and
-         * outgoing queues.
-         */
+        // QUEUE_CLEAR behaviour from virtio-video spec
+        // Return already queued buffers back from the input or the output queue
+        // of the device. The device SHOULD return all of the buffers from the
+        // respective queue as soon as possible without pushing the buffers through
+        // the processing pipeline.
+        //
+        // From v4l2 PoV we issue a VIDIOC_STREAMOFF on the queue which will abort
+        // or finish any DMA in progress, unlocks any user pointer buffers locked
+        // in physical memory, and it removes all buffers from the incoming and
+        // outgoing queues.
         if let Err(e) = v4l2r::ioctl::streamoff(stream, queue) {
             warn!("streamoff failed: {}", e);
             return Sync(video::CmdResponse::Error(InvalidParameter));
@@ -492,9 +490,9 @@ impl VideoBackend for V4L2Decoder {
             return Sync(video::CmdResponse::Error(InvalidParameter));
         };
 
-        /*if queue_type.direction() == v4l2r::QueueDirection::Capture {
-            todo!("compose on CAPTURE");
-        }*/
+        // if queue_type.direction() == v4l2r::QueueDirection::Capture {
+        // todo!("compose on CAPTURE");
+        // }
 
         Sync(video::CmdResponse::OkNoData)
     }
@@ -891,7 +889,7 @@ mod tests {
             Some(v4l2_fmtdesc {
                 index,
                 type_: v4l2r::bindings::v4l2_buf_type_V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
-                pixelformat: 0x3231564e, // NV12
+                pixelformat: 0x3231564E, // NV12
                 // SAFETY: test environment only.
                 ..unsafe { mem::zeroed() }
             })
@@ -1106,7 +1104,7 @@ mod tests {
     fn test_v4l2_backend_helpers(test_dir: TempDir) {
         let v4l2_device = VideoDeviceMock::new(&test_dir);
         let decoder = V4L2Decoder::new(Path::new(&v4l2_device.path)).unwrap();
-        let nv12 = u32::from_le(0x3231564e);
+        let nv12 = u32::from_le(0x3231564E);
         assert_matches!(
             V4L2Decoder::v4l2_get_selection(&decoder.video_device, video::QueueType::InputQueue),
             None

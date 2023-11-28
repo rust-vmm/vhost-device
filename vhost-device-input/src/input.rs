@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use evdev::{Device, FetchEventsSynced, InputId};
+#[cfg(not(test))]
 use nix::ioctl_read_buf;
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
@@ -46,6 +47,23 @@ impl InputDevice for Device {
     fn input_id(&self) -> InputId {
         Device::input_id(self)
     }
+}
+
+#[cfg(test)]
+// For testing purpose, fill the sequence number into the buffer
+// for emulation ioctl calls.
+macro_rules! ioctl_read_buf {
+    ($(#[$attr:meta])* $name:ident, $ioty:expr, $nr:expr, $ty:ty) => (
+        $(#[$attr])*
+        pub unsafe fn $name(_fd: libc::c_int,
+                            data: &mut [$ty])
+                            -> nix::Result<libc::c_int> {
+            for item in data.iter_mut() {
+                *item = $nr as u8;
+            }
+            Ok(data.len() as i32)
+        }
+    )
 }
 
 ioctl_read_buf!(eviocgname, b'E', 0x06, u8);

@@ -959,6 +959,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost-device-template"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "clap",
+ "env_logger",
+ "libc",
+ "log",
+ "thiserror",
+ "vhost",
+ "vhost-user-backend",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-vsock"
 version = "0.1.0"
 dependencies = [

@@ -7,5 +7,6 @@ members = [
     "vhost-device-rng",
     "vhost-device-scsi",
     "vhost-device-scmi",
+    "vhost-device-template",
     "vhost-device-vsock",
 ]

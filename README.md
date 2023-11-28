@@ -21,6 +21,10 @@ Here is the list of device backends that we support:
 - [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)
 - [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-vsock/README.md)
 
+The vhost-device workspace also provides a
+[template](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-template/README.md)
+to help new developers understand how to write their own vhost-user backend.
+
 ### Staging Devices
 
 Implementing a proper VirtIO device requires co-ordination between the

@@ -169,3 +169,80 @@ fn main() {
         exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use evdev::{BusType, FetchEventsSynced, InputId};
+    use std::io::{self};
+    use std::os::fd::RawFd;
+
+    use super::*;
+
+    struct MockDevice;
+
+    impl InputDevice for MockDevice {
+        fn open(_path: PathBuf) -> io::Result<MockDevice> {
+            Ok(MockDevice {})
+        }
+
+        fn fetch_events(&mut self) -> io::Result<FetchEventsSynced<'_>> {
+            unreachable!()
+        }
+
+        fn get_raw_fd(&self) -> RawFd {
+            0 as RawFd
+        }
+
+        fn input_id(&self) -> InputId {
+            InputId::new(BusType::BUS_USB, 0x46d, 0x4023, 0x111)
+        }
+    }
+
+    #[test]
+    fn verify_cmd_line_arguments() {
+        // All parameters have default values, except for the socket path.  White spaces are
+        // introduced on purpose to make sure Strings are trimmed properly.
+        let default_args: InputArgs = Parser::parse_from([
+            "",
+            "--socket-path=/some/socket_path",
+            "--event-list=/dev/input/event1,/dev/input/event2",
+        ]);
+
+        // A valid configuration that should be equal to the above default configuration.
+        let args = InputArgs {
+            socket_path: PathBuf::from("/some/socket_path"),
+            event_list: vec![
+                PathBuf::from("/dev/input/event1"),
+                PathBuf::from("/dev/input/event2"),
+            ],
+        };
+
+        // All configuration elements should be what we expect them to be.  Using
+        // VuInputConfig::try_from() ensures that strings have been properly trimmed.
+        assert_eq!(default_args, args);
+
+        // Test short arguments
+        let default_args: InputArgs = Parser::parse_from([
+            "",
+            "-s=/some/socket_path",
+            "-e=/dev/input/event1,/dev/input/event2",
+        ]);
+
+        assert_eq!(default_args, args);
+    }
+
+    #[test]
+    fn test_fail_listener() {
+        let config = InputArgs {
+            socket_path: PathBuf::from("/invalid/path"),
+            event_list: vec![PathBuf::from("/invalid/path")],
+        };
+
+        // An invalid socket path should trigger daemon failure.
+        assert_matches!(
+            start_backend::<MockDevice>(config.clone()).unwrap_err(),
+            Error::ServeFailed(_)
+        );
+    }
+}

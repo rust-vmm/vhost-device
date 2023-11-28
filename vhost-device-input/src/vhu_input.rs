@@ -422,3 +422,437 @@ impl<T: 'static + InputDevice + Sync + Send> VhostUserBackendMut for VuInputBack
         self.exit_event.try_clone().ok()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use evdev::{BusType, FetchEventsSynced, InputId};
+    use std::mem;
+    use std::os::fd::RawFd;
+    use std::path::PathBuf;
+    use virtio_queue::Descriptor;
+    use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::*;
+
+    struct MockDevice;
+
+    impl InputDevice for MockDevice {
+        fn open(_path: PathBuf) -> io::Result<MockDevice> {
+            Ok(MockDevice {})
+        }
+
+        fn fetch_events(&mut self) -> io::Result<FetchEventsSynced<'_>> {
+            // Don't support fetch events due to FetchEventsSynced struct
+            // contains private fields.
+            Err(std::io::Error::from(
+                VuInputError::UnexpectedFetchEventError,
+            ))
+        }
+
+        fn get_raw_fd(&self) -> RawFd {
+            0 as RawFd
+        }
+
+        fn input_id(&self) -> InputId {
+            InputId::new(BusType::BUS_USB, 0x46d, 0x4023, 0x111)
+        }
+    }
+
+    #[test]
+    fn verify_handle_event() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Update memory
+        backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+
+        // Currently only handles events after event_idx setting to true,
+        // otherwise an error is generated.
+        assert_eq!(
+            backend
+                .handle_event(0, EventSet::OUT, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        backend.set_event_idx(true);
+
+        // Currently handles EventSet::IN only, otherwise an error is generated.
+        assert_eq!(
+            backend
+                .handle_event(0, EventSet::OUT, &[vring.clone()], 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+
+        // Currently handles a single device event 'EVENT_ID_IN_VRING_EPOLL',
+        // otherwise do nothing and return Ok(()).
+        assert_matches!(
+            backend.handle_event(1, EventSet::IN, &[vring.clone()], 0),
+            Ok(())
+        );
+
+        // Currently handles EVENT_ID_IN_VRING_EPOLL only, since the event list is empty,
+        // an error is generated.
+        assert_eq!(
+            backend
+                .handle_event(
+                    EVENT_ID_IN_VRING_EPOLL as u16,
+                    EventSet::OUT,
+                    &[vring.clone()],
+                    0
+                )
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Other
+        );
+    }
+
+    #[test]
+    fn verify_process_queue() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Update memory
+        backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // The mock device returns the error when fetch events.
+        assert_eq!(
+            backend.process_queue(&vring),
+            Err(VuInputError::UnexpectedFetchEventError)
+        );
+    }
+
+    #[test]
+    fn verify_process_event() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Update memory
+        backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+
+        // Verifying the process event flow if have no any input event.
+        assert!(backend.process_event(&vring).unwrap());
+        assert_eq!(vring.queue_used_idx().unwrap(), 0_u16);
+    }
+
+    #[test]
+    fn verify_chain_descriptors() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+
+        let mem_map = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(mem_map.clone());
+
+        // Update memory
+        backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+
+        // Create a descriptor chain with two descriptors.
+        let desc = Descriptor::new(0x400_u64, 0x100, 0, 0);
+        mem_map.write_obj(desc, GuestAddress(0x100)).unwrap();
+
+        let desc = Descriptor::new(0x500_u64, 0x100, 0, 0);
+        mem_map.write_obj(desc, GuestAddress(0x100 + 16)).unwrap();
+
+        // Put the descriptor index 0 in the first available ring position.
+        mem_map
+            .write_obj(0u16, GuestAddress(0x200).unchecked_add(4))
+            .unwrap();
+
+        // Set `avail_idx` to 2.
+        mem_map
+            .write_obj(2u16, GuestAddress(0x200).unchecked_add(2))
+            .unwrap();
+
+        let ev_raw_data = VuInputEvent {
+            ev_type: EV_KEY as u16,
+            code: SYN_REPORT as u16,
+            value: 0,
+        };
+        backend.ev_list.push_back(ev_raw_data);
+
+        let ev_raw_data = VuInputEvent {
+            ev_type: EV_SYN as u16,
+            code: SYN_REPORT as u16,
+            value: 0,
+        };
+        backend.ev_list.push_back(ev_raw_data);
+
+        vring.set_queue_ready(false);
+
+        // Fail to get descriptor, return Ok(false).
+        assert!(!backend.process_event(&vring).unwrap());
+        // When fail to get descriptor, the event list will be cleared.
+        assert_eq!(backend.ev_list.len(), 0);
+
+        let ev_raw_data = VuInputEvent {
+            ev_type: EV_KEY as u16,
+            code: SYN_REPORT as u16,
+            value: 0,
+        };
+        backend.ev_list.push_back(ev_raw_data);
+
+        let ev_raw_data = VuInputEvent {
+            ev_type: EV_SYN as u16,
+            code: SYN_REPORT as u16,
+            value: 0,
+        };
+        backend.ev_list.push_back(ev_raw_data);
+
+        vring.set_queue_ready(true);
+        assert!(backend.process_event(&vring).unwrap());
+        assert_eq!(vring.queue_used_idx().unwrap(), 2_u16);
+    }
+
+    #[test]
+    fn verify_get_dev_ids_config() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_ID_DEVIDS, 0];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        let mut expected_id: [u8; VIRTIO_INPUT_CFG_SIZE] = [0; VIRTIO_INPUT_CFG_SIZE];
+
+        // bus type: BUS_USB
+        expected_id[0] = 0x3;
+        expected_id[1] = 0x0;
+        // vendor
+        expected_id[2] = 0x6d;
+        expected_id[3] = 0x04;
+        // product
+        expected_id[4] = 0x23;
+        expected_id[5] = 0x40;
+        // version
+        expected_id[6] = 0x11;
+        expected_id[7] = 0x01;
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_ID_DEVIDS,
+            subsel: 0,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_id,
+        };
+
+        // Verifying the config
+        assert_eq!(config, expected_config.as_slice().to_vec());
+    }
+
+    #[test]
+    fn verify_get_name_config() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_ID_NAME, 0];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0x6; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_ID_NAME,
+            subsel: 0,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying the config
+        assert_eq!(config, expected_config.as_slice().to_vec());
+    }
+
+    #[test]
+    fn verify_get_event_config() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+
+        // Retrieve key event configuration.
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_EV_BITS, EV_KEY];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0x21; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_EV_BITS,
+            subsel: EV_KEY,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying key event configuration.
+        assert_eq!(config, expected_config.as_slice().to_vec());
+
+        // Retrieve relative configuration.
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_EV_BITS, EV_REL];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0x22; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_EV_BITS,
+            subsel: EV_REL,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying relative configuration.
+        assert_eq!(config, expected_config.as_slice().to_vec());
+
+        // Retrieve absolute configuration.
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_EV_BITS, EV_ABS];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0x23; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_EV_BITS,
+            subsel: EV_ABS,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying absolute configuration.
+        assert_eq!(config, expected_config.as_slice().to_vec());
+
+        // Retrieve misc configuration.
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_EV_BITS, EV_MSC];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0x24; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_EV_BITS,
+            subsel: EV_MSC,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying misc configuration.
+        assert_eq!(config, expected_config.as_slice().to_vec());
+
+        // Retrieve switch configuration.
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_EV_BITS, EV_SW];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0x25; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: VIRTIO_INPUT_CFG_EV_BITS,
+            subsel: EV_SW,
+            size: VIRTIO_INPUT_CFG_SIZE as u8,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying switch configuration.
+        assert_eq!(config, expected_config.as_slice().to_vec());
+
+        // Retrieve unsupported configuration.
+        let buf: [u8; 2] = [VIRTIO_INPUT_CFG_EV_BITS, 0x6];
+        backend.set_config(0, &buf).expect("failed to set config");
+
+        let config = backend.get_config(0, mem::size_of::<VuInputConfig>() as u32);
+
+        // The buffer is filled with the sequence number.
+        let expected_val: [u8; VIRTIO_INPUT_CFG_SIZE] = [0; VIRTIO_INPUT_CFG_SIZE];
+
+        let expected_config = VuInputConfig {
+            select: 0,
+            subsel: 0,
+            size: 0,
+            reserved: [0; 5],
+            val: expected_val,
+        };
+
+        // Verifying unsupported configuration with filling zeros.
+        assert_eq!(config, expected_config.as_slice().to_vec());
+    }
+
+    #[test]
+    fn verify_backend() {
+        let ev_dev = MockDevice::open(PathBuf::from("/dev/input/event0")).unwrap();
+        let mut backend = VuInputBackend::new(ev_dev).unwrap();
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_eq!(backend.features(), 0x170000000);
+        assert_eq!(
+            backend.protocol_features(),
+            VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
+        );
+
+        assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
+        assert_eq!(backend.get_config(0, 0), vec![]);
+        assert!(backend.update_memory(mem.clone()).is_ok());
+
+        backend.set_event_idx(true);
+        assert!(backend.event_idx);
+    }
+}

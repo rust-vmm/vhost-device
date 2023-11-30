@@ -20,10 +20,9 @@ use vm_memory::Bytes;
 
 use super::AudioBackend;
 use crate::{
-    device::ControlMessage,
     stream::{PCMState, Stream},
     virtio_sound::{self, VirtioSndPcmSetParams, VIRTIO_SND_S_BAD_MSG, VIRTIO_SND_S_NOT_SUPP},
-    Direction, Result as CrateResult,
+    ControlMessage, Direction, Result as CrateResult,
 };
 
 impl From<Direction> for alsa::Direction {

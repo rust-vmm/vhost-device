@@ -15,7 +15,7 @@ use self::alsa::AlsaBackend;
 use self::null::NullBackend;
 #[cfg(feature = "pw-backend")]
 use self::pipewire::PwBackend;
-use crate::{device::ControlMessage, stream::Stream, BackendType, Result};
+use crate::{stream::Stream, BackendType, ControlMessage, Result};
 
 pub trait AudioBackend {
     fn write(&self, stream_id: u32) -> Result<()>;

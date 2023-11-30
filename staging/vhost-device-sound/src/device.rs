@@ -29,8 +29,8 @@ use vmm_sys_util::{
 use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
     stream::{Buffer, Error as StreamError, Stream},
-    virtio_sound::{self, *},
-    ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
+    virtio_sound::*,
+    ControlMessage, ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
 };
 
 pub struct VhostUserSoundThread {
@@ -782,62 +782,6 @@ impl VhostUserBackend for VhostUserSoundBackend {
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
         self.exit_event.try_clone().ok()
-    }
-}
-
-#[cfg_attr(test, derive(Clone))]
-pub struct ControlMessage {
-    pub kind: ControlMessageKind,
-    pub code: u32,
-    pub desc_chain: SoundDescriptorChain,
-    pub descriptor: virtio_queue::Descriptor,
-    pub vring: VringRwLock,
-}
-
-impl std::fmt::Debug for ControlMessage {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        fmt.debug_struct(stringify!(ControlMessage))
-            .field("kind", &self.kind)
-            .field("code", &self.code)
-            .finish()
-    }
-}
-
-impl Drop for ControlMessage {
-    fn drop(&mut self) {
-        log::trace!(
-            "dropping ControlMessage {:?} reply = {}",
-            self.kind,
-            match self.code {
-                virtio_sound::VIRTIO_SND_S_OK => "VIRTIO_SND_S_OK",
-                virtio_sound::VIRTIO_SND_S_BAD_MSG => "VIRTIO_SND_S_BAD_MSG",
-                virtio_sound::VIRTIO_SND_S_NOT_SUPP => "VIRTIO_SND_S_NOT_SUPP",
-                virtio_sound::VIRTIO_SND_S_IO_ERR => "VIRTIO_SND_S_IO_ERR",
-                _ => "other",
-            }
-        );
-        let resp = VirtioSoundHeader {
-            code: self.code.into(),
-        };
-
-        if let Err(err) = self
-            .desc_chain
-            .memory()
-            .write_obj(resp, self.descriptor.addr())
-        {
-            log::error!("Error::DescriptorWriteFailed: {}", err);
-            return;
-        }
-        if self
-            .vring
-            .add_used(self.desc_chain.head_index(), resp.as_slice().len() as u32)
-            .is_err()
-        {
-            log::error!("Couldn't add used");
-        }
-        if self.vring.signal_used_queue().is_err() {
-            log::error!("Couldn't signal used queue");
-        }
     }
 }
 

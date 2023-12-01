@@ -35,7 +35,6 @@ use vm_memory::Bytes;
 
 use super::AudioBackend;
 use crate::{
-    device::ControlMessage,
     virtio_sound::{
         VirtioSndPcmSetParams, VIRTIO_SND_PCM_FMT_A_LAW, VIRTIO_SND_PCM_FMT_FLOAT,
         VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW, VIRTIO_SND_PCM_FMT_S16,
@@ -51,7 +50,7 @@ use crate::{
         VIRTIO_SND_PCM_RATE_88200, VIRTIO_SND_PCM_RATE_96000, VIRTIO_SND_S_BAD_MSG,
         VIRTIO_SND_S_NOT_SUPP,
     },
-    Direction, Error, Result, Stream,
+    ControlMessage, Direction, Error, Result, Stream,
 };
 
 impl From<Direction> for spa::Direction {

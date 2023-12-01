@@ -257,7 +257,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
     }
 
     /// Process the requests in the vring and dispatch replies
-    fn process_queue(&self, vring: &VringRwLock) -> Result<bool> {
+    fn process_queue(&self, vring: &VringRwLock) -> Result<()> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
@@ -272,7 +272,7 @@ impl<D: I2cDevice> VhostUserI2cBackend<D> {
                 .map_err(|_| Error::NotificationFailed)?;
         }
 
-        Ok(true)
+        Ok(())
     }
 }
 

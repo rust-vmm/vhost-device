@@ -129,7 +129,7 @@ impl VhostUserSoundThread {
         &self,
         vring: &VringRwLock,
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         let Some(ref atomic_mem) = self.mem else {
             return Err(Error::NoMemoryConfigured.into());
         };
@@ -141,7 +141,7 @@ impl VhostUserSoundThread {
             .collect();
 
         if requests.is_empty() {
-            return Ok(true);
+            return Ok(());
         }
 
         // Reply to some requests right away, and defer others to the audio backend (for
@@ -445,12 +445,12 @@ impl VhostUserSoundThread {
             log::error!("Couldn't signal used queue");
         }
 
-        Ok(!any)
+        Ok(())
     }
 
-    fn process_event(&self, _vring: &VringRwLock) -> IoResult<bool> {
+    fn process_event(&self, _vring: &VringRwLock) -> IoResult<()> {
         log::trace!("process_event");
-        Ok(false)
+        Ok(())
     }
 
     fn process_io(
@@ -458,7 +458,7 @@ impl VhostUserSoundThread {
         vring: &VringRwLock,
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
         direction: Direction,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         let Some(ref atomic_mem) = self.mem else {
             return Err(Error::NoMemoryConfigured.into());
         };
@@ -470,7 +470,7 @@ impl VhostUserSoundThread {
             .collect();
 
         if requests.is_empty() {
-            return Ok(true);
+            return Ok(());
         }
 
         // Instead of counting descriptor chain lengths, encode the "parsing" logic in
@@ -592,7 +592,7 @@ impl VhostUserSoundThread {
             }
         }
 
-        Ok(false)
+        Ok(())
     }
 }
 

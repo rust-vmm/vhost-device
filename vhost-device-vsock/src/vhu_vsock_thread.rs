@@ -489,12 +489,7 @@ impl VhostUserVsockThread {
     }
 
     /// Iterate over the rx queue and process rx requests.
-    fn process_rx_queue(
-        &mut self,
-        vring: &VringRwLock,
-        rx_queue_type: RxQueueType,
-    ) -> Result<bool> {
-        let mut used_any = false;
+    fn process_rx_queue(&mut self, vring: &VringRwLock, rx_queue_type: RxQueueType) -> Result<()> {
         let atomic_mem = match &self.mem {
             Some(m) => m,
             None => return Err(Error::NoMemoryConfigured),
@@ -509,7 +504,6 @@ impl VhostUserVsockThread {
             .map_err(|_| Error::IterateQueue)?
             .next()
         {
-            used_any = true;
             let mem = atomic_mem.clone().memory();
 
             let head_idx = avail_desc.head_index();
@@ -561,11 +555,11 @@ impl VhostUserVsockThread {
                 }
             }
         }
-        Ok(used_any)
+        Ok(())
     }
 
     /// Wrapper to process rx queue based on whether event idx is enabled or not.
-    fn process_unix_sockets(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+    fn process_unix_sockets(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -585,11 +579,11 @@ impl VhostUserVsockThread {
         } else {
             self.process_rx_queue(vring, RxQueueType::Standard)?;
         }
-        Ok(false)
+        Ok(())
     }
 
     /// Wrapper to process raw vsock packets queue based on whether event idx is enabled or not.
-    pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+    pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
         if event_idx {
             loop {
                 if !self.thread_backend.pending_raw_pkts() {
@@ -605,10 +599,10 @@ impl VhostUserVsockThread {
         } else {
             self.process_rx_queue(vring, RxQueueType::RawPkts)?;
         }
-        Ok(false)
+        Ok(())
     }
 
-    pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+    pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
         match self.last_processed {
             RxQueueType::Standard => {
                 if self.thread_backend.pending_raw_pkts() {
@@ -629,13 +623,11 @@ impl VhostUserVsockThread {
                 }
             }
         }
-        Ok(false)
+        Ok(())
     }
 
     /// Process tx queue and send requests to the backend for processing.
-    fn process_tx_queue(&mut self, vring: &VringRwLock) -> Result<bool> {
-        let mut used_any = false;
-
+    fn process_tx_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         let atomic_mem = match &self.mem {
             Some(m) => m,
             None => return Err(Error::NoMemoryConfigured),
@@ -648,7 +640,6 @@ impl VhostUserVsockThread {
             .map_err(|_| Error::IterateQueue)?
             .next()
         {
-            used_any = true;
             let mem = atomic_mem.clone().memory();
 
             let head_idx = avail_desc.head_index();
@@ -689,11 +680,11 @@ impl VhostUserVsockThread {
                 .unwrap();
         }
 
-        Ok(used_any)
+        Ok(())
     }
 
     /// Wrapper to process tx queue based on whether event idx is enabled or not.
-    pub fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<bool> {
+    pub fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<()> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -709,7 +700,7 @@ impl VhostUserVsockThread {
         } else {
             self.process_tx_queue(vring_lock)?;
         }
-        Ok(false)
+        Ok(())
     }
 }
 

@@ -182,7 +182,7 @@ impl<T: ReadVolatile> VuRngBackend<T> {
     }
 
     /// Process the requests in the vring and dispatch replies
-    fn process_queue(&mut self, vring: &VringRwLock) -> Result<bool> {
+    fn process_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
@@ -197,7 +197,7 @@ impl<T: ReadVolatile> VuRngBackend<T> {
                 .map_err(|_| VuRngError::SendNotificationFailed)?;
         }
 
-        Ok(true)
+        Ok(())
     }
 }
 

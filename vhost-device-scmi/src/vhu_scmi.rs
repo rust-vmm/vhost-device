@@ -136,9 +136,9 @@ impl VuScmiBackend {
         &mut self,
         requests: Vec<ScmiDescriptorChain>,
         vring: &VringRwLock,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         if requests.is_empty() {
-            return Ok(true);
+            return Ok(());
         }
 
         for desc_chain in requests {
@@ -230,7 +230,7 @@ impl VuScmiBackend {
                 error!("Couldn't return used descriptors to the ring");
             }
         }
-        Ok(true)
+        Ok(())
     }
 
     fn process_command_queue(&mut self, vring: &VringRwLock) -> Result<()> {
@@ -271,7 +271,7 @@ impl VuScmiBackend {
         &mut self,
         requests: Vec<ScmiDescriptorChain>,
         _vring: &VringRwLock,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         // The requests here are notifications from the guest about adding
         // fresh buffers for the used ring. The Linux driver allocates 256
         // buffers for the event queue initially (arriving here in several
@@ -295,7 +295,7 @@ impl VuScmiBackend {
 
             self.event_descriptors.push(desc_chain);
         }
-        Ok(true)
+        Ok(())
     }
 
     fn process_event_queue(&mut self, vring: &VringRwLock) -> Result<()> {

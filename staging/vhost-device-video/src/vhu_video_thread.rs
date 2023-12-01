@@ -472,7 +472,7 @@ impl VhostUserVideoThread {
     }
 
     /// Process the requests in the vring and dispatch replies
-    pub fn process_command_queue(&mut self, vring: &VringRwLock) -> Result<bool> {
+    pub fn process_command_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
@@ -487,10 +487,10 @@ impl VhostUserVideoThread {
                 .map_err(|_| VuVideoError::SendNotificationFailed)?;
         }
 
-        Ok(true)
+        Ok(())
     }
 
-    fn process_event(&self, stream_id: u32, eventq: &VringRwLock) -> Result<bool> {
+    fn process_event(&self, stream_id: u32, eventq: &VringRwLock) -> Result<()> {
         if let Some(event) = self.backend.read().unwrap().dequeue_event(stream_id) {
             let desc_chain = eventq
                 .get_mut()
@@ -516,10 +516,10 @@ impl VhostUserVideoThread {
                 .map_err(|_| VuVideoError::SendNotificationFailed)?;
         }
 
-        Ok(true)
+        Ok(())
     }
 
-    fn send_dqbuf(&mut self, stream_id: u32, queue_type: video::QueueType) -> Result<bool> {
+    fn send_dqbuf(&mut self, stream_id: u32, queue_type: video::QueueType) -> Result<()> {
         let dqbuf_data = match self
             .backend
             .read()
@@ -527,7 +527,7 @@ impl VhostUserVideoThread {
             .dequeue_resource(stream_id, queue_type)
         {
             Some(buf_data) => buf_data,
-            None => return Ok(false),
+            None => return Ok(()),
         };
         let mut backend = self.backend.write().unwrap();
         let stream = backend.stream_mut(&stream_id).unwrap();
@@ -544,10 +544,10 @@ impl VhostUserVideoThread {
             .unwrap();
         resource.ready_with(dqbuf_data.flags, dqbuf_data.size);
 
-        Ok(true)
+        Ok(())
     }
 
-    pub fn process_video_event(&mut self, eventq: &VringRwLock) -> Result<bool> {
+    pub fn process_video_event(&mut self, eventq: &VringRwLock) -> Result<()> {
         let mut epoll_events = vec![PollerEvent::default(); 1024];
         let events = self.poller.wait(epoll_events.as_mut_slice(), 0).unwrap();
         for event in events {
@@ -565,7 +565,7 @@ impl VhostUserVideoThread {
             }
         }
 
-        Ok(true)
+        Ok(())
     }
 }
 

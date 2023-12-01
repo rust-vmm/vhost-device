@@ -3,7 +3,7 @@
     {
       "test_name": "staging: build-gnu",
       "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release",
-      "soft_fail": "true",
+      "soft_fail": "false",
       "platform": [
         "x86_64",
         "aarch64"

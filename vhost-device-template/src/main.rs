@@ -8,6 +8,7 @@
 mod vhu_foo;
 
 use log::error;
+use std::path::PathBuf;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
@@ -36,21 +37,24 @@ pub(crate) enum Error {
 #[clap(author, version, about, long_about = None)]
 struct FooArgs {
     /// Location of vhost-user Unix domain socket.
-    #[clap(short, long)]
-    socket_path: String,
+    #[clap(short, long, value_name = "SOCKET")]
+    socket_path: PathBuf,
 }
 
 #[derive(PartialEq, Debug)]
 struct FooConfiguration {
-    socket_path: String,
+    socket_path: PathBuf,
 }
 
 impl TryFrom<FooArgs> for FooConfiguration {
     type Error = Error;
 
     fn try_from(args: FooArgs) -> Result<Self> {
+        // Even though this try_from() conversion always succeeds, in cases where the device's
+        // configuration type needs to validate arguments and/or make operations that can fail a
+        // TryFrom<_> implementation will be necessary.
         Ok(FooConfiguration {
-            socket_path: args.socket_path.trim().to_string(),
+            socket_path: args.socket_path,
         })
     }
 }
@@ -74,7 +78,7 @@ impl FooInfo {
 fn start_backend(args: FooArgs) -> Result<()> {
     let config = FooConfiguration::try_from(args).unwrap();
 
-    let socket = config.socket_path.to_owned();
+    let socket_path = config.socket_path.clone();
     let info = FooInfo::new();
 
     let handle: JoinHandle<Result<()>> = spawn(move || loop {
@@ -92,7 +96,7 @@ fn start_backend(args: FooArgs) -> Result<()> {
         )
         .map_err(Error::CouldNotCreateDaemon)?;
 
-        daemon.serve(&socket).map_err(Error::ServeFailed)?;
+        daemon.serve(&socket_path).map_err(Error::ServeFailed)?;
     });
 
     handle.join().map_err(std::panic::resume_unwind).unwrap()
@@ -110,26 +114,27 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use std::path::Path;
 
     use super::*;
 
     impl FooArgs {
-        pub(crate) fn from_args(path: &str) -> FooArgs {
+        pub(crate) fn from_args(path: &Path) -> FooArgs {
             FooArgs {
-                socket_path: path.to_string(),
+                socket_path: path.to_path_buf(),
             }
         }
     }
 
     #[test]
     fn test_parse_successful() {
-        let socket_name = "vfoo.sock";
+        let socket_name = Path::new("vfoo.sock");
 
         let cmd_args = FooArgs::from_args(socket_name);
         let config = FooConfiguration::try_from(cmd_args).unwrap();
 
         let expected_config = FooConfiguration {
-            socket_path: String::from(socket_name),
+            socket_path: socket_name.into(),
         };
 
         assert_eq!(config, expected_config);
@@ -138,7 +143,7 @@ mod tests {
     #[test]
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
-        let socket_name = "~/path/not/present/foo";
+        let socket_name = Path::new("~/path/not/present/foo");
         let cmd_args = FooArgs::from_args(socket_name);
 
         assert_matches!(start_backend(cmd_args).unwrap_err(), Error::ServeFailed(_));

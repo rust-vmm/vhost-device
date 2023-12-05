@@ -129,6 +129,12 @@ impl PwBackend {
     }
 }
 
+impl Drop for PwBackend {
+    fn drop(&mut self) {
+        self.thread_loop.stop();
+    }
+}
+
 impl AudioBackend for PwBackend {
     fn write(&self, stream_id: u32) -> Result<()> {
         if !matches!(
@@ -528,7 +534,6 @@ impl AudioBackend for PwBackend {
         stream_hash.remove(&stream_id);
         stream_listener.remove(&stream_id);
         lock_guard.unlock();
-        self.thread_loop.stop();
         Ok(())
     }
 

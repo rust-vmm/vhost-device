@@ -189,7 +189,7 @@ pub fn available_devices() -> NameDeviceMapping {
     devices
 }
 
-fn devices_help() -> String {
+pub fn devices_help() -> String {
     let mut help = String::new();
     writeln!(help, "Available devices:").unwrap();
     for (name, specification) in available_devices().iter() {
@@ -214,11 +214,6 @@ fn devices_help() -> String {
     )
     .unwrap();
     help
-}
-
-pub fn print_devices_help() {
-    let help = devices_help();
-    println!("{}", help);
 }
 
 // Common sensor infrastructure

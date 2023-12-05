@@ -36,7 +36,7 @@ mod devices;
 mod scmi;
 mod vhu_scmi;
 
-use devices::common::{print_devices_help, DeviceDescription, DeviceProperties};
+use devices::common::{devices_help, DeviceDescription, DeviceProperties};
 
 use std::{
     path::PathBuf,
@@ -55,17 +55,16 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Parser)]
+#[command(author, version, about, long_about = None, after_help = devices_help())]
 struct ScmiArgs {
     // Location of vhost-user Unix domain socket.
     // Required, unless one of the --help options is used.
-    #[clap(short, long, help = "vhost-user socket to use (required)")]
-    socket_path: Option<PathBuf>,
+    #[clap(short, long, help = "vhost-user socket to use")]
+    socket_path: PathBuf,
     // Specification of SCMI devices to create.
     #[clap(short, long, help = "Devices to expose")]
     #[arg(num_args(1..))]
     device: Vec<String>,
-    #[clap(long, help = "Print help on available devices")]
-    help_devices: bool,
 }
 
 pub struct VuScmiConfig {
@@ -77,9 +76,7 @@ impl TryFrom<ScmiArgs> for VuScmiConfig {
     type Error = String;
 
     fn try_from(cmd_args: ScmiArgs) -> Result<Self> {
-        let Some(socket_path) = cmd_args.socket_path else {
-            return Result::Err("Required argument socket-path was not provided".to_string());
-        };
+        let socket_path = cmd_args.socket_path;
         let mut devices: DeviceDescription = vec![];
         let device_iterator = cmd_args.device.iter();
         for d in device_iterator {
@@ -125,15 +122,6 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
     }
 }
 
-fn process_args(args: ScmiArgs) -> Option<ScmiArgs> {
-    if args.help_devices {
-        print_devices_help();
-        None
-    } else {
-        Some(args)
-    }
-}
-
 fn print_help(message: &String) {
     println!("{message}\n");
     let mut command = ScmiArgs::command();
@@ -142,17 +130,16 @@ fn print_help(message: &String) {
 
 fn main() {
     env_logger::init();
-    if let Some(args) = process_args(ScmiArgs::parse()) {
-        match VuScmiConfig::try_from(args) {
-            Ok(config) => {
-                if let Err(error) = start_backend(config) {
-                    error!("{error}");
-                    println!("{error}");
-                    exit(1);
-                }
+    let args = ScmiArgs::parse();
+    match VuScmiConfig::try_from(args) {
+        Ok(config) => {
+            if let Err(error) = start_backend(config) {
+                error!("{error}");
+                println!("{error}");
+                exit(1);
             }
-            Err(message) => print_help(&message),
         }
+        Err(message) => print_help(&message),
     }
 }
 
@@ -172,7 +159,7 @@ mod tests {
                      -d fake,name=bar"
         );
         let params: Vec<&str> = params_string.split_whitespace().collect();
-        let args: ScmiArgs = process_args(Parser::parse_from(params)).unwrap();
+        let args: ScmiArgs = Parser::parse_from(params);
         let config = VuScmiConfig::try_from(args).unwrap();
         assert_eq!(&config.socket_path, Path::new(&path));
         let devices = vec![
@@ -190,15 +177,6 @@ mod tests {
             ),
         ];
         assert_eq!(config.devices, devices);
-    }
-
-    #[test]
-    fn test_device_help_processing() {
-        let params_string = "binary --help-devices".to_string();
-        let params: Vec<&str> = params_string.split_whitespace().collect();
-        let args: ScmiArgs = Parser::parse_from(params);
-        let processed = process_args(args);
-        assert!(processed.is_none());
     }
 
     #[test]

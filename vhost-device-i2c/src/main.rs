@@ -10,6 +10,7 @@ mod vhu_i2c;
 
 use log::error;
 use std::num::ParseIntError;
+use std::path::PathBuf;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
 use std::thread::{spawn, JoinHandle};
@@ -51,8 +52,8 @@ pub(crate) enum Error {
 #[clap(author, version, about, long_about = None)]
 struct I2cArgs {
     /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
-    #[clap(short, long)]
-    socket_path: String,
+    #[clap(short, long, value_name = "SOCKET")]
+    socket_path: PathBuf,
 
     /// Number of guests (sockets) to connect to.
     #[clap(short = 'c', long, default_value_t = 1)]
@@ -152,7 +153,7 @@ impl TryFrom<&str> for AdapterConfig {
 
 #[derive(PartialEq, Debug)]
 struct I2cConfiguration {
-    socket_path: String,
+    socket_path: PathBuf,
     socket_count: usize,
     devices: AdapterConfig,
 }
@@ -167,10 +168,30 @@ impl TryFrom<I2cArgs> for I2cConfiguration {
 
         let devices = AdapterConfig::try_from(args.device_list.trim())?;
         Ok(I2cConfiguration {
-            socket_path: args.socket_path.trim().to_string(),
+            socket_path: args.socket_path,
             socket_count: args.socket_count,
             devices,
         })
+    }
+}
+
+impl I2cConfiguration {
+    pub fn generate_socket_paths(&self) -> Vec<PathBuf> {
+        let socket_file_name = self
+            .socket_path
+            .file_name()
+            .expect("socket_path has no filename.");
+        let socket_file_parent = self
+            .socket_path
+            .parent()
+            .expect("socket_path has no parent directory.");
+
+        let make_socket_path = |i: usize| -> PathBuf {
+            let mut file_name = socket_file_name.to_os_string();
+            file_name.push(std::ffi::OsStr::new(&i.to_string()));
+            socket_file_parent.join(&file_name)
+        };
+        (0..self.socket_count).map(make_socket_path).collect()
     }
 }
 
@@ -182,8 +203,7 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
 
     let mut handles = Vec::new();
 
-    for i in 0..config.socket_count {
-        let socket = config.socket_path.to_owned() + &i.to_string();
+    for socket in config.generate_socket_paths() {
         let i2c_map = i2c_map.clone();
 
         let handle: JoinHandle<Result<()>> = spawn(move || loop {
@@ -231,6 +251,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use std::path::Path;
+
     use vhost::vhost_user::Listener;
 
     use super::*;
@@ -254,7 +276,7 @@ mod tests {
     impl I2cArgs {
         fn from_args(path: &str, devices: &str, count: usize) -> I2cArgs {
             I2cArgs {
-                socket_path: path.to_string(),
+                socket_path: path.into(),
                 socket_count: count,
                 device_list: devices.to_string(),
             }
@@ -310,8 +332,8 @@ mod tests {
     fn test_parse_successful() {
         let socket_name = "vi2c.sock";
 
-        // Space before and after the device list and socket name
-        let cmd_args = I2cArgs::from_args(" ./vi2c.sock", " 1:4 ", 1);
+        // Whitespace prefix/suffix in device list argument
+        let cmd_args = I2cArgs::from_args(socket_name, " 1:4 ", 1);
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
         Listener::new(config.socket_path, true).unwrap();
 
@@ -327,11 +349,23 @@ mod tests {
 
         let expected_config = I2cConfiguration {
             socket_count: 5,
-            socket_path: String::from(socket_name),
+            socket_path: socket_name.into(),
             devices: expected_devices,
         };
 
         assert_eq!(config, expected_config);
+
+        // Socket paths are what we expect them to be.
+        assert_eq!(
+            config.generate_socket_paths(),
+            vec![
+                Path::new("vi2c.sock0").to_path_buf(),
+                Path::new("vi2c.sock1").to_path_buf(),
+                Path::new("vi2c.sock2").to_path_buf(),
+                Path::new("vi2c.sock3").to_path_buf(),
+                Path::new("vi2c.sock4").to_path_buf()
+            ]
+        );
     }
 
     #[test]

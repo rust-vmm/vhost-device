@@ -587,7 +587,7 @@ mod tests {
 
     fn make_backend() -> VuScmiBackend {
         let config = VuScmiConfig {
-            socket_path: "/foo/scmi.sock".to_owned(),
+            socket_path: "/foo/scmi.sock".into(),
             devices: vec![],
         };
         VuScmiBackend::new(&config).unwrap()

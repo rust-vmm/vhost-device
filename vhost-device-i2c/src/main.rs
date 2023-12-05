@@ -40,6 +40,8 @@ pub(crate) enum Error {
     I2cFailure(i2c::Error),
     #[error("Failed while parsing to integer: {0:?}")]
     ParseFailure(ParseIntError),
+    #[error("Invalid path `{0}` given: {1}")]
+    PathParseFailure(PathBuf, String),
     #[error("Could not create backend: {0}")]
     CouldNotCreateBackend(vhu_i2c::Error),
     #[error("Could not create daemon: {0}")]
@@ -162,8 +164,38 @@ impl TryFrom<I2cArgs> for I2cConfiguration {
     type Error = Error;
 
     fn try_from(args: I2cArgs) -> Result<Self> {
+        use std::borrow::Cow;
+
         if args.socket_count == 0 {
             return Err(Error::SocketCountInvalid(0));
+        }
+
+        let absolute_socket_path = if !args.socket_path.is_absolute() {
+            if let Ok(cwd) = std::env::current_dir() {
+                Cow::Owned(cwd.join(&args.socket_path))
+            } else {
+                Cow::Borrowed(&args.socket_path)
+            }
+        } else {
+            Cow::Borrowed(&args.socket_path)
+        };
+
+        if let Some(parent_dir) = absolute_socket_path.parent() {
+            if !parent_dir.exists() {
+                return Err(Error::PathParseFailure(
+                    args.socket_path.clone(),
+                    format!(
+                        "Parent directory `{}` does not exist.",
+                        parent_dir.display()
+                    ),
+                ));
+            }
+            if !parent_dir.is_dir() {
+                return Err(Error::PathParseFailure(
+                    args.socket_path.clone(),
+                    format!("`{}` is a file, not a directory.", parent_dir.display()),
+                ));
+            }
         }
 
         let devices = AdapterConfig::try_from(args.device_list.trim())?;
@@ -196,7 +228,7 @@ impl I2cConfiguration {
 }
 
 fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<()> {
-    let config = I2cConfiguration::try_from(args).unwrap();
+    let config = I2cConfiguration::try_from(args)?;
 
     // The same i2c_map structure instance is shared between all the guests
     let i2c_map = Arc::new(I2cMap::<D>::new(&config.devices).map_err(Error::I2cFailure)?);
@@ -305,6 +337,16 @@ mod tests {
     #[test]
     fn test_parse_failure() {
         let socket_name = "vi2c.sock";
+        let invalid_socket_name = " ./vi2c.sock";
+
+        // Space in filenames
+        let cmd_args = I2cArgs::from_args(invalid_socket_name, " 1:4", 1);
+        // " ./vi2c.sock" will fail because " ." does not exist, while "." exists in every UNIX
+        // directory.
+        assert_matches!(
+            I2cConfiguration::try_from(cmd_args).unwrap_err(),
+            Error::PathParseFailure(p, msg) if p == Path::new(invalid_socket_name) && msg.starts_with("Parent directory `") && msg.ends_with("` does not exist.")
+        );
 
         // Invalid client address
         let cmd_args = I2cArgs::from_args(socket_name, "1:4d", 5);
@@ -410,7 +452,7 @@ mod tests {
 
         assert_matches!(
             start_backend::<DummyDevice>(cmd_args).unwrap_err(),
-            Error::ServeFailed(_)
+            Error::PathParseFailure(_, _)
         );
     }
 }

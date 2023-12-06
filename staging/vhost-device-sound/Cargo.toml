@@ -35,3 +35,6 @@ rstest = "0.18.2"
 tempfile = "3.8"
 virtio-queue = { version = "0.10", features = ["test-utils"] }
 vm-memory = { version = "0.13.1", features = ["backend-mmap", "backend-atomic"] }
+
+[lints]
+workspace = true

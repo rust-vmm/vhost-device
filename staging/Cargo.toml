@@ -4,3 +4,29 @@ members = [
   "vhost-device-sound",
   "vhost-device-video",
 ]
+
+[workspace.lints.clippy]
+enum_glob_use = "deny"
+# groups
+correctness = "deny"
+suspicious = "deny"
+complexity = "deny"
+perf = "deny"
+style = "deny"
+nursery = "deny"
+# restriction
+dbg_macro = "deny"
+rc_buffer = "deny"
+as_underscore = "deny"
+assertions_on_result_states = "deny"
+# pedantic
+cast_lossless = "deny"
+cast_possible_wrap = "deny"
+cast_ptr_alignment = "deny"
+naive_bytecount = "deny"
+ptr_as_ptr = "deny"
+bool_to_int_with_if = "deny"
+borrow_as_ptr = "deny"
+case_sensitive_file_extension_comparisons = "deny"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"

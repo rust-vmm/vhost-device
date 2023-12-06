@@ -55,16 +55,27 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None, after_help = devices_help())]
+#[command(author, version, about, long_about = None)]
 struct ScmiArgs {
     // Location of vhost-user Unix domain socket.
     // Required, unless one of the --help options is used.
-    #[clap(short, long, help = "vhost-user socket to use")]
+    #[clap(
+        short,
+        long,
+        default_value_if(
+            "help_devices",
+            clap::builder::ArgPredicate::IsPresent,
+            "PathBuf::new()"
+        ),
+        help = "vhost-user socket to use"
+    )]
     socket_path: PathBuf,
     // Specification of SCMI devices to create.
     #[clap(short, long, help = "Devices to expose")]
     #[arg(num_args(1..))]
     device: Vec<String>,
+    #[clap(long, exclusive = true, help = "Print help on available devices")]
+    help_devices: bool,
 }
 
 pub struct VuScmiConfig {
@@ -131,6 +142,10 @@ fn print_help(message: &String) {
 fn main() {
     env_logger::init();
     let args = ScmiArgs::parse();
+    if args.help_devices {
+        println!("{}", devices_help());
+        return;
+    }
     match VuScmiConfig::try_from(args) {
         Ok(config) => {
             if let Err(error) = start_backend(config) {

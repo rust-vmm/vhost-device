@@ -811,7 +811,6 @@ mod tests {
         let request = VirtioSndPcmSetParams {
             hdr: VirtioSoundPcmHeader {
                 stream_id: 0.into(),
-                hdr: VirtioSoundHeader { code: 0.into() },
             },
             format: VIRTIO_SND_PCM_FMT_S16,
             rate: VIRTIO_SND_PCM_RATE_44100,
@@ -847,7 +846,6 @@ mod tests {
         let request = VirtioSndPcmSetParams {
             hdr: VirtioSoundPcmHeader {
                 stream_id: 3.into(),
-                hdr: VirtioSoundHeader { code: 0.into() },
             },
             format: VIRTIO_SND_PCM_FMT_S16,
             rate: VIRTIO_SND_PCM_RATE_44100,
@@ -882,7 +880,6 @@ mod tests {
         let request = VirtioSndPcmSetParams {
             hdr: VirtioSoundPcmHeader {
                 stream_id: 3.into(),
-                hdr: VirtioSoundHeader { code: 0.into() },
             },
             format: VIRTIO_SND_PCM_FMT_S16,
             rate: VIRTIO_SND_PCM_RATE_44100,
@@ -1122,7 +1119,6 @@ mod tests {
         let mut request = VirtioSndPcmSetParams {
             hdr: VirtioSoundPcmHeader {
                 stream_id: 0.into(),
-                hdr: VirtioSoundHeader { code: 0.into() },
             },
             format: VIRTIO_SND_PCM_FMT_S16,
             rate: VIRTIO_SND_PCM_RATE_44100,

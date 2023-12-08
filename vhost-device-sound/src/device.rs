@@ -155,30 +155,28 @@ impl VhostUserSoundThread {
         let mut any = false;
 
         for desc_chain in requests {
-            let descriptors: Vec<_> = desc_chain.clone().collect();
-            if descriptors.len() < 2 {
-                return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
-            }
+            let mem = atomic_mem.memory();
 
-            // Request descriptor.
-            let desc_request = descriptors[0];
-            if desc_request.is_write_only() {
-                return Err(Error::UnexpectedWriteOnlyDescriptor(0).into());
-            }
+            let mut reader = desc_chain
+                .clone()
+                .reader(&mem)
+                .map_err(|_| Error::DescriptorReadFailed)?;
 
-            let request = desc_chain
-                .memory()
-                .read_obj::<VirtioSoundHeader>(desc_request.addr())
+            let mut writer_status = desc_chain
+                .clone()
+                .writer(&mem)
+                .map_err(|_| Error::DescriptorReadFailed)?;
+
+            let mut writer_content = writer_status
+                .split_at(size_of::<VirtioSoundHeader>())
+                .map_err(|_| Error::DescriptorReadFailed)?;
+
+            let request = reader
+                .read_obj::<VirtioSoundHeader>()
                 .map_err(|_| Error::DescriptorReadFailed)?;
 
             // Keep track of bytes that will be written in the VQ.
             let mut used_len = 0;
-
-            // Reply header descriptor.
-            let desc_hdr = descriptors[1];
-            if !desc_hdr.is_write_only() {
-                return Err(Error::UnexpectedReadableDescriptor(1).into());
-            }
 
             let mut resp = VirtioSoundHeader {
                 code: VIRTIO_SND_S_OK.into(),
@@ -187,54 +185,28 @@ impl VhostUserSoundThread {
             let code = ControlMessageKind::try_from(request.code).map_err(Error::from)?;
             match code {
                 ControlMessageKind::ChmapInfo => {
-                    if descriptors.len() != 3 {
-                        log::error!("a CHMAP_INFO request should have three descriptors total.");
-                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
-                    } else if !descriptors[2].is_write_only() {
-                        log::error!(
-                            "a CHMAP_INFO request should have a writeable descriptor for the info \
-                             payload response after the header status response"
-                        );
-                        return Err(Error::UnexpectedReadableDescriptor(2).into());
-                    }
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundQueryInfo>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundQueryInfo>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
+
                     let start_id = u32::from(request.start_id) as usize;
                     let count = u32::from(request.count) as usize;
                     let chmaps = self.chmaps.read().unwrap();
                     if chmaps.len() <= start_id || chmaps.len() < start_id + count {
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let desc_response = descriptors[2];
-                        let mut buf = vec![];
-
                         for i in chmaps.iter().skip(start_id).take(count) {
-                            buf.extend_from_slice(i.as_slice());
+                            writer_content
+                                .write_obj(*i)
+                                .map_err(|_| Error::DescriptorWriteFailed)?;
                         }
                         drop(chmaps);
-                        desc_chain
-                            .memory()
-                            .write_slice(&buf, desc_response.addr())
-                            .map_err(|_| Error::DescriptorWriteFailed)?;
-                        used_len += desc_response.len();
+                        used_len += writer_content.bytes_written();
                     }
                 }
                 ControlMessageKind::JackInfo => {
-                    if descriptors.len() != 3 {
-                        log::error!("a JACK_INFO request should have three descriptors total.");
-                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
-                    } else if !descriptors[2].is_write_only() {
-                        log::error!(
-                            "a JACK_INFO request should have a writeable descriptor for the info \
-                             payload response after the header status response"
-                        );
-                        return Err(Error::UnexpectedReadableDescriptor(2).into());
-                    }
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundQueryInfo>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundQueryInfo>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
 
                     let start_id = u32::from(request.start_id) as usize;
@@ -243,38 +215,21 @@ impl VhostUserSoundThread {
                     if jacks.len() <= start_id || jacks.len() < start_id + count {
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let desc_response = descriptors[2];
-                        let mut buf = vec![];
-
                         for i in jacks.iter().skip(start_id).take(count) {
-                            buf.extend_from_slice(i.as_slice());
+                            writer_content
+                                .write_obj(*i)
+                                .map_err(|_| Error::DescriptorWriteFailed)?;
                         }
                         drop(jacks);
-                        desc_chain
-                            .memory()
-                            .write_slice(&buf, desc_response.addr())
-                            .map_err(|_| Error::DescriptorWriteFailed)?;
-                        used_len += desc_response.len();
+                        used_len += writer_content.bytes_written();
                     }
                 }
                 ControlMessageKind::JackRemap => {
                     resp.code = VIRTIO_SND_S_NOT_SUPP.into();
                 }
                 ControlMessageKind::PcmInfo => {
-                    if descriptors.len() != 3 {
-                        log::error!("a PCM_INFO request should have three descriptors total.");
-                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
-                    } else if !descriptors[2].is_write_only() {
-                        log::error!(
-                            "a PCM_INFO request should have a writeable descriptor for the info \
-                             payload response after the header status response"
-                        );
-                        return Err(Error::UnexpectedReadableDescriptor(2).into());
-                    }
-
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundQueryInfo>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundQueryInfo>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
 
                     let start_id = u32::from(request.start_id) as usize;
@@ -283,9 +238,6 @@ impl VhostUserSoundThread {
                     if streams.len() <= start_id || streams.len() < start_id + count {
                         resp.code = VIRTIO_SND_S_BAD_MSG.into();
                     } else {
-                        let desc_response = descriptors[2];
-
-                        let mut buf = vec![];
                         let mut p: VirtioSoundPcmInfo;
 
                         for s in streams
@@ -301,20 +253,17 @@ impl VhostUserSoundThread {
                             p.direction = s.direction as u8;
                             p.channels_min = s.channels_min;
                             p.channels_max = s.channels_max;
-                            buf.extend_from_slice(p.as_slice());
+                            writer_content
+                                .write_obj(p)
+                                .map_err(|_| Error::DescriptorWriteFailed)?;
                         }
                         drop(streams);
-                        desc_chain
-                            .memory()
-                            .write_slice(&buf, desc_response.addr())
-                            .map_err(|_| Error::DescriptorWriteFailed)?;
-                        used_len += desc_response.len();
+                        used_len += writer_content.bytes_written();
                     }
                 }
                 ControlMessageKind::PcmSetParams => {
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSndPcmSetParams>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSndPcmSetParams>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
                     let stream_id: u32 = request.hdr.stream_id.into();
 
@@ -341,9 +290,8 @@ impl VhostUserSoundThread {
                     }
                 }
                 ControlMessageKind::PcmPrepare => {
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundPcmHeader>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
                     let stream_id = request.stream_id.into();
 
@@ -355,9 +303,8 @@ impl VhostUserSoundThread {
                     }
                 }
                 ControlMessageKind::PcmRelease => {
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundPcmHeader>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
                     let stream_id = request.stream_id.into();
 
@@ -377,9 +324,8 @@ impl VhostUserSoundThread {
                     }
                 }
                 ControlMessageKind::PcmStart => {
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundPcmHeader>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
                     let stream_id = request.stream_id.into();
 
@@ -391,9 +337,8 @@ impl VhostUserSoundThread {
                     }
                 }
                 ControlMessageKind::PcmStop => {
-                    let request = desc_chain
-                        .memory()
-                        .read_obj::<VirtioSoundPcmHeader>(desc_request.addr())
+                    let request = reader
+                        .read_obj::<VirtioSoundPcmHeader>()
                         .map_err(|_| Error::DescriptorReadFailed)?;
                     let stream_id = request.stream_id.into();
 
@@ -416,13 +361,24 @@ impl VhostUserSoundThread {
                 },
                 code
             );
-            desc_chain
-                .memory()
-                .write_obj(resp, desc_hdr.addr())
+            writer_status
+                .write_obj(resp)
                 .map_err(|_| Error::DescriptorWriteFailed)?;
-            used_len += desc_hdr.len();
 
-            if vring.add_used(desc_chain.head_index(), used_len).is_err() {
+            used_len += writer_status.bytes_written();
+
+            let used_len = match u32::try_from(used_len) {
+                Ok(len) => len,
+                Err(len) => {
+                    log::warn!("used_len {} overflows u32", len);
+                    u32::MAX
+                }
+            };
+
+            if vring
+                .add_used(desc_chain.head_index(), used_len as u32)
+                .is_err()
+            {
                 log::error!("Couldn't return used descriptors to the ring");
             }
             any |= true;
@@ -984,8 +940,13 @@ mod tests {
             };
             let addr_req = 0x10_0000;
             let descs = [
-                Descriptor::new(addr_req, 0x100, 0, 0), // request
-                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0), // response
+                Descriptor::new(addr_req, size_of::<VirtioSoundHeader>() as u32, 0, 0), // request
+                Descriptor::new(
+                    0x20_0000,
+                    size_of::<VirtioSoundHeader>() as u32,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                ), // response
             ];
             let (vring, mem) = setup_descs(&descs);
             mem.memory()

@@ -106,8 +106,8 @@ pub enum Error {
     DescriptorWriteFailed,
     #[error("Failed to handle event other than EPOLLIN event")]
     HandleEventNotEpollIn,
-    #[error("Failed to handle unknown event")]
-    HandleUnknownEvent,
+    #[error("Failed to handle unknown event with id {0}")]
+    HandleUnknownEvent(u16),
     #[error("Invalid control message code {0}")]
     InvalidControlMessage(u32),
     #[error("Invalid value in {0}: {1}")]

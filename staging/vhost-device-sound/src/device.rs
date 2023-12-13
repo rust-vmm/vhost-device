@@ -91,7 +91,9 @@ impl VhostUserSoundThread {
         vrings: &[VringRwLock],
         audio_backend: &RwLock<Box<dyn AudioBackend + Send + Sync>>,
     ) -> IoResult<()> {
-        let vring = &vrings[device_event as usize];
+        let vring = &vrings
+            .get(device_event as usize)
+            .ok_or_else(|| Error::HandleUnknownEvent(device_event))?;
         let queue_idx = self.queue_indexes[device_event as usize];
         if self.event_idx {
             // vm-virtio's Queue implementation only checks avail_index
@@ -105,7 +107,7 @@ impl VhostUserSoundThread {
                     EVENT_QUEUE_IDX => self.process_event(vring),
                     TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
                     RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
-                    _ => Err(Error::HandleUnknownEvent.into()),
+                    _ => Err(Error::HandleUnknownEvent(queue_idx).into()),
                 }?;
                 if !vring.enable_notification().unwrap() {
                     break;
@@ -118,7 +120,7 @@ impl VhostUserSoundThread {
                 EVENT_QUEUE_IDX => self.process_event(vring),
                 TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
                 RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
-                _ => Err(Error::HandleUnknownEvent.into()),
+                _ => Err(Error::HandleUnknownEvent(queue_idx).into()),
             }?;
         }
         Ok(())
@@ -1058,6 +1060,9 @@ mod tests {
         backend
             .handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0)
             .unwrap();
+        backend
+            .handle_event(RX_QUEUE_IDX * 2, EventSet::IN, &vrings, 0)
+            .unwrap_err();
 
         test_dir.close().unwrap();
     }
@@ -1114,6 +1119,13 @@ mod tests {
         assert_eq!(
             ret.unwrap_err().to_string(),
             Error::HandleEventNotEpollIn.to_string()
+        );
+
+        // Unknown event.
+        let ret = backend.handle_event(RX_QUEUE_IDX * 2, EventSet::IN, &vrings, 0);
+        assert_eq!(
+            ret.unwrap_err().to_string(),
+            Error::HandleUnknownEvent(RX_QUEUE_IDX * 2).to_string()
         );
 
         test_dir.close().unwrap();

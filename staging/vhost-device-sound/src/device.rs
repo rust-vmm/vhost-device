@@ -1007,65 +1007,67 @@ mod tests {
         assert_eq!(backend.max_queue_size(), 64);
         assert_ne!(backend.features(), 0);
         assert!(!backend.protocol_features().is_empty());
-        backend.set_event_idx(false);
+        for event_idx in [true, false] {
+            backend.set_event_idx(event_idx);
 
-        // Mock memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
-        );
+            // Mock memory
+            let mem = GuestMemoryAtomic::new(
+                GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+            );
 
-        // Mock Vring for queues
-        let vrings = [
-            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
-            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
-            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
-            VringRwLock::new(mem.clone(), 0x1000).unwrap(),
-        ];
-        vrings[CONTROL_QUEUE_IDX as usize]
-            .set_queue_info(0x100, 0x200, 0x300)
-            .unwrap();
-        vrings[CONTROL_QUEUE_IDX as usize].set_queue_ready(true);
-        vrings[EVENT_QUEUE_IDX as usize]
-            .set_queue_info(0x100, 0x200, 0x300)
-            .unwrap();
-        vrings[EVENT_QUEUE_IDX as usize].set_queue_ready(true);
-        vrings[TX_QUEUE_IDX as usize]
-            .set_queue_info(0x1100, 0x1200, 0x1300)
-            .unwrap();
-        vrings[TX_QUEUE_IDX as usize].set_queue_ready(true);
-        vrings[RX_QUEUE_IDX as usize]
-            .set_queue_info(0x100, 0x200, 0x300)
-            .unwrap();
-        vrings[RX_QUEUE_IDX as usize].set_queue_ready(true);
+            // Mock Vring for queues
+            let vrings = [
+                VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+                VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+                VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+                VringRwLock::new(mem.clone(), 0x1000).unwrap(),
+            ];
+            vrings[CONTROL_QUEUE_IDX as usize]
+                .set_queue_info(0x100, 0x200, 0x300)
+                .unwrap();
+            vrings[CONTROL_QUEUE_IDX as usize].set_queue_ready(true);
+            vrings[EVENT_QUEUE_IDX as usize]
+                .set_queue_info(0x100, 0x200, 0x300)
+                .unwrap();
+            vrings[EVENT_QUEUE_IDX as usize].set_queue_ready(true);
+            vrings[TX_QUEUE_IDX as usize]
+                .set_queue_info(0x1100, 0x1200, 0x1300)
+                .unwrap();
+            vrings[TX_QUEUE_IDX as usize].set_queue_ready(true);
+            vrings[RX_QUEUE_IDX as usize]
+                .set_queue_info(0x100, 0x200, 0x300)
+                .unwrap();
+            vrings[RX_QUEUE_IDX as usize].set_queue_ready(true);
 
-        backend.update_memory(mem).unwrap();
+            backend.update_memory(mem).unwrap();
 
-        let queues_per_thread = backend.queues_per_thread();
-        assert_eq!(queues_per_thread.len(), 1);
-        assert_eq!(queues_per_thread[0], 0xf);
+            let queues_per_thread = backend.queues_per_thread();
+            assert_eq!(queues_per_thread.len(), 1);
+            assert_eq!(queues_per_thread[0], 0xf);
 
-        let config = backend.get_config(0, 8);
-        assert_eq!(config.len(), 8);
+            let config = backend.get_config(0, 8);
+            assert_eq!(config.len(), 8);
 
-        let exit = backend.exit_event(0);
-        assert!(exit.is_some());
-        exit.unwrap().write(1).unwrap();
+            let exit = backend.exit_event(0);
+            assert!(exit.is_some());
+            exit.unwrap().write(1).unwrap();
 
-        backend
-            .handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0)
-            .unwrap();
-        backend
-            .handle_event(EVENT_QUEUE_IDX, EventSet::IN, &vrings, 0)
-            .unwrap();
-        backend
-            .handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0)
-            .unwrap();
-        backend
-            .handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0)
-            .unwrap();
-        backend
-            .handle_event(RX_QUEUE_IDX * 2, EventSet::IN, &vrings, 0)
-            .unwrap_err();
+            backend
+                .handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0)
+                .unwrap();
+            backend
+                .handle_event(EVENT_QUEUE_IDX, EventSet::IN, &vrings, 0)
+                .unwrap();
+            backend
+                .handle_event(TX_QUEUE_IDX, EventSet::IN, &vrings, 0)
+                .unwrap();
+            backend
+                .handle_event(RX_QUEUE_IDX, EventSet::IN, &vrings, 0)
+                .unwrap();
+            backend
+                .handle_event(RX_QUEUE_IDX * 2, EventSet::IN, &vrings, 0)
+                .unwrap_err();
+        }
 
         test_dir.close().unwrap();
     }

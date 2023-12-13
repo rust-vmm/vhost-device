@@ -827,6 +827,7 @@ mod tests {
 
     #[test]
     fn test_sound_thread_success() {
+        crate::init_logger();
         let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
 
         let chmaps = Arc::new(RwLock::new(vec![]));
@@ -921,6 +922,7 @@ mod tests {
 
     #[test]
     fn test_sound_thread_failure() {
+        crate::init_logger();
         let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
 
         let chmaps = Arc::new(RwLock::new(vec![]));
@@ -995,6 +997,7 @@ mod tests {
 
     #[test]
     fn test_sound_backend() {
+        crate::init_logger();
         let test_dir = tempdir().expect("Could not create a temp test directory.");
         let socket_path = test_dir.path().join(SOCKET_PATH).display().to_string();
         let config = SoundConfig::new(socket_path, false, BackendType::Null);
@@ -1069,6 +1072,7 @@ mod tests {
 
     #[test]
     fn test_sound_backend_failures() {
+        crate::init_logger();
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let socket_path = test_dir

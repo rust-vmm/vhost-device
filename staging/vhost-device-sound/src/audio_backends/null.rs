@@ -34,6 +34,7 @@ mod tests {
 
     #[test]
     fn test_null_backend_write() {
+        crate::init_logger();
         let streams = Arc::new(RwLock::new(vec![Stream::default()]));
         let null_backend = NullBackend::new(streams.clone());
 
@@ -45,6 +46,7 @@ mod tests {
 
     #[test]
     fn test_null_backend_read() {
+        crate::init_logger();
         let streams = Arc::new(RwLock::new(vec![Stream::default()]));
         let null_backend = NullBackend::new(streams.clone());
 

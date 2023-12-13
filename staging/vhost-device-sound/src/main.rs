@@ -53,8 +53,14 @@ mod tests {
         }
     }
 
+    fn init_logger() {
+        std::env::set_var("RUST_LOG", "trace");
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn test_sound_config_setup() {
+        init_logger();
         let args = SoundArgs::from_args("/tmp/vhost-sound.socket");
 
         let config = SoundConfig::try_from(args);

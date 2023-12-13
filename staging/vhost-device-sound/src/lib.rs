@@ -30,6 +30,12 @@
     clippy::significant_drop_tightening
 )]
 
+#[cfg(test)]
+pub fn init_logger() {
+    std::env::set_var("RUST_LOG", "trace");
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 pub mod audio_backends;
 pub mod device;
 pub mod stream;
@@ -319,6 +325,7 @@ mod tests {
     #[test]
     fn test_sound_server() {
         const SOCKET_PATH: &str = "vsound.socket";
+        crate::init_logger();
 
         let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
 
@@ -341,6 +348,7 @@ mod tests {
 
     #[test]
     fn test_control_message_kind_try_from() {
+        crate::init_logger();
         assert_eq!(
             ControlMessageKind::try_from(<u32 as Into<Le32>>::into(VIRTIO_SND_R_JACK_INFO)),
             Ok(ControlMessageKind::JackInfo)
@@ -361,6 +369,7 @@ mod tests {
 
     #[test]
     fn test_control_message_kind_try_from_invalid() {
+        crate::init_logger();
         // Test an invalid value that should result in an InvalidControlMessage error
         let invalid_value: u32 = 0x1101;
         assert_eq!(
@@ -371,6 +380,7 @@ mod tests {
 
     #[test]
     fn test_try_from_valid_output() {
+        crate::init_logger();
         let val = virtio_sound::VIRTIO_SND_D_OUTPUT;
         assert_eq!(Direction::try_from(val).unwrap(), Direction::Output);
 
@@ -383,6 +393,7 @@ mod tests {
 
     #[test]
     fn test_display() {
+        crate::init_logger();
         let error = InvalidControlMessage(42);
         let formatted_error = format!("{}", error);
         assert_eq!(formatted_error, "Invalid control message code 42");
@@ -390,6 +401,7 @@ mod tests {
 
     #[test]
     fn test_into_error() {
+        crate::init_logger();
         let error = InvalidControlMessage(42);
         let _error: Error = error.into();
 

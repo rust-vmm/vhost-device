@@ -575,6 +575,7 @@ mod tests {
 
     #[test]
     fn test_pipewire_backend_success() {
+        crate::init_logger();
         let streams = Arc::new(RwLock::new(vec![Stream::default()]));
         let stream_params = streams.clone();
 
@@ -603,6 +604,7 @@ mod tests {
 
     #[test]
     fn test_pipewire_backend_invalid_stream() {
+        crate::init_logger();
         let stream_params = Arc::new(RwLock::new(vec![]));
 
         let _test_harness = PipewireTestHarness::new();

@@ -645,12 +645,14 @@ impl AudioBackend for AlsaBackend {
     }
 
     fn stop(&self, id: u32) -> CrateResult<()> {
-        if let Some(Err(err)) = self
+        if let Err(err) = self
             .streams
             .write()
             .unwrap()
             .get_mut(id as usize)
-            .map(|s| s.state.stop())
+            .ok_or_else(|| Error::StreamWithIdNotFound(id))?
+            .state
+            .stop()
         {
             log::error!("Stream {} stop {}", id, err);
         }

@@ -724,3 +724,512 @@ impl AudioBackend for AlsaBackend {
         self
     }
 }
+
+#[cfg(test)]
+/// Utilities for temporarily setting a test-specific alsa config.
+pub mod test_utils;
+
+#[cfg(test)]
+mod tests {
+    use super::{test_utils::setup_alsa_conf, *};
+    use crate::{stream::PcmParams, virtio_sound::*};
+
+    const RATES: [u8; _VIRTIO_SND_PCM_RATE_MAX as usize] = [
+        virtio_sound::VIRTIO_SND_PCM_RATE_5512,
+        virtio_sound::VIRTIO_SND_PCM_RATE_8000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_11025,
+        virtio_sound::VIRTIO_SND_PCM_RATE_16000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_22050,
+        virtio_sound::VIRTIO_SND_PCM_RATE_32000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_44100,
+        virtio_sound::VIRTIO_SND_PCM_RATE_48000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_64000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_88200,
+        virtio_sound::VIRTIO_SND_PCM_RATE_96000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_176400,
+        virtio_sound::VIRTIO_SND_PCM_RATE_192000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_384000,
+    ];
+
+    const FORMATS: [u8; _VIRTIO_SND_PCM_FMT_MAX as usize] = [
+        virtio_sound::VIRTIO_SND_PCM_FMT_IMA_ADPCM,
+        virtio_sound::VIRTIO_SND_PCM_FMT_MU_LAW,
+        virtio_sound::VIRTIO_SND_PCM_FMT_A_LAW,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S8,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U8,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S16,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U16,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S18_3,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U18_3,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S20_3,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U20_3,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S24_3,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U24_3,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S20,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U20,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S24,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U24,
+        virtio_sound::VIRTIO_SND_PCM_FMT_S32,
+        virtio_sound::VIRTIO_SND_PCM_FMT_U32,
+        virtio_sound::VIRTIO_SND_PCM_FMT_FLOAT,
+        virtio_sound::VIRTIO_SND_PCM_FMT_FLOAT64,
+        virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U8,
+        virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U16,
+        virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U32,
+        virtio_sound::VIRTIO_SND_PCM_FMT_IEC958_SUBFRAME,
+    ];
+
+    #[test]
+    fn test_alsa_trait_impls() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let _: alsa::Direction = Direction::Output.into();
+        let _: alsa::Direction = Direction::Input.into();
+
+        let backend = AlsaBackend::new(Default::default());
+        #[allow(clippy::redundant_clone)]
+        let _ = backend.clone();
+
+        _ = format!("{:?}", backend);
+    }
+
+    #[test]
+    fn test_alsa_ops() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![
+            Stream::default(),
+            Stream {
+                id: 1,
+                direction: Direction::Input,
+                ..Stream::default()
+            },
+        ]));
+        let backend = AlsaBackend::new(streams);
+        let request = VirtioSndPcmSetParams {
+            hdr: VirtioSoundPcmHeader {
+                stream_id: 0.into(),
+                hdr: VirtioSoundHeader { code: 0.into() },
+            },
+            format: VIRTIO_SND_PCM_FMT_S16,
+            rate: VIRTIO_SND_PCM_RATE_44100,
+            channels: 2,
+            features: 0.into(),
+            buffer_bytes: 8192.into(),
+            period_bytes: 4096.into(),
+            padding: 0,
+        };
+        backend.set_parameters(0, request).unwrap();
+        backend.prepare(0).unwrap();
+        backend.start(0).unwrap();
+        backend.write(0).unwrap();
+        backend.read(0).unwrap();
+        backend.stop(0).unwrap();
+        backend.release(0).unwrap();
+    }
+
+    #[test]
+    fn test_alsa_invalid_stream_id() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![
+            Stream::default(),
+            Stream {
+                id: 1,
+                direction: Direction::Input,
+                ..Stream::default()
+            },
+        ]));
+        let backend = AlsaBackend::new(streams);
+        let request = VirtioSndPcmSetParams {
+            hdr: VirtioSoundPcmHeader {
+                stream_id: 3.into(),
+                hdr: VirtioSoundHeader { code: 0.into() },
+            },
+            format: VIRTIO_SND_PCM_FMT_S16,
+            rate: VIRTIO_SND_PCM_RATE_44100,
+            channels: 2,
+            features: 0.into(),
+            buffer_bytes: 8192.into(),
+            period_bytes: 4096.into(),
+            padding: 0,
+        };
+        backend.set_parameters(3, request).unwrap_err();
+        backend.prepare(3).unwrap_err();
+        backend.start(3).unwrap_err();
+        backend.write(3).unwrap_err();
+        backend.read(3).unwrap_err();
+        backend.stop(3).unwrap_err();
+        backend.release(3).unwrap_err();
+    }
+
+    #[test]
+    fn test_alsa_invalid_state_transitions() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![
+            Stream::default(),
+            Stream {
+                id: 1,
+                direction: Direction::Input,
+                ..Stream::default()
+            },
+        ]));
+        let request = VirtioSndPcmSetParams {
+            hdr: VirtioSoundPcmHeader {
+                stream_id: 3.into(),
+                hdr: VirtioSoundHeader { code: 0.into() },
+            },
+            format: VIRTIO_SND_PCM_FMT_S16,
+            rate: VIRTIO_SND_PCM_RATE_44100,
+            channels: 2,
+            features: 0.into(),
+            buffer_bytes: 8192.into(),
+            period_bytes: 4096.into(),
+            padding: 0,
+        };
+        {
+            let backend = AlsaBackend::new(streams.clone());
+
+            // Invalid, but we allow it.
+            backend.stop(0).unwrap();
+            // Invalid, but we don't allow it.
+            backend.release(0).unwrap_err();
+            backend.start(0).unwrap_err();
+            backend.release(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+
+            // set_parameters -> set_parameters | VALID
+            backend.set_parameters(0, request).unwrap();
+
+            // set_parameters -> prepare | VALID
+            backend.prepare(0).unwrap();
+
+            // Invalid, but we allow it.
+            // prepare -> stop | INVALID
+            backend.stop(0).unwrap();
+            // prepare -> release | VALID
+            backend.release(0).unwrap();
+
+            // release -> start | INVALID
+            backend.start(0).unwrap_err();
+            // release -> stop | VALID
+            backend.stop(0).unwrap();
+            // release -> prepare | VALID
+            backend.prepare(0).unwrap();
+
+            // prepare -> start | VALID
+            backend.start(0).unwrap();
+
+            // start -> start | INVALID
+            backend.start(0).unwrap_err();
+            // start -> set_parameters | INVALID
+            backend.set_parameters(0, request).unwrap_err();
+            // start -> prepare | INVALID
+            backend.prepare(0).unwrap_err();
+            // start -> release | INVALID
+            backend.release(0).unwrap_err();
+            // start -> stop | VALID
+            backend.stop(0).unwrap();
+            // stop -> start | VALID
+            backend.start(0).unwrap();
+            // start -> stop | VALID
+            backend.stop(0).unwrap();
+            // stop -> prepare | INVALID
+            backend.prepare(0).unwrap_err();
+            // stop -> set_parameters | INVALID
+            backend.set_parameters(0, request).unwrap_err();
+            // stop -> release | VALID
+            backend.release(0).unwrap();
+        }
+
+        // Redundant checks? Oh well.
+        //
+        // Generated with:
+        //
+        // ```python
+        // import itertools
+        // states = ["SetParameters", "Prepare", "Release", "Start", "Stop"]
+        // combs = set(itertools.product(states, repeat=2))
+        // ```
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap();
+            backend.prepare(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.prepare(0).unwrap();
+            backend.stop(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.start(0).unwrap();
+            backend.start(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.prepare(0).unwrap_err();
+            backend.start(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.stop(0).unwrap();
+            backend.release(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.stop(0).unwrap();
+            backend.prepare(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.release(0).unwrap();
+            backend.set_parameters(0, request).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.start(0).unwrap_err();
+            backend.set_parameters(0, request).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.prepare(0).unwrap();
+            backend.set_parameters(0, request).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.release(0).unwrap_err();
+            backend.read(0).unwrap_err();
+            backend.write(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap();
+            backend.stop(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.release(0).unwrap_err();
+            backend.prepare(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap();
+            backend.start(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.start(0).unwrap_err();
+            backend.release(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.prepare(0).unwrap();
+            backend.release(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.start(0).unwrap_err();
+            backend.prepare(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.stop(0).unwrap();
+            backend.stop(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.prepare(0).unwrap();
+            backend.prepare(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.stop(0).unwrap();
+            backend.start(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap_err();
+            backend.release(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.release(0).unwrap_err();
+            backend.stop(0).unwrap();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.stop(0).unwrap();
+            backend.set_parameters(0, request).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams.clone());
+            backend.release(0).unwrap();
+            backend.start(0).unwrap_err();
+        }
+        {
+            let backend = AlsaBackend::new(streams);
+            backend.start(0).unwrap_err();
+            backend.stop(0).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_alsa_worker() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![
+            Stream::default(),
+            Stream {
+                id: 1,
+                direction: Direction::Input,
+                ..Stream::default()
+            },
+        ]));
+        let (sender, receiver) = channel();
+        let pcm = Arc::new(Mutex::new(
+            PCM::new("null", Direction::Output.into(), false).unwrap(),
+        ));
+
+        let mtx = Arc::clone(&pcm);
+        let streams = Arc::clone(&streams);
+        let _handle =
+            thread::spawn(move || alsa_worker(mtx.clone(), streams.clone(), &receiver, 0));
+        sender.send(false).unwrap();
+    }
+
+    #[test]
+    fn test_alsa_valid_parameters() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![
+            Stream::default(),
+            Stream {
+                id: 1,
+                direction: Direction::Input,
+                ..Stream::default()
+            },
+        ]));
+        let mut request = VirtioSndPcmSetParams {
+            hdr: VirtioSoundPcmHeader {
+                stream_id: 0.into(),
+                hdr: VirtioSoundHeader { code: 0.into() },
+            },
+            format: VIRTIO_SND_PCM_FMT_S16,
+            rate: VIRTIO_SND_PCM_RATE_44100,
+            channels: 2,
+            features: 0.into(),
+            buffer_bytes: 8192.into(),
+            period_bytes: 4096.into(),
+            padding: 0,
+        };
+
+        for rate in RATES
+            .iter()
+            .cloned()
+            .filter(|rt| ((1 << *rt) & crate::SUPPORTED_RATES) > 0)
+        {
+            request.rate = rate;
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap();
+        }
+
+        for rate in RATES
+            .iter()
+            .cloned()
+            .filter(|rt| ((1 << *rt) & crate::SUPPORTED_RATES) == 0)
+        {
+            request.rate = rate;
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap_err();
+        }
+        request.rate = VIRTIO_SND_PCM_RATE_44100;
+
+        for format in FORMATS
+            .iter()
+            .cloned()
+            .filter(|fmt| ((1 << *fmt) & crate::SUPPORTED_FORMATS) > 0)
+        {
+            request.format = format;
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap();
+        }
+
+        for format in FORMATS
+            .iter()
+            .cloned()
+            .filter(|fmt| ((1 << *fmt) & crate::SUPPORTED_FORMATS) == 0)
+        {
+            request.format = format;
+            let backend = AlsaBackend::new(streams.clone());
+            backend.set_parameters(0, request).unwrap_err();
+        }
+
+        {
+            for format in FORMATS
+                .iter()
+                .cloned()
+                .filter(|fmt| ((1 << *fmt) & crate::SUPPORTED_FORMATS) > 0)
+            {
+                let streams = Arc::new(RwLock::new(vec![Stream {
+                    params: PcmParams {
+                        format,
+                        ..PcmParams::default()
+                    },
+                    ..Stream::default()
+                }]));
+                let pcm = Arc::new(Mutex::new(
+                    PCM::new("null", Direction::Output.into(), false).unwrap(),
+                ));
+                update_pcm(&pcm, 0, &streams).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unreachable")]
+    fn test_alsa_invalid_rate() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![Stream {
+            params: PcmParams {
+                rate: _VIRTIO_SND_PCM_RATE_MAX,
+                ..PcmParams::default()
+            },
+            ..Stream::default()
+        }]));
+        let pcm = Arc::new(Mutex::new(
+            PCM::new("null", Direction::Output.into(), false).unwrap(),
+        ));
+        update_pcm(&pcm, 0, &streams).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "unreachable")]
+    fn test_alsa_invalid_fmt() {
+        crate::init_logger();
+        let _harness = setup_alsa_conf();
+
+        let streams = Arc::new(RwLock::new(vec![Stream {
+            params: PcmParams {
+                format: _VIRTIO_SND_PCM_FMT_MAX,
+                ..PcmParams::default()
+            },
+            ..Stream::default()
+        }]));
+        let pcm = Arc::new(Mutex::new(
+            PCM::new("null", Direction::Output.into(), false).unwrap(),
+        ));
+        update_pcm(&pcm, 0, &streams).unwrap();
+    }
+}

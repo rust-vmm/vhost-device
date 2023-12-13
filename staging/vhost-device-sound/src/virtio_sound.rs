@@ -89,6 +89,7 @@ pub const VIRTIO_SND_PCM_FMT_DSD_U8: u8 = 21;
 pub const VIRTIO_SND_PCM_FMT_DSD_U16: u8 = 22;
 pub const VIRTIO_SND_PCM_FMT_DSD_U32: u8 = 23;
 pub const VIRTIO_SND_PCM_FMT_IEC958_SUBFRAME: u8 = 24;
+pub(crate) const _VIRTIO_SND_PCM_FMT_MAX: u8 = 25;
 
 // supported PCM frame rates
 
@@ -106,6 +107,7 @@ pub const VIRTIO_SND_PCM_RATE_96000: u8 = 10;
 pub const VIRTIO_SND_PCM_RATE_176400: u8 = 11;
 pub const VIRTIO_SND_PCM_RATE_192000: u8 = 12;
 pub const VIRTIO_SND_PCM_RATE_384000: u8 = 13;
+pub(crate) const _VIRTIO_SND_PCM_RATE_MAX: u8 = 14;
 
 // standard channel position definition
 

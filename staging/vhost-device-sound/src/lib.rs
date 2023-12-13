@@ -94,7 +94,43 @@ impl TryFrom<u8> for Direction {
         Ok(match val {
             virtio_sound::VIRTIO_SND_D_OUTPUT => Self::Output,
             virtio_sound::VIRTIO_SND_D_INPUT => Self::Input,
-            other => return Err(Error::InvalidMessageValue(stringify!(Direction), other)),
+            other => {
+                return Err(Error::InvalidMessageValue(
+                    stringify!(Direction),
+                    other.into(),
+                ))
+            }
+        })
+    }
+}
+
+/// Queue index.
+///
+/// Type safe enum for CONTROL_QUEUE_IDX, EVENT_QUEUE_IDX, TX_QUEUE_IDX,
+/// RX_QUEUE_IDX.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u16)]
+pub enum QueueIdx {
+    #[doc(alias = "CONTROL_QUEUE_IDX")]
+    Control = virtio_sound::CONTROL_QUEUE_IDX,
+    #[doc(alias = "EVENT_QUEUE_IDX")]
+    Event = virtio_sound::EVENT_QUEUE_IDX,
+    #[doc(alias = "TX_QUEUE_IDX")]
+    Tx = virtio_sound::TX_QUEUE_IDX,
+    #[doc(alias = "RX_QUEUE_IDX")]
+    Rx = virtio_sound::RX_QUEUE_IDX,
+}
+
+impl TryFrom<u16> for QueueIdx {
+    type Error = Error;
+
+    fn try_from(val: u16) -> std::result::Result<Self, Self::Error> {
+        Ok(match val {
+            virtio_sound::CONTROL_QUEUE_IDX => Self::Control,
+            virtio_sound::EVENT_QUEUE_IDX => Self::Event,
+            virtio_sound::TX_QUEUE_IDX => Self::Tx,
+            virtio_sound::RX_QUEUE_IDX => Self::Rx,
+            other => return Err(Error::InvalidMessageValue(stringify!(QueueIdx), other)),
         })
     }
 }
@@ -117,7 +153,7 @@ pub enum Error {
     #[error("Invalid control message code {0}")]
     InvalidControlMessage(u32),
     #[error("Invalid value in {0}: {1}")]
-    InvalidMessageValue(&'static str, u8),
+    InvalidMessageValue(&'static str, u16),
     #[error("Failed to create a new EventFd")]
     EventFdCreate(IoError),
     #[error("Request missing data buffer")]
@@ -389,6 +425,25 @@ mod tests {
 
         let val = 42;
         Direction::try_from(val).unwrap_err();
+
+        assert_eq!(
+            QueueIdx::try_from(virtio_sound::CONTROL_QUEUE_IDX).unwrap(),
+            QueueIdx::Control
+        );
+        assert_eq!(
+            QueueIdx::try_from(virtio_sound::EVENT_QUEUE_IDX).unwrap(),
+            QueueIdx::Event
+        );
+        assert_eq!(
+            QueueIdx::try_from(virtio_sound::TX_QUEUE_IDX).unwrap(),
+            QueueIdx::Tx
+        );
+        assert_eq!(
+            QueueIdx::try_from(virtio_sound::RX_QUEUE_IDX).unwrap(),
+            QueueIdx::Rx
+        );
+        let val = virtio_sound::NUM_QUEUES;
+        QueueIdx::try_from(val).unwrap_err();
     }
 
     #[test]

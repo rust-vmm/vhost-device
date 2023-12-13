@@ -30,7 +30,7 @@ use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
     stream::{Buffer, Error as StreamError, Stream},
     virtio_sound::*,
-    ControlMessageKind, Direction, Error, IOMessage, Result, SoundConfig,
+    ControlMessageKind, Direction, Error, IOMessage, QueueIdx, Result, SoundConfig,
 };
 
 pub struct VhostUserSoundThread {
@@ -38,7 +38,7 @@ pub struct VhostUserSoundThread {
     event_idx: bool,
     chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>>,
     jacks: Arc<RwLock<Vec<VirtioSoundJackInfo>>>,
-    queue_indexes: Vec<u16>,
+    queue_indexes: Vec<QueueIdx>,
     streams: Arc<RwLock<Vec<Stream>>>,
     streams_no: usize,
 }
@@ -49,11 +49,11 @@ impl VhostUserSoundThread {
     pub fn new(
         chmaps: Arc<RwLock<Vec<VirtioSoundChmapInfo>>>,
         jacks: Arc<RwLock<Vec<VirtioSoundJackInfo>>>,
-        mut queue_indexes: Vec<u16>,
+        mut queue_indexes: Vec<QueueIdx>,
         streams: Arc<RwLock<Vec<Stream>>>,
         streams_no: usize,
     ) -> Result<Self> {
-        queue_indexes.sort();
+        queue_indexes.sort_by_key(|idx| *idx as u16);
 
         Ok(Self {
             event_idx: false,
@@ -70,7 +70,7 @@ impl VhostUserSoundThread {
         let mut queues_per_thread = 0u64;
 
         for idx in self.queue_indexes.iter() {
-            queues_per_thread |= 1u64 << idx
+            queues_per_thread |= 1u64 << *idx as u16
         }
 
         queues_per_thread
@@ -94,7 +94,10 @@ impl VhostUserSoundThread {
         let vring = &vrings
             .get(device_event as usize)
             .ok_or_else(|| Error::HandleUnknownEvent(device_event))?;
-        let queue_idx = self.queue_indexes[device_event as usize];
+        let queue_idx = self
+            .queue_indexes
+            .get(device_event as usize)
+            .ok_or_else(|| Error::HandleUnknownEvent(device_event))?;
         if self.event_idx {
             // vm-virtio's Queue implementation only checks avail_index
             // once, so to properly support EVENT_IDX we need to keep
@@ -103,11 +106,10 @@ impl VhostUserSoundThread {
             loop {
                 vring.disable_notification().unwrap();
                 match queue_idx {
-                    CONTROL_QUEUE_IDX => self.process_control(vring, audio_backend),
-                    EVENT_QUEUE_IDX => self.process_event(vring),
-                    TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
-                    RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
-                    _ => Err(Error::HandleUnknownEvent(queue_idx).into()),
+                    QueueIdx::Control => self.process_control(vring, audio_backend),
+                    QueueIdx::Event => self.process_event(vring),
+                    QueueIdx::Tx => self.process_io(vring, audio_backend, Direction::Output),
+                    QueueIdx::Rx => self.process_io(vring, audio_backend, Direction::Input),
                 }?;
                 if !vring.enable_notification().unwrap() {
                     break;
@@ -116,11 +118,10 @@ impl VhostUserSoundThread {
         } else {
             // Without EVENT_IDX, a single call is enough.
             match queue_idx {
-                CONTROL_QUEUE_IDX => self.process_control(vring, audio_backend),
-                EVENT_QUEUE_IDX => self.process_event(vring),
-                TX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Output),
-                RX_QUEUE_IDX => self.process_io(vring, audio_backend, Direction::Input),
-                _ => Err(Error::HandleUnknownEvent(queue_idx).into()),
+                QueueIdx::Control => self.process_control(vring, audio_backend),
+                QueueIdx::Event => self.process_event(vring),
+                QueueIdx::Tx => self.process_io(vring, audio_backend, Direction::Output),
+                QueueIdx::Rx => self.process_io(vring, audio_backend, Direction::Input),
             }?;
         }
         Ok(())
@@ -635,21 +636,21 @@ impl VhostUserSoundBackend {
                 RwLock::new(VhostUserSoundThread::new(
                     chmaps.clone(),
                     jacks.clone(),
-                    vec![CONTROL_QUEUE_IDX, EVENT_QUEUE_IDX],
+                    vec![QueueIdx::Control, QueueIdx::Event],
                     streams.clone(),
                     streams_no,
                 )?),
                 RwLock::new(VhostUserSoundThread::new(
                     chmaps.clone(),
                     jacks.clone(),
-                    vec![TX_QUEUE_IDX],
+                    vec![QueueIdx::Tx],
                     streams.clone(),
                     streams_no,
                 )?),
                 RwLock::new(VhostUserSoundThread::new(
                     chmaps,
                     jacks,
-                    vec![RX_QUEUE_IDX],
+                    vec![QueueIdx::Rx],
                     streams.clone(),
                     streams_no,
                 )?),
@@ -659,10 +660,10 @@ impl VhostUserSoundBackend {
                 chmaps,
                 jacks,
                 vec![
-                    CONTROL_QUEUE_IDX,
-                    EVENT_QUEUE_IDX,
-                    TX_QUEUE_IDX,
-                    RX_QUEUE_IDX,
+                    QueueIdx::Control,
+                    QueueIdx::Event,
+                    QueueIdx::Tx,
+                    QueueIdx::Rx,
                 ],
                 streams.clone(),
                 streams_no,
@@ -832,7 +833,7 @@ mod tests {
 
         let chmaps = Arc::new(RwLock::new(vec![]));
         let jacks = Arc::new(RwLock::new(vec![]));
-        let queue_indexes = vec![1, 2, 3];
+        let queue_indexes = vec![QueueIdx::Event, QueueIdx::Tx, QueueIdx::Rx];
         let streams = vec![Stream::default()];
         let streams_no = streams.len();
         let streams = Arc::new(RwLock::new(streams));
@@ -927,7 +928,7 @@ mod tests {
 
         let chmaps = Arc::new(RwLock::new(vec![]));
         let jacks = Arc::new(RwLock::new(vec![]));
-        let queue_indexes = vec![1, 2, 3];
+        let queue_indexes = vec![QueueIdx::Event, QueueIdx::Tx, QueueIdx::Rx];
         let streams = Arc::new(RwLock::new(vec![]));
         let streams_no = 0;
         let thread =

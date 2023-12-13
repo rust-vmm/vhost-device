@@ -26,6 +26,11 @@ impl AudioBackend for NullBackend {
         log::trace!("NullBackend read stream_id {}", _id);
         Ok(())
     }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]

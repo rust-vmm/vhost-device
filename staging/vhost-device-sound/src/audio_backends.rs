@@ -41,6 +41,9 @@ pub trait AudioBackend {
     fn stop(&self, _stream_id: u32) -> Result<()> {
         Ok(())
     }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 pub fn alloc_audio_backend(
@@ -54,5 +57,37 @@ pub fn alloc_audio_backend(
         BackendType::Pipewire => Ok(Box::new(PwBackend::new(streams))),
         #[cfg(feature = "alsa-backend")]
         BackendType::Alsa => Ok(Box::new(AlsaBackend::new(streams))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::TypeId;
+
+    use super::*;
+
+    #[test]
+    fn test_alloc_audio_backend() {
+        crate::init_logger();
+        {
+            let v = BackendType::Null;
+            let value = alloc_audio_backend(v, Default::default()).unwrap();
+            assert_eq!(TypeId::of::<NullBackend>(), value.as_any().type_id());
+        }
+        #[cfg(feature = "pw-backend")]
+        {
+            use pipewire::{test_utils::PipewireTestHarness, *};
+
+            let _test_harness = PipewireTestHarness::new();
+            let v = BackendType::Pipewire;
+            let value = alloc_audio_backend(v, Default::default()).unwrap();
+            assert_eq!(TypeId::of::<PwBackend>(), value.as_any().type_id());
+        }
+        #[cfg(feature = "alsa-backend")]
+        {
+            let v = BackendType::Alsa;
+            let value = alloc_audio_backend(v, Default::default()).unwrap();
+            assert_eq!(TypeId::of::<AlsaBackend>(), value.as_any().type_id());
+        }
     }
 }

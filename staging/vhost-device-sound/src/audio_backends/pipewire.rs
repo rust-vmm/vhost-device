@@ -562,12 +562,17 @@ impl AudioBackend for PwBackend {
         lock_guard.unlock();
         Ok(())
     }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 #[cfg(test)]
 /// Utilities for building a temporary Dbus session and a pipewire instance for
 /// testing.
-mod test_utils;
+pub mod test_utils;
 
 #[cfg(test)]
 mod tests {

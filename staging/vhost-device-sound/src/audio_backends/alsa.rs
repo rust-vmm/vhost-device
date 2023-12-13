@@ -718,4 +718,9 @@ impl AudioBackend for AlsaBackend {
         std::mem::take(&mut streams[stream_id as usize].buffers);
         Ok(())
     }
+
+    #[cfg(test)]
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

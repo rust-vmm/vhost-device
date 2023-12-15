@@ -1,19 +1,19 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
 mod alsa;
 mod null;
 
-#[cfg(feature = "pw-backend")]
+#[cfg(all(feature = "pw-backend", target_env = "gnu"))]
 mod pipewire;
 
 use std::sync::{Arc, RwLock};
 
-#[cfg(feature = "alsa-backend")]
+#[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
 use self::alsa::AlsaBackend;
 use self::null::NullBackend;
-#[cfg(feature = "pw-backend")]
+#[cfg(all(feature = "pw-backend", target_env = "gnu"))]
 use self::pipewire::PwBackend;
 use crate::{stream::Stream, BackendType, Result, VirtioSndPcmSetParams};
 
@@ -53,9 +53,9 @@ pub fn alloc_audio_backend(
     log::trace!("allocating audio backend {:?}", backend);
     match backend {
         BackendType::Null => Ok(Box::new(NullBackend::new(streams))),
-        #[cfg(feature = "pw-backend")]
+        #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
         BackendType::Pipewire => Ok(Box::new(PwBackend::new(streams))),
-        #[cfg(feature = "alsa-backend")]
+        #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
         BackendType::Alsa => Ok(Box::new(AlsaBackend::new(streams))),
     }
 }
@@ -74,7 +74,7 @@ mod tests {
             let value = alloc_audio_backend(v, Default::default()).unwrap();
             assert_eq!(TypeId::of::<NullBackend>(), value.as_any().type_id());
         }
-        #[cfg(feature = "pw-backend")]
+        #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
         {
             use pipewire::{test_utils::PipewireTestHarness, *};
 
@@ -83,7 +83,7 @@ mod tests {
             let value = alloc_audio_backend(v, Default::default()).unwrap();
             assert_eq!(TypeId::of::<PwBackend>(), value.as_any().type_id());
         }
-        #[cfg(feature = "alsa-backend")]
+        #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
         {
             let v = BackendType::Alsa;
             let value = alloc_audio_backend(v, Default::default()).unwrap();

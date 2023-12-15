@@ -73,10 +73,13 @@ mod tests {
     #[rstest]
     #[case::null_backend("null", BackendType::Null)]
     #[cfg_attr(
-        feature = "pw-backend",
+        all(feature = "pw-backend", target_env = "gnu"),
         case::pipewire("pipewire", BackendType::Pipewire)
     )]
-    #[cfg_attr(feature = "alsa-backend", case::alsa("alsa", BackendType::Alsa))]
+    #[cfg_attr(
+        all(feature = "alsa-backend", target_env = "gnu"),
+        case::alsa("alsa", BackendType::Alsa)
+    )]
     fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
         let args: SoundArgs = Parser::parse_from([
             "",

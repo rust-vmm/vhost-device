@@ -1,18 +1,30 @@
 {
   "tests": [
     {
-      "test_name": "staging: build-gnu",
-      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release",
+      "test_name": "staging: build",
+      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build -p {{ matrix.package }} --release --all-features --target {target_platform}-unknown-linux-{{ matrix.environment }}",
+      "matrix": {
+        "setup": {
+          "package": [
+            "vhost-device-sound",
+            "vhost-device-video"
+          ],
+          "environment": [
+            "gnu",
+            "musl"
+          ]
+        },
+        "adjustments": [
+          {
+            "with": {
+              "package": "vhost-device-sound",
+              "environment": "musl"
+            },
+            "skip": "true"
+          }
+        ]
+      },
       "soft_fail": "false",
-      "platform": [
-        "x86_64",
-        "aarch64"
-      ]
-    },
-    {
-      "test_name": "staging: build-musl",
-      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl",
-      "soft_fail": "true",
       "platform": [
         "x86_64",
         "aarch64"
@@ -23,18 +35,35 @@
       "command": "cd staging && cargo fmt --all -- --check --config format_code_in_doc_comments=true"
     },
     {
-      "test_name": "staging: unittests-gnu",
-      "command": "cd staging && cargo test --all-features --workspace",
-      "soft_fail": "true",
-      "platform": [
-        "x86_64",
-        "aarch64"
-      ]
-    },
-    {
-      "test_name": "staging: unittests-musl",
-      "command": "cd staging && cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl",
-      "soft_fail": "true",
+      "test_name": "staging: unittests",
+      "command": "cd staging && cargo test --all-features -p {{ matrix.package }} --target {target_platform}-unknown-linux-{{ matrix.environment }}",
+      "matrix": {
+        "setup": {
+          "package": [
+            "vhost-device-sound",
+            "vhost-device-video"
+          ],
+          "environment": [
+            "gnu",
+            "musl"
+          ]
+        },
+        "adjustments": [
+          {
+            "with": {
+              "package": "vhost-device-sound",
+              "environment": "musl"
+            },
+            "skip": "true"
+          },
+          {
+            "with": {
+              "package": "vhost-device-video"
+            },
+            "soft_fail": "true"
+          }
+        ]
+      },
       "platform": [
         "x86_64",
         "aarch64"

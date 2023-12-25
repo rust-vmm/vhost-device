@@ -29,7 +29,7 @@ virtio-queue = "0.10"
 vm-memory = "0.13.1"
 vmm-sys-util = "0.11"
 evdev = "0.12"
-nix = "0.26"
+nix = "0.27"
 
 [dev-dependencies]
 assert_matches = "1.5"

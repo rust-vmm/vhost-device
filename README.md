@@ -20,6 +20,7 @@ Here is the list of device backends that we support:
 - [RNG](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-rng/README.md)
 - [SCMI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scmi/README.md)
 - [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)
+- [Sound](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-sound/README.md)
 - [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-vsock/README.md)
 
 The vhost-device workspace also provides a
@@ -44,7 +45,6 @@ More information may be found in its [README file](./staging/README.md).
 
 Here is the list of device backends in **staging**:
 
-- [Sound](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-sound/README.md)
 - [Video](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-video/README.md)
 
 <!--

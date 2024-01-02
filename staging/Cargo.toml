@@ -1,6 +1,5 @@
 [workspace]
 resolver = "2"
 members = [
-  "vhost-device-sound",
   "vhost-device-video",
 ]

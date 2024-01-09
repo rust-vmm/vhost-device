@@ -2,4 +2,5 @@
 resolver = "2"
 members = [
   "vhost-device-video",
+  "vhost-device-can",
 ]

@@ -98,7 +98,7 @@ pub(crate) fn start_backend(config: VuVideoConfig) -> Result<()> {
 fn main() -> Result<()> {
     env_logger::init();
 
-    start_backend(VuVideoConfig::try_from(VideoArgs::parse()).unwrap())
+    start_backend(VuVideoConfig::from(VideoArgs::parse()))
 }
 
 #[cfg(test)]
@@ -134,10 +134,7 @@ mod tests {
     fn test_command_line_arguments(#[case] args: Vec<&str>, #[case] command_line: VideoArgs) {
         let args: VideoArgs = Parser::parse_from(args.as_slice());
 
-        assert_eq!(
-            VuVideoConfig::try_from(command_line).unwrap(),
-            VuVideoConfig::try_from(args).unwrap()
-        );
+        assert_eq!(VuVideoConfig::from(command_line), VuVideoConfig::from(args));
     }
 
     #[test]
@@ -149,7 +146,7 @@ mod tests {
             backend: BackendType::V4L2Decoder,
         };
         assert_matches!(
-            start_backend(VuVideoConfig::try_from(config.clone()).unwrap()).unwrap_err(),
+            start_backend(VuVideoConfig::from(config.clone())).unwrap_err(),
             Error::CouldNotCreateBackend(VuVideoError::AccessVideoDeviceFile)
         );
     }
@@ -166,7 +163,7 @@ mod tests {
             backend: BackendType::Null,
         };
         assert_matches!(
-            start_backend(VuVideoConfig::try_from(config).unwrap()).unwrap_err(),
+            start_backend(VuVideoConfig::from(config)).unwrap_err(),
             Error::ServeFailed(_)
         );
         // cleanup

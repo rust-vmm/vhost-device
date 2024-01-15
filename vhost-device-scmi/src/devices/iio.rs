@@ -776,7 +776,7 @@ mod tests {
         // custom exponent = 2
         // applied and rounded: 45037037598 = 0xA7C6AA81E
         assert_eq!(result.len(), 4);
-        assert_eq!(result.get(0).unwrap(), &MessageValue::Unsigned(0x7C6AA81E));
+        assert_eq!(result.first().unwrap(), &MessageValue::Unsigned(0x7C6AA81E));
         assert_eq!(result.get(1).unwrap(), &MessageValue::Unsigned(0xA));
         assert_eq!(result.get(2).unwrap(), &MessageValue::Unsigned(0));
         assert_eq!(result.get(3).unwrap(), &MessageValue::Unsigned(0));
@@ -793,7 +793,7 @@ mod tests {
         sensor.initialize().unwrap();
         let result = sensor.reading_get().unwrap();
         assert_eq!(result.len(), 4);
-        assert_eq!(result.get(0).unwrap(), &MessageValue::Unsigned(0x5A));
+        assert_eq!(result.first().unwrap(), &MessageValue::Unsigned(0x5A));
         assert_eq!(result.get(1).unwrap(), &MessageValue::Unsigned(0));
         assert_eq!(result.get(2).unwrap(), &MessageValue::Unsigned(0));
         assert_eq!(result.get(3).unwrap(), &MessageValue::Unsigned(0));
@@ -815,7 +815,7 @@ mod tests {
         sensor.initialize().unwrap();
         let result = sensor.reading_get().unwrap();
         assert_eq!(result.len(), 12);
-        assert_eq!(result.get(0).unwrap(), &MessageValue::Unsigned(22));
+        assert_eq!(result.first().unwrap(), &MessageValue::Unsigned(22));
         assert_eq!(result.get(4).unwrap(), &MessageValue::Unsigned(60));
         assert_eq!(result.get(8).unwrap(), &MessageValue::Unsigned(150));
         for i in 0..12 {

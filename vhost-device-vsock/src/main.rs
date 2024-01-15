@@ -407,7 +407,7 @@ mod tests {
         let configs = configs.unwrap();
         assert_eq!(configs.len(), 3);
 
-        let config = configs.get(0).unwrap();
+        let config = configs.first().unwrap();
         assert_eq!(config.get_guest_cid(), 3);
         assert_eq!(
             config.get_socket_path(),

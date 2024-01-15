@@ -20,7 +20,7 @@ epoll = "4.3.2"
 log = "0.4"
 thiserror = "1.0"
 vhost = { version = "0.10", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.12"
+vhost-user-backend = "0.13"
 virtio-bindings = "0.2.2"
 virtio-queue = "0.11"
 virtio-vsock = "0.5"

@@ -31,7 +31,7 @@ vmm-sys-util = "0.12"
 # Make alsa and pipewire backends available only on gnu
 [target.'cfg(target_env = "gnu")'.dependencies]
 alsa = { version = "0.8", optional = true }
-pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "5fe090b3ac8f6fed756c4871ac18f26edda3ac89", optional = true }
+pw = { package = "pipewire", git = "https://gitlab.freedesktop.org/pipewire/pipewire-rs.git", rev = "675dab340015ba2cc9e8ad1cc99b3a1e5005a18a", optional = true }
 
 [dev-dependencies]
 rstest = "0.18.2"

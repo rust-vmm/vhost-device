@@ -10,7 +10,10 @@ use std::{
 };
 
 use log::debug;
-use pw::{properties, spa, sys::PW_ID_CORE, Context, Core, ThreadLoop};
+use pw::{
+    context::Context, core::Core, properties::properties, spa, sys::PW_ID_CORE,
+    thread_loop::ThreadLoop,
+};
 use spa::{
     param::{
         audio::{AudioFormat, AudioInfoRaw},
@@ -51,7 +54,7 @@ use crate::{
     Direction, Error, Result, Stream,
 };
 
-impl From<Direction> for spa::Direction {
+impl From<Direction> for spa::utils::Direction {
     fn from(val: Direction) -> Self {
         match val {
             Direction::Output => Self::Output,
@@ -89,7 +92,7 @@ impl PwBackend {
 
         let lock_guard = thread_loop.lock();
 
-        let context = pw::Context::new(&thread_loop).expect("failed to create context");
+        let context = Context::new(&thread_loop).expect("failed to create context");
         thread_loop.start();
         let core = context.connect(None).expect("Failed to connect to core");
 
@@ -336,10 +339,10 @@ impl AudioBackend for PwBackend {
 
             let listener_stream = stream
                 .add_local_listener()
-                .state_changed(|old, new| {
+                .state_changed(|_, _, old, new| {
                     debug!("State changed: {:?} -> {:?}", old, new);
                 })
-                .param_changed(move |stream, id, _data, param| {
+                .param_changed(move |stream, _data, id, param| {
                     let Some(_param) = param else {
                         return;
                     };

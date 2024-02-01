@@ -1,6 +1,6 @@
 // vhost device can
 //
-// Copyright 2023 VIRTUAL OPEN SYSTEMS SAS. All Rights Reserved.
+// Copyright 2023-2024 VIRTUAL OPEN SYSTEMS SAS. All Rights Reserved.
 //          Timos Ampelikiotis <t.ampelikiotis@virtualopensystems.com>
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
@@ -591,17 +591,20 @@ impl VhostUserCanBackend {
     /// Set self's VringWorker.
     pub(crate) fn set_vring_worker(
         &self,
-        vring_worker: &Arc<VringEpollHandler<Arc<RwLock<VhostUserCanBackend>>, VringRwLock, ()>>,
+        vring_worker: &Arc<VringEpollHandler<Arc<RwLock<VhostUserCanBackend>>>>,
     ) {
         let rx_event_fd = self.controller.read().unwrap().rx_event_fd.as_raw_fd();
         vring_worker
             .register_listener(rx_event_fd, EventSet::IN, u64::from(BACKEND_EFD))
-            .unwrap();
+            .expect("Fail to register new handler");
     }
 }
 
 /// VhostUserBackendMut trait methods
-impl VhostUserBackendMut<VringRwLock, ()> for VhostUserCanBackend {
+impl VhostUserBackendMut for VhostUserCanBackend {
+    type Vring = VringRwLock;
+    type Bitmap = ();
+
     fn num_queues(&self) -> usize {
         trace!("num_queues: {:?}", NUM_QUEUES);
         NUM_QUEUES
@@ -640,9 +643,9 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserCanBackend {
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        trace!("vhu_can->get_config");
         // SAFETY: The layout of the structure is fixed and can be initialized by
         // reading its content from byte array.
-        trace!("vhu_can->get_config");
         unsafe {
             from_raw_parts(
                 self.controller
@@ -659,7 +662,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserCanBackend {
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
@@ -674,7 +677,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserCanBackend {
         evset: EventSet,
         vrings: &[VringRwLock],
         _thread_id: usize,
-    ) -> IoResult<bool> {
+    ) -> IoResult<()> {
         trace!("\nhandle_event:");
 
         if evset != EventSet::IN {
@@ -682,7 +685,7 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserCanBackend {
         }
         if device_event == RX_QUEUE {
             trace!("RX_QUEUE\n");
-            return Ok(false);
+            return Ok(());
         };
         let vring = if device_event != BACKEND_EFD {
             &vrings[device_event as usize]
@@ -719,11 +722,10 @@ impl VhostUserBackendMut<VringRwLock, ()> for VhostUserCanBackend {
                 _ => Err(Error::HandleEventUnknown),
             }?;
         }
-        Ok(false)
+        Ok(())
     }
 
     fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        dbg!("exit_event\n");
         self.exit_event.try_clone().ok()
     }
 }

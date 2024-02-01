@@ -1,23 +1,27 @@
 // VIRTIO CAN Emulation via vhost-user
 //
-// Copyright 2023 VIRTUAL OPEN SYSTEMS SAS. All Rights Reserved.
+// Copyright 2023-2024 VIRTUAL OPEN SYSTEMS SAS. All Rights Reserved.
 //          Timos Ampelikiotis <t.ampelikiotis@virtualopensystems.com>
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use log::{error, info, warn};
+use std::any::Any;
 use std::process::exit;
 use std::sync::{Arc, RwLock};
-use std::thread::{spawn, JoinHandle};
+//use std::thread::{spawn, JoinHandle};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::thread;
 
 use clap::Parser;
 use thiserror::Error as ThisError;
-use vhost::{vhost_user, vhost_user::Listener};
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 use crate::can::CanController;
 use crate::vhu_can::VhostUserCanBackend;
+use socketcan::{CanSocket, Socket};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -26,8 +30,6 @@ pub(crate) type Result<T> = std::result::Result<T, Error>;
 pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
-    #[error("Failed to join threads")]
-    FailedJoiningThreads,
     #[error("Could not create can controller: {0}")]
     CouldNotCreateCanController(crate::can::Error),
     #[error("Could not create can controller output socket: {0}")]
@@ -36,22 +38,26 @@ pub(crate) enum Error {
     CouldNotCreateBackend(crate::vhu_can::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Could not find can devices")]
+    CouldNotFindCANDevs,
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
+    #[error("Thread `{0}` panicked")]
+    ThreadPanic(String, Box<dyn Any + Send>),
+    #[error("Could not parse can devices")]
+    WrongPairConf,
 }
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CanArgs {
     /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
-    #[clap(short, long)]
-    socket_path: String,
+    #[clap(short, long, value_name = "SOCKET")]
+    socket_path: PathBuf,
 
     /// A can device name to be used for reading (ex. vcan, can0, can1, ... etc.)
-    #[clap(short = 'i', long)]
-    can_in: String,
-
-    /// A can device name to be used for writing (ex. vcan, can0, can1, ... etc.)
-    #[clap(short = 'o', long)]
-    can_out: String,
+    #[clap(short = 'd', long)]
+    can_devices: String,
 
     /// Number of guests (sockets) to connect to.
     #[clap(short = 'c', long, default_value_t = 1)]
@@ -59,14 +65,60 @@ struct CanArgs {
 }
 
 #[derive(PartialEq, Debug)]
-struct CanConfiguration {
-    socket_path: String,
+struct VuCanConfig {
+    socket_path: PathBuf,
     socket_count: u32,
-    can_in: String,
-    can_out: String,
+    can_in_devices: Vec<String>,
+    can_out_devices: Vec<String>,
 }
 
-impl TryFrom<CanArgs> for CanConfiguration {
+fn check_can_devices(can_in_devices: &[String], can_out_devices: &[String]) -> Result<()> {
+    let mut can_devices = can_in_devices.to_owned();
+    can_devices.extend(can_out_devices.iter().cloned());
+
+    for can_in in &can_devices {
+        if CanSocket::open(can_in).is_err() {
+            info!("There is no interface with the following name {}", can_in);
+            return Err(Error::CouldNotFindCANDevs);
+        }
+    }
+    Ok(())
+}
+
+fn parse_can_devices(input: &CanArgs) -> Result<(Vec<String>, Vec<String>)> {
+    let mut can_in = Vec::new();
+    let mut can_out = Vec::new();
+    let pairs: Vec<&str> = input.can_devices.split_whitespace().collect();
+
+    for pair in &pairs {
+        let components: Vec<&str> = pair.split(':').collect();
+
+        if components.len() == 2 {
+            can_in.push(components[0].to_string());
+            can_out.push(components[1].to_string());
+        } else {
+            info!("Invalid input: {}", pair);
+            return Err(Error::WrongPairConf);
+        }
+    }
+
+    if (pairs.len() as u32) != input.socket_count {
+        info!(
+            "Number of pairs ({}) not equal with socket count {}",
+            input.can_devices, input.socket_count
+        );
+        return Err(Error::SocketCountInvalid(
+            input.socket_count.try_into().unwrap(),
+        ));
+    }
+
+    match check_can_devices(&can_in, &can_out) {
+        Ok(_) => Ok((can_in, can_out)),
+        Err(_) => Err(Error::CouldNotFindCANDevs),
+    }
+}
+
+impl TryFrom<CanArgs> for VuCanConfig {
     type Error = Error;
 
     fn try_from(args: CanArgs) -> Result<Self> {
@@ -74,101 +126,129 @@ impl TryFrom<CanArgs> for CanConfiguration {
             return Err(Error::SocketCountInvalid(0));
         }
 
-        let can_in = args.can_in.trim().to_string();
-        let can_out = args.can_out.trim().to_string();
+        let (can_in_devices, can_out_devices) = match parse_can_devices(&args) {
+            Ok((can_in_devices, can_out_devices)) => (can_in_devices, can_out_devices),
+            Err(e) => return Err(e),
+        };
 
-        Ok(CanConfiguration {
+        Ok(VuCanConfig {
             socket_path: args.socket_path,
             socket_count: args.socket_count,
-            can_in,
-            can_out,
+            can_in_devices,
+            can_out_devices,
         })
     }
 }
 
-fn start_backend(args: CanArgs) -> Result<()> {
-    let config = CanConfiguration::try_from(args).unwrap();
-    let mut handles = Vec::new();
+impl VuCanConfig {
+    pub fn generate_socket_paths(&self) -> Vec<PathBuf> {
+        let socket_file_name = self
+            .socket_path
+            .file_name()
+            .expect("socket_path has no filename.");
+        let socket_file_parent = self
+            .socket_path
+            .parent()
+            .expect("socket_path has no parent directory.");
 
-    for _ in 0..config.socket_count {
-        let socket = config.socket_path.to_owned();
-        let can_in = config.can_in.to_owned();
-        let can_out = config.can_out.to_owned();
+        let make_socket_path = |i: u32| -> PathBuf {
+            let mut file_name = socket_file_name.to_os_string();
+            file_name.push(std::ffi::OsStr::new(&i.to_string()));
+            socket_file_parent.join(&file_name)
+        };
 
-        let handle: JoinHandle<Result<()>> = spawn(move || loop {
-            // A separate thread is spawned for each socket and can connect to a separate guest.
-            // These are run in an infinite loop to not require the daemon to be restarted once a
-            // guest exits.
-            //
-            // There isn't much value in complicating code here to return an error from the
-            // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
-            // trouble to other threads/guests or the main() function and should be safe for the
-            // daemon.
+        (0..self.socket_count).map(make_socket_path).collect()
+    }
+}
 
-            let controller = CanController::new(can_in.clone(), can_out.clone())
-                .map_err(Error::CouldNotCreateCanController)?;
-            let lockable_controller = Arc::new(RwLock::new(controller));
-            let vu_can_backend = Arc::new(RwLock::new(
-                VhostUserCanBackend::new(lockable_controller.clone())
-                    .map_err(Error::CouldNotCreateBackend)?,
-            ));
-            lockable_controller
-                .write()
-                .unwrap()
-                .open_can_out_socket()
-                .map_err(Error::FailCreateCanControllerSocket)?;
+// This is the public API through which an external program starts the
+/// vhost-device-can backend server.
+pub(crate) fn start_backend_server(socket: PathBuf, can_in: String, can_out: String) -> Result<()> {
+    loop {
+        let controller = CanController::new(can_in.clone(), can_out.clone())
+            .map_err(Error::CouldNotCreateCanController)?;
+        let lockable_controller = Arc::new(RwLock::new(controller));
+        let vu_can_backend = Arc::new(RwLock::new(
+            VhostUserCanBackend::new(lockable_controller.clone())
+                .map_err(Error::CouldNotCreateBackend)?,
+        ));
+        lockable_controller
+            .write()
+            .unwrap()
+            .open_can_out_socket()
+            .map_err(Error::FailCreateCanControllerSocket)?;
 
-            let read_handle = CanController::start_read_thread(lockable_controller.clone());
+        let read_handle = CanController::start_read_thread(lockable_controller.clone());
 
-            let mut daemon = VhostUserDaemon::new(
-                String::from("vhost-device-can-backend"),
-                vu_can_backend.clone(),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .map_err(Error::CouldNotCreateDaemon)?;
+        let mut daemon = VhostUserDaemon::new(
+            String::from("vhost-device-can-backend"),
+            vu_can_backend.clone(),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .map_err(Error::CouldNotCreateDaemon)?;
 
-            /* Start the read thread -- need to handle it after termination */
-            let vring_workers = daemon.get_epoll_handlers();
-            vu_can_backend
-                .read()
-                .unwrap()
-                .set_vring_worker(&vring_workers[0]);
+        /* Start the read thread -- need to handle it after termination */
+        let vring_workers = daemon.get_epoll_handlers();
+        vu_can_backend
+            .read()
+            .unwrap()
+            .set_vring_worker(&vring_workers[0]);
 
-            let listener = Listener::new(socket.clone(), true).unwrap();
-            daemon.start(listener).unwrap();
+        daemon.serve(&socket).map_err(Error::ServeFailed)?;
 
-            match daemon.wait() {
-                Ok(()) => {
-                    info!("Stopping cleanly.");
-                }
-                Err(vhost_user_backend::Error::HandleRequest(
-                    vhost_user::Error::PartialMessage | vhost_user::Error::Disconnected,
-                )) => {
-                    info!("vhost-user connection closed with partial message. If the VM is shutting down, this is expected behavior; otherwise, it might be a bug.");
-                }
-                Err(e) => {
-                    warn!("Error running daemon: {:?}", e);
-                }
-            }
+        // Terminate the thread which reads CAN messages from "can_in"
+        lockable_controller.write().unwrap().exit_read_thread();
 
-            // No matter the result, we need to shut down the worker thread.
-            vu_can_backend.read().unwrap().exit_event.write(1).unwrap();
+        // Wait for read thread to exit
+        match read_handle.join() {
+            Ok(_) => info!("The read thread returned successfully"),
+            Err(e) => warn!("The read thread returned the error: {:?}", e),
+        }
+    }
+}
 
-            // Terminate the thread which reads CAN messages from "can_in"
-            lockable_controller.write().unwrap().exit_read_thread();
+fn start_backend(config: VuCanConfig) -> Result<()> {
+    let mut handles = HashMap::new();
+    let (senders, receiver) = std::sync::mpsc::channel();
 
-            // Wait for read thread to exit
-            match read_handle.join() {
-                Ok(_) => info!("The read thread returned successfully"),
-                Err(e) => warn!("The read thread returned the error: {:?}", e),
-            }
-        });
+    for (thread_id, (socket, can_in, can_out)) in config
+        .generate_socket_paths()
+        .into_iter()
+        .zip(config.can_in_devices.iter().cloned())
+        .zip(config.can_out_devices.iter().cloned())
+        .map(|((a, b), c)| (a, b.to_string(), c.to_string()))
+        .enumerate()
+    {
+        println!(
+            "thread_id: {}, socket: {:?}, can_in: {:?}, can_out: {:?}",
+            thread_id, socket, can_in, can_out
+        );
 
-        handles.push(handle);
+        let name = format!("vhu-can-{}-{}", can_in, can_out);
+        let sender = senders.clone();
+        let handle = thread::Builder::new()
+            .name(name.clone())
+            .spawn(move || {
+                let result =
+                    std::panic::catch_unwind(move || start_backend_server(socket, can_in, can_out));
+
+                // Notify the main thread that we are done.
+                sender.send(thread_id).unwrap();
+
+                result.map_err(|e| Error::ThreadPanic(name, e))?
+            })
+            .unwrap();
+        handles.insert(thread_id, handle);
     }
 
-    for handle in handles {
-        handle.join().map_err(|_| Error::FailedJoiningThreads)??;
+    while !handles.is_empty() {
+        let thread_id = receiver.recv().unwrap();
+        handles
+            .remove(&thread_id)
+            .unwrap()
+            .join()
+            .map_err(std::panic::resume_unwind)
+            .unwrap()?;
     }
 
     Ok(())
@@ -176,7 +256,7 @@ fn start_backend(args: CanArgs) -> Result<()> {
 
 pub(crate) fn can_init() {
     env_logger::init();
-    if let Err(e) = start_backend(CanArgs::parse()) {
+    if let Err(e) = VuCanConfig::try_from(CanArgs::parse()).and_then(start_backend) {
         error!("{e}");
         exit(1);
     }
@@ -185,35 +265,89 @@ pub(crate) fn can_init() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     #[test]
-    fn test_can_configuration_try_from() {
-        // Test valid configuration
+    fn test_can_valid_configuration() {
         let valid_args = CanArgs {
-            socket_path: "/tmp/vhost.sock".to_string(),
-            can_in: "vcan0".to_string(),
-            can_out: "vcan1".to_string(),
+            socket_path: "/tmp/vhost.sock".to_string().into(),
+            can_devices: "vcan0:vcan1".to_string(),
             socket_count: 1,
         };
 
-        let result = CanConfiguration::try_from(valid_args);
-        assert!(result.is_ok());
+        assert_matches!(
+            VuCanConfig::try_from(valid_args),
+            Err(Error::CouldNotFindCANDevs)
+        );
+    }
 
-        let config = result.unwrap();
-        assert_eq!(config.socket_path, "/tmp/vhost.sock");
-        assert_eq!(config.can_in, "vcan0");
-        assert_eq!(config.can_out, "vcan1");
-        assert_eq!(config.socket_count, 1);
+    #[test]
+    fn test_can_valid_mult_device_configuration() {
+        let valid_args = CanArgs {
+            socket_path: "/tmp/vhost.sock".to_string().into(),
+            can_devices: "vcan0:vcan1 vcan2:vcan3".to_string(),
+            socket_count: 2,
+        };
 
-        // Test invalid socket count
+        assert_matches!(
+            VuCanConfig::try_from(valid_args),
+            Err(Error::CouldNotFindCANDevs)
+        );
+    }
+
+    #[test]
+    fn test_can_invalid_socket_configuration() {
         let invalid_args = CanArgs {
-            socket_path: "/tmp/vhost.sock".to_string(),
-            can_in: "vcan0".to_string(),
-            can_out: "vcan1".to_string(),
+            socket_path: "/tmp/vhost.sock".to_string().into(),
+            can_devices: "vcan0:vcan1".to_string(),
             socket_count: 0,
         };
 
-        let result = CanConfiguration::try_from(invalid_args);
-        assert!(result.is_err());
+        assert_matches!(
+            VuCanConfig::try_from(invalid_args),
+            Err(Error::SocketCountInvalid(0))
+        );
+    }
+
+    #[test]
+    fn test_can_invalid_mult_socket_configuration_1() {
+        let invalid_args = CanArgs {
+            socket_path: "/tmp/vhost.sock".to_string().into(),
+            can_devices: "vcan0:vcan1".to_string(),
+            socket_count: 2,
+        };
+
+        assert_matches!(
+            VuCanConfig::try_from(invalid_args),
+            Err(Error::SocketCountInvalid(2))
+        );
+    }
+
+    #[test]
+    fn test_can_invalid_mult_socket_configuration_2() {
+        let invalid_args = CanArgs {
+            socket_path: "/tmp/vhost.sock".to_string().into(),
+            can_devices: "vcan0:vcan1 vcan2:vcan3".to_string(),
+            socket_count: 1,
+        };
+
+        assert_matches!(
+            VuCanConfig::try_from(invalid_args),
+            Err(Error::SocketCountInvalid(1))
+        );
+    }
+
+    #[test]
+    fn test_can_invalid_devs_configuration() {
+        let invalid_args = CanArgs {
+            socket_path: "/tmp/vhost.sock".to_string().into(),
+            can_devices: "vcan0:vcan1 vcan2".to_string(),
+            socket_count: 1,
+        };
+
+        assert_matches!(
+            VuCanConfig::try_from(invalid_args),
+            Err(Error::WrongPairConf)
+        );
     }
 }

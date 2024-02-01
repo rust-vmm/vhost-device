@@ -1,6 +1,6 @@
 // CAN backend device
 //
-// Copyright 2023 VIRTUAL OPEN SYSTEMS SAS. All Rights Reserved.
+// Copyright 2023-2024 VIRTUAL OPEN SYSTEMS SAS. All Rights Reserved.
 //          Timos Ampelikiotis <t.ampelikiotis@virtualopensystems.com>
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
@@ -221,7 +221,10 @@ impl CanController {
                     }
                 }
 
-                controller.rx_event_fd.write(1).unwrap();
+                controller
+                    .rx_event_fd
+                    .write(1)
+                    .expect("Fail to write on rx_event_fd");
             }
         }
     }
@@ -240,11 +243,12 @@ impl CanController {
         trace!("Can out\n");
 
         // Create a CAN frame with a specific CAN-ID and the data buffer
-        let can_id = StandardId::new(tx_request.can_id.to_native().try_into().unwrap()).unwrap();
+        let can_id = StandardId::new(tx_request.can_id.to_native().try_into().unwrap())
+            .expect("Fail to create StandardId");
         let data_len = tx_request.length.to_native() as usize;
 
         let data: Vec<u8> = tx_request.sdu.iter().cloned().take(data_len).collect();
-        let frame = CanFdFrame::new(can_id, &data).unwrap();
+        let frame = CanFdFrame::new(can_id, &data).expect("Fail to create CanFdFrame");
 
         // Send the CAN frame
         let write_result = self
@@ -273,10 +277,7 @@ mod tests {
         let can_in_name = "can_in".to_string();
         let can_out_name = "can_out".to_string();
 
-        let canif = CanController::new(can_in_name.clone(), can_out_name.clone());
-        assert!(canif.is_ok());
-
-        let controller = canif.unwrap();
+        let controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
         assert_eq!(controller.can_in_name, can_in_name);
         assert_eq!(controller.can_out_name, can_out_name);
     }
@@ -297,13 +298,11 @@ mod tests {
         };
 
         // Test push
-        let push_result = controller.push(frame.clone());
-        assert!(push_result.is_ok());
+        controller.push(frame).unwrap();
 
         // Test pop
-        let pop_result = controller.pop();
-        assert!(pop_result.is_ok());
-        assert_eq!(pop_result.unwrap(), frame);
+        let pop_result = controller.pop().unwrap();
+        assert_eq!(pop_result, frame);
     }
 
     #[test]
@@ -335,9 +334,8 @@ mod tests {
         match controller.open_can_out_socket() {
             Ok(_) => {
                 // Test operation
-                let operation_result = controller.can_out(frame);
-                assert!(operation_result.is_ok());
-                assert_eq!(operation_result.unwrap(), VIRTIO_CAN_STATUS_OK);
+                let operation_result = controller.can_out(frame).unwrap();
+                assert_eq!(operation_result, VIRTIO_CAN_STATUS_OK);
             }
             Err(_) => warn!("There is no CAN interface with {} name", can_out_name),
         }

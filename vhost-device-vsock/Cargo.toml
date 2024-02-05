@@ -26,7 +26,7 @@ virtio-queue = "0.11"
 virtio-vsock = "0.5"
 vm-memory = "0.14.0"
 vmm-sys-util = "0.12"
-config = { version = "0.13", default-features = false, features = ["yaml"] }
+config = { version = "0.14", default-features = false, features = ["yaml"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 

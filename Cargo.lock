@@ -139,17 +139,17 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.68.1"
+version = "0.69.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726e4313eb6ec35d2730258ad4e15b547ee75d6afaa1361a922e78e59b7d8078"
+checksum = "a00dc851838a2120612785d195287475a3ac45514741da670b735818822129a0"
 dependencies = [
  "annotate-snippets",
  "bitflags 2.4.1",
  "cexpr",
  "clang-sys",
+ "itertools",
  "lazy_static",
  "lazycell",
- "peeking_take_while",
  "proc-macro2",
  "quote",
  "regex",
@@ -640,8 +640,9 @@ dependencies = [
 
 [[package]]
 name = "libspa"
-version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=675dab340015ba2cc9e8ad1cc99b3a1e5005a18a#675dab340015ba2cc9e8ad1cc99b3a1e5005a18a"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65f3a4b81b2a2d8c7f300643676202debd1b7c929dbf5c9bb89402ea11d19810"
 dependencies = [
  "bitflags 2.4.1",
  "cc",
@@ -649,17 +650,18 @@ dependencies = [
  "cookie-factory",
  "libc",
  "libspa-sys",
- "nix 0.26.4",
+ "nix 0.27.1",
  "nom",
  "system-deps 6.2.0",
 ]
 
 [[package]]
 name = "libspa-sys"
-version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=675dab340015ba2cc9e8ad1cc99b3a1e5005a18a#675dab340015ba2cc9e8ad1cc99b3a1e5005a18a"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf0d9716420364790e85cbb9d3ac2c950bde16a7dd36f3209b7dfdfc4a24d01f"
 dependencies = [
- "bindgen 0.68.1",
+ "bindgen 0.69.4",
  "cc",
  "system-deps 6.2.0",
 ]
@@ -698,15 +700,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "memoffset"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -722,7 +715,7 @@ dependencies = [
  "cc",
  "cfg-if",
  "libc",
- "memoffset 0.6.5",
+ "memoffset",
 ]
 
 [[package]]
@@ -734,8 +727,6 @@ dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
- "memoffset 0.7.1",
- "pin-utils",
 ]
 
 [[package]]
@@ -812,15 +803,16 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pipewire"
-version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=675dab340015ba2cc9e8ad1cc99b3a1e5005a18a#675dab340015ba2cc9e8ad1cc99b3a1e5005a18a"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08e645ba5c45109106d56610b3ee60eb13a6f2beb8b74f8dc8186cf261788dda"
 dependencies = [
  "anyhow",
  "bitflags 2.4.1",
  "libc",
  "libspa",
  "libspa-sys",
- "nix 0.26.4",
+ "nix 0.27.1",
  "once_cell",
  "pipewire-sys",
  "thiserror",
@@ -828,10 +820,11 @@ dependencies = [
 
 [[package]]
 name = "pipewire-sys"
-version = "0.7.2"
-source = "git+https://gitlab.freedesktop.org/pipewire/pipewire-rs.git?rev=675dab340015ba2cc9e8ad1cc99b3a1e5005a18a#675dab340015ba2cc9e8ad1cc99b3a1e5005a18a"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "849e188f90b1dda88fe2bfe1ad31fe5f158af2c98f80fb5d13726c44f3f01112"
 dependencies = [
- "bindgen 0.68.1",
+ "bindgen 0.69.4",
  "libspa-sys",
  "system-deps 6.2.0",
 ]

@@ -88,7 +88,7 @@ impl PwBackend {
 
         // SAFETY: safe as the thread loop cannot access objects associated
         // with the loop while the lock is held
-        let thread_loop = unsafe { ThreadLoop::new(Some("Pipewire thread loop")).unwrap() };
+        let thread_loop = unsafe { ThreadLoop::new(Some("Pipewire thread loop"), None).unwrap() };
 
         let lock_guard = thread_loop.lock();
 

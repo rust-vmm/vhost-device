@@ -299,6 +299,7 @@ impl AudioBackend for PwBackend {
             audio_info.set_format(AudioFormat::S16LE);
             audio_info.set_rate(info.rate);
             audio_info.set_channels(info.channels);
+            audio_info.set_position(pos);
 
             let values: Vec<u8> = PodSerializer::serialize(
                 std::io::Cursor::new(Vec::new()),

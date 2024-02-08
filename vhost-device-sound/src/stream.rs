@@ -1,10 +1,16 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    convert::TryFrom,
+    io::{Read, Write},
+    mem::size_of,
+    sync::Arc,
+};
 
 use thiserror::Error as ThisError;
-use vm_memory::{Address, Bytes, Le32, Le64};
+use vm_memory::{Le32, Le64};
 
 use crate::{virtio_sound::*, Direction, IOMessage, SUPPORTED_FORMATS, SUPPORTED_RATES};
 
@@ -182,7 +188,7 @@ pub struct Stream {
     pub channels_min: u8,
     pub channels_max: u8,
     pub state: PCMState,
-    pub buffers: VecDeque<Buffer>,
+    pub requests: VecDeque<Request>,
 }
 
 impl Default for Stream {
@@ -196,7 +202,7 @@ impl Default for Stream {
             channels_min: 1,
             channels_max: 6,
             state: Default::default(),
-            buffers: VecDeque::new(),
+            requests: VecDeque::new(),
         }
     }
 }
@@ -241,85 +247,110 @@ impl Default for PcmParams {
     }
 }
 
-pub struct Buffer {
-    data_descriptor: virtio_queue::Descriptor,
+pub struct Request {
     pub pos: usize,
+    len: usize,
     pub message: Arc<IOMessage>,
     direction: Direction,
 }
 
-impl std::fmt::Debug for Buffer {
+impl std::fmt::Debug for Request {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        fmt.debug_struct(stringify!(Buffer))
+        fmt.debug_struct(stringify!(Request))
             .field("pos", &self.pos)
+            .field("len", &self.len)
             .field("direction", &self.direction)
             .field("message", &Arc::as_ptr(&self.message))
             .finish()
     }
 }
 
-impl Buffer {
-    pub fn new(
-        data_descriptor: virtio_queue::Descriptor,
-        message: Arc<IOMessage>,
-        direction: Direction,
-    ) -> Self {
+impl Request {
+    pub fn new(len: usize, message: Arc<IOMessage>, direction: Direction) -> Self {
         Self {
             pos: 0,
-            data_descriptor,
+            len,
             message,
             direction,
         }
     }
 
     pub fn read_output(&self, buf: &mut [u8]) -> Result<u32> {
-        let addr = self.data_descriptor.addr();
-        let offset = self.pos as u64;
-        let len = self
+        let mem = self.message.desc_chain.memory();
+
+        let mut reader = self
             .message
             .desc_chain
-            .memory()
-            .read(
-                buf,
-                addr.checked_add(offset)
-                    .expect("invalid guest memory address"),
-            )
+            .clone()
+            .reader(mem)
             .map_err(|_| Error::DescriptorReadFailed)?;
-        Ok(len as u32)
+
+        let mut reader_content = reader
+            .split_at(size_of::<VirtioSoundPcmXfer>() + self.pos)
+            .map_err(|_| Error::DescriptorReadFailed)?;
+
+        let bytes_read = reader_content
+            .read(buf)
+            .map_err(|_| Error::DescriptorReadFailed)?;
+
+        Ok(bytes_read as u32)
     }
 
     pub fn write_input(&mut self, buf: &[u8]) -> Result<u32> {
-        if self.desc_len() <= self.pos as u32 {
-            return Ok(0);
-        }
-        let addr = self.data_descriptor.addr();
-        let offset = self.pos as u64;
-        let len = self
+        let mem = self.message.desc_chain.memory();
+
+        let mut writer = self
             .message
             .desc_chain
-            .memory()
-            .write(
-                buf,
-                addr.checked_add(offset)
-                    .expect("invalid guest memory address"),
-            )
+            .clone()
+            .writer(mem)
+            .map_err(|_| Error::DescriptorReadFailed)?;
+
+        let mut _status = writer
+            .split_at(self.len)
+            .map_err(|_| Error::DescriptorReadFailed)?;
+
+        let mut write_content = writer
+            .split_at(self.pos)
+            .map_err(|_| Error::DescriptorReadFailed)?;
+
+        let bytes_written = write_content
+            .write(buf)
             .map_err(|_| Error::DescriptorWriteFailed)?;
-        self.pos += len;
-        Ok(len as u32)
+
+        self.pos += bytes_written;
+
+        Ok(bytes_written as u32)
     }
 
     #[inline]
     /// Returns the length of the sound data [`virtio_queue::Descriptor`].
-    pub fn desc_len(&self) -> u32 {
-        self.data_descriptor.len()
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 
-impl Drop for Buffer {
+impl Drop for Request {
     fn drop(&mut self) {
+        // Since used_len is 32 bits, but self.len() may be bigger
+        // than that, the spec is unclear about how to handle this
+        // case, so when converting from usize to u32, saturate
+        // when conversion overflows
+        let payload_len = match u32::try_from(self.len()) {
+            Ok(len) => len,
+            Err(len) => {
+                log::warn!("used_len {} overflows u32", len);
+                u32::MAX
+            }
+        };
+
         match self.direction {
             Direction::Input => {
-                let used_len = std::cmp::min(self.pos as u32, self.desc_len());
+                let used_len = std::cmp::min(self.pos as u32, payload_len);
                 self.message
                     .used_len
                     .fetch_add(used_len, std::sync::atomic::Ordering::SeqCst);
@@ -330,10 +361,10 @@ impl Drop for Buffer {
             Direction::Output => {
                 self.message
                     .latency_bytes
-                    .fetch_add(self.desc_len(), std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(payload_len, std::sync::atomic::Ordering::SeqCst);
             }
         }
-        log::trace!("dropping {:?} buffer {:?}", self.direction, self);
+        log::trace!("dropping {:?} request {:?}", self.direction, self);
     }
 }
 
@@ -345,7 +376,8 @@ mod tests {
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
     use vm_memory::{
-        Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+        Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+        GuestMemoryMmap,
     };
 
     use super::*;
@@ -355,6 +387,7 @@ mod tests {
     fn prepare_desc_chain<R: ByteValued>(
         start_addr: GuestAddress,
         hdr: R,
+        payload_len: u32,
         response_len: u32,
     ) -> SoundDescriptorChain {
         let mem = &GuestMemoryMmap::<()>::from_ranges(&[(start_addr, 0x1000)]).unwrap();
@@ -364,7 +397,9 @@ mod tests {
 
         let desc_out = Descriptor::new(
             next_addr,
-            std::mem::size_of::<R>() as u32,
+            (std::mem::size_of::<R>() as u32)
+                .checked_add(payload_len)
+                .unwrap(),
             VRING_DESC_F_NEXT as u16,
             index + 1,
         );
@@ -395,21 +430,22 @@ mod tests {
             .unwrap()
     }
 
-    fn iomsg() -> IOMessage {
-        let hdr = VirtioSndPcmSetParams::default();
+    fn iomsg(payload_len: u32, response_len: u32) -> IOMessage {
+        let hdr = VirtioSoundPcmHeader::default();
         let memr = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );
         let vring = VringRwLock::new(memr, 0x1000).unwrap();
-        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
-        let vq = MockSplitQueue::new(mem, 16);
-        let next_addr = vq.desc_table().total_size() + 0x100;
         IOMessage {
             status: VIRTIO_SND_S_OK.into(),
             latency_bytes: 0.into(),
             used_len: 0.into(),
-            desc_chain: prepare_desc_chain::<VirtioSndPcmSetParams>(GuestAddress(0), hdr, 1),
-            response_descriptor: Descriptor::new(next_addr, 0x200, VRING_DESC_F_NEXT as u16, 1),
+            desc_chain: prepare_desc_chain::<VirtioSoundPcmHeader>(
+                GuestAddress(0),
+                hdr,
+                payload_len,
+                response_len,
+            ),
             vring,
         }
     }
@@ -421,17 +457,16 @@ mod tests {
 
     #[test]
     fn test_logging() {
-        let data_descriptor = Descriptor::new(0, 0, 0, 0);
-        let msg = iomsg();
+        let msg = iomsg(0, size_of::<VirtioSoundPcmStatus>() as u32);
         let message = Arc::new(msg);
         let direction = Direction::Input;
-        let buffer = Buffer::new(data_descriptor, message, direction);
+        let request = Request::new(0, message, direction);
         assert_eq!(format!("{direction:?}"), "Input");
         assert_eq!(
-            format!("{buffer:?}"),
+            format!("{request:?}"),
             format!(
-                "Buffer {{ pos: 0, direction: Input, message: {:?} }}",
-                &Arc::as_ptr(&buffer.message)
+                "Request {{ pos: 0, len: 0, direction: Input, message: {:?} }}",
+                &Arc::as_ptr(&request.message)
             )
         );
     }
@@ -561,58 +596,52 @@ mod tests {
     }
 
     #[test]
-    fn test_buffer_read_output() {
-        let msg = iomsg();
-        let message = Arc::new(msg);
-        let desc_msg = iomsg();
-        let buffer = Buffer::new(
-            desc_msg.desc_chain.clone().readable().next().unwrap(),
-            message,
-            Direction::Output,
-        );
-
+    fn test_request_read_output() {
         let mut buf = vec![0; 5];
-        buffer.read_output(&mut buf).unwrap();
-    }
-
-    #[test]
-    fn test_buffer_write_input() {
-        let msg = iomsg();
+        let msg = iomsg(buf.len() as u32, size_of::<VirtioSoundPcmStatus>() as u32);
         let message = Arc::new(msg);
-        let desc_msg = iomsg();
-        let mut buffer = Buffer::new(
-            desc_msg.desc_chain.clone().readable().next().unwrap(),
-            message,
-            Direction::Input,
-        );
+        let request = Request::new(buf.len(), message, Direction::Output);
 
-        let buf = vec![0; 5];
-        buffer.write_input(&buf).unwrap();
+        let len = request.read_output(&mut buf).unwrap();
+        assert_eq!(len, buf.len() as u32);
     }
 
     #[test]
-    fn test_buffer_fn() {
-        let data_descriptor = Descriptor::new(0, 0, 0, 0);
-        let msg = iomsg();
+    fn test_request_write_input() {
+        let buf = vec![0; 5];
+        let msg = iomsg(
+            0,
+            size_of::<VirtioSoundPcmStatus>() as u32 + buf.len() as u32,
+        );
+        let message = Arc::new(msg);
+        let mut request = Request::new(buf.len(), message, Direction::Input);
+
+        request.write_input(&buf).unwrap();
+    }
+
+    #[test]
+    fn test_request_fn() {
+        let msg = iomsg(0, size_of::<VirtioSoundPcmStatus>() as u32);
         let message = Arc::new(msg);
         let direction = Direction::Input;
-        let buffer = Buffer::new(data_descriptor, message, direction);
+        let request = Request::new(0, message, direction);
 
-        assert_eq!(buffer.desc_len() as usize, buffer.pos);
-        assert_eq!(buffer.desc_len(), 0);
-        assert_eq!(buffer.direction, Direction::Input);
+        assert_eq!(request.len() as usize, request.pos);
+        assert_eq!(request.len(), 0);
+        assert_eq!(request.direction, Direction::Input);
 
-        // Test debug format representation for Buffer
+        // Test debug format representation for Request
         let mut debug_output = String::new();
 
         // Format the Debug representation into the String.
-        write!(&mut debug_output, "{:?}", buffer).unwrap();
+        write!(&mut debug_output, "{:?}", request).unwrap();
 
         let expected_debug = format!(
-            "Buffer {{ pos: {}, direction: {:?}, message: {:?} }}",
-            buffer.pos,
-            buffer.direction,
-            Arc::as_ptr(&buffer.message)
+            "Request {{ pos: {}, len: {}, direction: {:?}, message: {:?} }}",
+            request.len,
+            request.pos,
+            request.direction,
+            Arc::as_ptr(&request.message)
         );
 
         assert_eq!(debug_output, expected_debug);

@@ -18,8 +18,7 @@ use virtio_bindings::{
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
-    ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
-    Le32,
+    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32,
 };
 use vmm_sys_util::{
     epoll::EventSet,
@@ -28,7 +27,7 @@ use vmm_sys_util::{
 
 use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
-    stream::{Buffer, Error as StreamError, Stream},
+    stream::{Error as StreamError, Request, Stream},
     virtio_sound::*,
     ControlMessageKind, Direction, Error, IOMessage, QueueIdx, Result, SoundConfig,
 };
@@ -421,107 +420,47 @@ impl VhostUserSoundThread {
             return Ok(());
         }
 
-        // Instead of counting descriptor chain lengths, encode the "parsing" logic in
-        // an enumeration. Then, the compiler will complain about any unhandled
-        // match {} cases if any part of the code is changed. This makes invalid
-        // states unrepresentable in the source code.
-        #[derive(Copy, Clone, PartialEq, Debug)]
-        enum IoState {
-            Ready,
-            WaitingBufferForStreamId(u32),
-            Done,
-        }
-
         // Keep log of stream IDs to wake up, in case the guest has queued more than
         // one.
         let mut stream_ids = BTreeSet::default();
 
+        let mem = atomic_mem.memory();
+
         for desc_chain in requests {
-            let mut state = IoState::Ready;
-            let mut buffers = vec![];
-            let descriptors: Vec<_> = desc_chain.clone().collect();
             let message = Arc::new(IOMessage {
                 vring: vring.clone(),
                 status: VIRTIO_SND_S_OK.into(),
                 used_len: 0.into(),
                 latency_bytes: 0.into(),
                 desc_chain: desc_chain.clone(),
-                response_descriptor: descriptors.last().cloned().ok_or_else(|| {
-                    log::error!("Received IO request with an empty descriptor chain.");
-                    Error::UnexpectedDescriptorCount(0)
-                })?,
             });
-            for descriptor in &descriptors {
-                match state {
-                    IoState::Done => {
-                        return Err(Error::UnexpectedDescriptorCount(descriptors.len()).into());
-                    }
-                    IoState::Ready
-                        if matches!(direction, Direction::Output) && descriptor.is_write_only() =>
-                    {
-                        if descriptor.len() as usize != size_of::<VirtioSoundPcmStatus>() {
-                            return Err(Error::UnexpectedDescriptorSize(
-                                size_of::<VirtioSoundPcmStatus>(),
-                                descriptor.len(),
-                            )
-                            .into());
-                        }
-                        state = IoState::Done;
-                    }
-                    IoState::WaitingBufferForStreamId(stream_id)
-                        if descriptor.len() as usize == size_of::<VirtioSoundPcmStatus>() =>
-                    {
-                        self.streams.write().unwrap()[stream_id as usize]
-                            .buffers
-                            .extend(std::mem::take(&mut buffers).into_iter());
-                        state = IoState::Done;
-                    }
-                    IoState::Ready
-                        if descriptor.len() as usize != size_of::<VirtioSoundPcmXfer>() =>
-                    {
-                        return Err(Error::UnexpectedDescriptorSize(
-                            size_of::<VirtioSoundPcmXfer>(),
-                            descriptor.len(),
-                        )
-                        .into());
-                    }
-                    IoState::Ready => {
-                        let xfer = desc_chain
-                            .memory()
-                            .read_obj::<VirtioSoundPcmXfer>(descriptor.addr())
-                            .map_err(|_| Error::DescriptorReadFailed)?;
-                        let stream_id: u32 = xfer.stream_id.into();
-                        stream_ids.insert(stream_id);
 
-                        state = IoState::WaitingBufferForStreamId(stream_id);
-                    }
-                    IoState::WaitingBufferForStreamId(stream_id)
-                        if descriptor.len() as usize == size_of::<VirtioSoundPcmXfer>() =>
-                    {
-                        return Err(Error::UnexpectedDescriptorSize(
-                            u32::from(
-                                self.streams.read().unwrap()[stream_id as usize]
-                                    .params
-                                    .period_bytes,
-                            ) as usize,
-                            descriptor.len(),
-                        )
-                        .into());
-                    }
-                    IoState::WaitingBufferForStreamId(_) => {
-                        // In the case of TX/Playback:
-                        //
-                        // Rather than copying the content of a descriptor, buffer keeps a pointer
-                        // to it. When we copy just after the request is enqueued, the guest's
-                        // userspace may or may not have updated the buffer contents. Guest driver
-                        // simply moves buffers from the used ring to the available ring without
-                        // knowing whether the content has been updated. The device only reads the
-                        // buffer from guest memory when the audio engine requires it, which is
-                        // about after a period thus ensuring that the buffer is up-to-date.
-                        buffers.push(Buffer::new(*descriptor, Arc::clone(&message), direction));
-                    }
+            let mut reader = desc_chain
+                .clone()
+                .reader(&mem)
+                .map_err(|_| Error::DescriptorReadFailed)?;
+
+            let in_header: VirtioSoundPcmXfer =
+                reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?;
+
+            let stream_id: u32 = in_header.stream_id.into();
+
+            stream_ids.insert(stream_id);
+
+            let payload_len = match direction {
+                Direction::Output => reader.available_bytes() - reader.bytes_read(),
+                Direction::Input => {
+                    let writer = desc_chain
+                        .clone()
+                        .writer(&mem)
+                        .map_err(|_| Error::DescriptorReadFailed)?;
+                    writer.available_bytes() - size_of::<VirtioSoundPcmStatus>()
                 }
-            }
+            };
+
+            self.streams.write().unwrap()[stream_id as usize]
+                .requests
+                .push_back(Request::new(payload_len, Arc::clone(&message), direction));
         }
 
         if !stream_ids.is_empty() {
@@ -738,7 +677,9 @@ mod tests {
     use tempfile::tempdir;
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::{mock::MockSplitQueue, Descriptor};
-    use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_memory::{
+        Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+    };
 
     use super::*;
     use crate::BackendType;

@@ -196,21 +196,21 @@ fn write_samples_direct(
     mmap: &mut alsa::direct::pcm::MmapPlayback<u8>,
 ) -> AResult<bool> {
     while mmap.avail() > 0 {
-        let Some(buffer) = stream.buffers.front_mut() else {
+        let Some(request) = stream.requests.front_mut() else {
             return Ok(false);
         };
         if !matches!(stream.state, PCMState::Start) {
             return Ok(false);
         }
-        let n_bytes = buffer.desc_len() as usize - buffer.pos;
+        let n_bytes = request.len() - request.pos;
         let mut buf = vec![0; n_bytes];
-        let read_bytes = match buffer.read_output(&mut buf) {
+        let read_bytes = match request.read_output(&mut buf) {
             Err(err) => {
                 log::error!(
-                    "Could not read TX buffer from guest, dropping it immediately: {}",
+                    "Could not read TX request from guest, dropping it immediately: {}",
                     err
                 );
-                stream.buffers.pop_front();
+                stream.requests.pop_front();
                 continue;
             }
             Ok(v) => v,
@@ -220,10 +220,10 @@ fn write_samples_direct(
         let frames = mmap.write(&mut iter);
         let written_bytes = pcm.frames_to_bytes(frames);
         if let Ok(written_bytes) = usize::try_from(written_bytes) {
-            buffer.pos += written_bytes;
+            request.pos += written_bytes;
         }
-        if buffer.pos >= buffer.desc_len() as usize {
-            stream.buffers.pop_front();
+        if request.pos >= request.len() {
+            stream.requests.pop_front();
         }
     }
     match mmap.status().state() {
@@ -241,7 +241,7 @@ fn read_samples_direct(
     mmap: &mut alsa::direct::pcm::MmapCapture<u8>,
 ) -> AResult<bool> {
     while mmap.avail() > 0 {
-        let Some(buffer) = stream.buffers.front_mut() else {
+        let Some(request) = stream.requests.front_mut() else {
             return Ok(false);
         };
 
@@ -253,12 +253,12 @@ fn read_samples_direct(
         // [`vm_memory::volatile_memory::VolatileSlice`]) and we can't use alsa's readi
         // without a slice: use an intermediate buffer and copy it to the
         // descriptor.
-        let mut intermediate_buf = vec![0; buffer.desc_len() as usize - buffer.pos];
+        let mut intermediate_buf = vec![0; request.len() - request.pos];
         for (sample, byte) in intermediate_buf.iter_mut().zip(&mut iter) {
             *sample = byte;
             n_bytes += 1;
         }
-        if buffer
+        if request
             .write_input(&intermediate_buf[0..n_bytes])
             .expect("Could not write data to guest memory")
             == 0
@@ -267,8 +267,8 @@ fn read_samples_direct(
         }
 
         drop(iter);
-        if buffer.pos as u32 >= buffer.desc_len() || mmap.avail() == 0 {
-            stream.buffers.pop_front();
+        if request.pos >= request.len() || mmap.avail() == 0 {
+            stream.requests.pop_front();
         }
     }
 
@@ -306,28 +306,31 @@ fn write_samples_io(
     if avail != 0 {
         io.mmap(avail as usize, |buf| {
             let stream = &mut streams.write().unwrap()[stream_id];
-            let Some(buffer) = stream.buffers.front_mut() else {
+            let Some(request) = stream.requests.front_mut() else {
                 return 0;
             };
             if !matches!(stream.state, PCMState::Start) {
-                stream.buffers.pop_front();
+                stream.requests.pop_front();
                 return 0;
             }
 
-            let n_bytes = std::cmp::min(buf.len(), buffer.desc_len() as usize - buffer.pos);
-            // read_output() always reads (buffer.desc_len() - buffer.pos) bytes
-            let read_bytes = match buffer.read_output(&mut buf[0..n_bytes]) {
+            let n_bytes = std::cmp::min(buf.len(), request.len() - request.pos);
+            // read_output() always reads (request.len() - request.pos) bytes
+            let read_bytes = match request.read_output(&mut buf[0..n_bytes]) {
                 Ok(v) => v,
                 Err(err) => {
-                    log::error!("Could not read TX buffer, dropping it immediately: {}", err);
-                    stream.buffers.pop_front();
+                    log::error!(
+                        "Could not read TX request, dropping it immediately: {}",
+                        err
+                    );
+                    stream.requests.pop_front();
                     return 0;
                 }
             };
 
-            buffer.pos += read_bytes as usize;
-            if buffer.pos as u32 >= buffer.desc_len() {
-                stream.buffers.pop_front();
+            request.pos += read_bytes as usize;
+            if request.pos >= request.len() {
+                stream.requests.pop_front();
             }
             p.bytes_to_frames(isize::try_from(read_bytes).unwrap())
                 .try_into()
@@ -372,11 +375,11 @@ fn read_samples_io(
         return Ok(false);
     }
     let stream = &mut streams.write().unwrap()[stream_id];
-    let Some(buffer) = stream.buffers.front_mut() else {
+    let Some(request) = stream.requests.front_mut() else {
         return Ok(false);
     };
     if !matches!(stream.state, PCMState::Start) {
-        stream.buffers.pop_front();
+        stream.requests.pop_front();
         return Ok(false);
     }
     let mut frames_read = 0;
@@ -385,16 +388,16 @@ fn read_samples_io(
     // [`vm_memory::volatile_memory::VolatileSlice`]) and we can't use alsa's readi
     // without a slice: use an intermediate buffer and copy it to the
     // descriptor.
-    let mut intermediate_buf = vec![0; buffer.desc_len() as usize - buffer.pos];
+    let mut intermediate_buf = vec![0; request.len() - request.pos];
     while let Some(frames) = io
-        .readi(&mut intermediate_buf[0..(buffer.desc_len() as usize - buffer.pos)])
+        .readi(&mut intermediate_buf[0..(request.len() - request.pos)])
         .map(std::num::NonZeroUsize::new)?
         .map(std::num::NonZeroUsize::get)
     {
         frames_read += frames;
         let n_bytes =
             usize::try_from(p.frames_to_bytes(frames.try_into().unwrap())).unwrap_or_default();
-        if buffer
+        if request
             .write_input(&intermediate_buf[0..n_bytes])
             .expect("Could not write data to guest memory")
             == 0
@@ -404,8 +407,8 @@ fn read_samples_io(
     }
 
     let bytes_read = p.frames_to_bytes(frames_read.try_into().unwrap());
-    if buffer.pos as u32 >= buffer.desc_len() || bytes_read == 0 {
-        stream.buffers.pop_front();
+    if request.pos >= request.len() || bytes_read == 0 {
+        stream.requests.pop_front();
     }
 
     match p.state() {
@@ -432,7 +435,7 @@ fn alsa_worker(
             let has_buffers = || -> bool {
                 // Hold `streams` lock as short as possible.
                 let lck = streams.read().unwrap();
-                !lck[stream_id].buffers.is_empty()
+                !lck[stream_id].requests.is_empty()
                     && matches!(lck[stream_id].state, PCMState::Start)
             };
             // Run this loop till the stream's buffer vector is empty:
@@ -710,12 +713,12 @@ impl AudioBackend for AlsaBackend {
         }
         // Stop worker thread
         self.senders[stream_id as usize].send(false).unwrap();
-        // Drop pending stream buffers to complete pending I/O messages
+        // Drop pending stream requests to complete pending I/O messages
         //
-        // This will release buffers even if state transition is invalid. If it is
+        // This will release requests even if state transition is invalid. If it is
         // invalid, we won't be in a valid device state anyway so better to get rid of
         // them and free the virt queue.
-        std::mem::take(&mut streams[stream_id as usize].buffers);
+        std::mem::take(&mut streams[stream_id as usize].requests);
         Ok(())
     }
 

@@ -18,7 +18,7 @@ impl NullBackend {
 impl AudioBackend for NullBackend {
     fn write(&self, stream_id: u32) -> Result<()> {
         log::trace!("NullBackend write stream_id {}", stream_id);
-        _ = std::mem::take(&mut self.streams.write().unwrap()[stream_id as usize].buffers);
+        _ = std::mem::take(&mut self.streams.write().unwrap()[stream_id as usize].requests);
         Ok(())
     }
 
@@ -46,7 +46,7 @@ mod tests {
         null_backend.write(0).unwrap();
 
         let streams = streams.read().unwrap();
-        assert_eq!(streams[0].buffers.len(), 0);
+        assert_eq!(streams[0].requests.len(), 0);
     }
 
     #[test]
@@ -57,8 +57,8 @@ mod tests {
 
         null_backend.read(0).unwrap();
 
-        // buffer lengths should remain unchanged
+        // requests lengths should remain unchanged
         let streams = streams.read().unwrap();
-        assert_eq!(streams[0].buffers.len(), 0);
+        assert_eq!(streams[0].requests.len(), 0);
     }
 }

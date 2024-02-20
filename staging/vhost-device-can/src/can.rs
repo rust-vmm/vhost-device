@@ -39,6 +39,8 @@ pub(crate) enum Error {
     EventFdFailed,
     #[error("Push can element operation failed")]
     PushFailed,
+    #[error("No output interface available")]
+    NoOutputInterface,
 }
 
 /* CAN flags to determine type of CAN Id */
@@ -251,18 +253,17 @@ impl CanController {
         let frame = CanFdFrame::new(can_id, &data).expect("Fail to create CanFdFrame");
 
         // Send the CAN frame
-        let write_result = self
-            .can_out_socket
-            .as_ref()
-            .expect("Interface does not exist!")
-            .write_frame(&frame);
+        let socket = self.can_out_socket.as_ref().ok_or("No available device");
 
-        match write_result {
-            Ok(_) => Ok(VIRTIO_CAN_STATUS_OK),
-            Err(_) => {
-                warn!("Error write CAN socket");
-                Err(Error::SocketWrite)
-            }
+        match socket {
+            Ok(socket) => match socket.write_frame(&frame) {
+                Ok(_) => Ok(VIRTIO_CAN_STATUS_OK),
+                Err(_) => {
+                    warn!("Error write CAN socket");
+                    Err(Error::SocketWrite)
+                }
+            },
+            Err(_) => Err(Error::NoOutputInterface),
         }
     }
 }
@@ -270,6 +271,7 @@ impl CanController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vhu_can::VhostUserCanBackend;
     use std::sync::{Arc, RwLock};
 
     #[test]
@@ -351,5 +353,31 @@ mod tests {
         // Test start_read_thread
         let thread_handle = CanController::start_read_thread(arc_controller.clone());
         assert!(thread_handle.join().is_ok());
+    }
+
+    #[test]
+    fn test_can_open_socket_fail() {
+        let controller = CanController::new("can0".to_string(), "can1".to_string())
+            .expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        assert_eq!(
+            controller.write().unwrap().open_can_out_socket(),
+            Err(Error::SocketOpen)
+        );
+    }
+
+    #[test]
+    fn test_can_read_socket_fail() {
+        let controller = CanController::new("can0".to_string(), "can1".to_string())
+            .expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        assert_eq!(
+            CanController::read_can_socket(controller),
+            Err(Error::SocketOpen)
+        );
     }
 }

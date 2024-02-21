@@ -20,7 +20,7 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 extern crate queues;
 use queues::*;
 
-use crate::vhu_can::{VirtioCanFrame, VIRTIO_CAN_STATUS_OK};
+use crate::vhu_can::{VirtioCanFrame, VIRTIO_CAN_RESULT_OK};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -187,6 +187,27 @@ impl CanController {
                     CanAnyFrame::Normal(frame) => {
                         // Regular CAN frame
                         trace!("Received CAN message: {:?}", frame);
+
+                        let read_can_frame = VirtioCanFrame {
+                            msg_type: VIRTIO_CAN_RX.into(),
+                            can_id: frame.raw_id().into(),
+                            length: (frame.data().len() as u16).into(),
+                            reserved: 0.into(),
+                            flags: frame.id_flags().bits().into(),
+                            sdu: {
+                                let mut sdu_data: [u8; 64] = [0; 64];
+                                sdu_data[..frame.data().len()].copy_from_slice(frame.data());
+                                sdu_data
+                            },
+                        };
+
+                        match controller.push(read_can_frame) {
+                            Ok(_) => warn!("New Can frame was received"),
+                            Err(_) => {
+                                warn!("Error read/push CAN frame");
+                                return Err(Error::SocketRead);
+                            }
+                        }
                     }
                     CanAnyFrame::Fd(frame) => {
                         // CAN FD frame
@@ -257,7 +278,7 @@ impl CanController {
 
         match socket {
             Ok(socket) => match socket.write_frame(&frame) {
-                Ok(_) => Ok(VIRTIO_CAN_STATUS_OK),
+                Ok(_) => Ok(VIRTIO_CAN_RESULT_OK),
                 Err(_) => {
                     warn!("Error write CAN socket");
                     Err(Error::SocketWrite)
@@ -337,7 +358,7 @@ mod tests {
             Ok(_) => {
                 // Test operation
                 let operation_result = controller.can_out(frame).unwrap();
-                assert_eq!(operation_result, VIRTIO_CAN_STATUS_OK);
+                assert_eq!(operation_result, VIRTIO_CAN_RESULT_OK);
             }
             Err(_) => warn!("There is no CAN interface with {} name", can_out_name),
         }

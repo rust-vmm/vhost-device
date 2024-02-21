@@ -265,6 +265,8 @@ pub(crate) fn can_init() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Error::FailCreateCanControllerSocket;
+    use crate::can::Error::SocketOpen;
     use assert_matches::assert_matches;
 
     #[test]
@@ -348,6 +350,22 @@ mod tests {
         assert_matches!(
             VuCanConfig::try_from(invalid_args),
             Err(Error::WrongPairConf)
+        );
+    }
+
+    #[test]
+    fn test_can_valid_configuration_start_backend_fail() {
+        // Instantiate the struct with the provided values
+        let config = VuCanConfig {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            socket_count: 1,
+            can_in_devices: vec!["vcan0".to_string()],
+            can_out_devices: vec!["vcan1".to_string()],
+        };
+
+        assert_matches!(
+            start_backend(config),
+            Err(FailCreateCanControllerSocket(SocketOpen))
         );
     }
 }

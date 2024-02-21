@@ -43,8 +43,8 @@ pub const VIRTIO_CAN_F_LATE_TX_ACK: u16 = 2;
 pub const VIRTIO_CAN_F_RTR_FRAMES: u16 = 3;
 
 /// Possible values of the status field
-pub const VIRTIO_CAN_STATUS_OK: u8 = 0x0;
-pub const VIRTIO_CAN_STATUS_ERR: u8 = 0x1;
+pub const VIRTIO_CAN_RESULT_OK: u8 = 0x0;
+pub const VIRTIO_CAN_RESULT_NOT_OK: u8 = 0x1;
 
 /// CAN Control messages
 const VIRTIO_CAN_SET_CTRL_MODE_START: u16 = 0x0201;
@@ -254,7 +254,7 @@ impl VhostUserCanBackend {
                 return Err(Error::UnexpectedReadableDescriptor(1));
             }
 
-            let response = VIRTIO_CAN_STATUS_OK;
+            let response = VIRTIO_CAN_RESULT_OK;
 
             desc_chain
                 .memory()
@@ -391,7 +391,7 @@ impl VhostUserCanBackend {
                 Ok(result) => result,
                 Err(_) => {
                     warn!("We got an error from controller send func");
-                    VIRTIO_CAN_STATUS_ERR
+                    VIRTIO_CAN_RESULT_NOT_OK
                 }
             };
 
@@ -420,11 +420,13 @@ impl VhostUserCanBackend {
         trace!("process_rx_requests");
 
         if requests.is_empty() {
+            trace!("rx_queue requests are empty");
             return Ok(true);
         }
 
         let desc_chain = &requests[0];
         let descriptors: Vec<_> = desc_chain.clone().collect();
+        trace!("descriptors.len(): {:?}", descriptors.len());
 
         if descriptors.len() != 1 {
             trace!("Error::UnexpectedDescriptorCount");
@@ -433,6 +435,7 @@ impl VhostUserCanBackend {
 
         let desc_response = descriptors[0];
         if !desc_response.is_write_only() {
+            trace!("Error::UnexpectedReadableDescriptor");
             return Err(Error::UnexpectedReadableDescriptor(1));
         }
 

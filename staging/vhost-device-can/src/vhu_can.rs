@@ -5,10 +5,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use crate::can::Error::QueueEmpty;
 use crate::can::{
-    CanController, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF, CAN_ERR_FLAG, CAN_FRMF_TYPE_FD,
-    CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED, VIRTIO_CAN_FLAGS_FD,
-    VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_RX, VIRTIO_CAN_TX,
+    CanController, CAN_CS_STARTED, CAN_CS_STOPPED, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF,
+    CAN_ERR_FLAG, CAN_FRMF_TYPE_FD, CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED,
+    VIRTIO_CAN_FLAGS_FD, VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_RX, VIRTIO_CAN_TX,
 };
 use log::{error, trace, warn};
 use std::mem::size_of;
@@ -38,6 +39,8 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 /// Feature bit numbers
 pub const VIRTIO_CAN_F_CAN_CLASSIC: u16 = 0;
 pub const VIRTIO_CAN_F_CAN_FD: u16 = 1;
+pub const VIRTIO_CAN_S_CTRL_BUSOFF: u16 = 2; /* Controller BusOff */
+
 #[allow(dead_code)]
 pub const VIRTIO_CAN_F_LATE_TX_ACK: u16 = 2;
 pub const VIRTIO_CAN_F_RTR_FRAMES: u16 = 3;
@@ -234,13 +237,15 @@ impl VhostUserCanBackend {
 
             match request.msg_type.into() {
                 VIRTIO_CAN_SET_CTRL_MODE_START => {
-                    //TODO: vcan->busoff = false;
                     trace!("VIRTIO_CAN_SET_CTRL_MODE_START");
+                    //self.controller.write().unwrap().busoff = false;
+                    self.controller.write().unwrap().ctrl_state = CAN_CS_STARTED;
                     Ok(())
                 }
                 VIRTIO_CAN_SET_CTRL_MODE_STOP => {
-                    //TODO: vcan->busoff = false;
                     trace!("VIRTIO_CAN_SET_CTRL_MODE_STOP");
+                    //self.controller.write().unwrap().busoff = false;
+                    self.controller.write().unwrap().ctrl_state = CAN_CS_STOPPED;
                     Ok(())
                 }
                 _ => {
@@ -387,11 +392,15 @@ impl VhostUserCanBackend {
                 return Err(Error::UnexpectedReadableDescriptor(1));
             }
 
-            let response = match self.controller.write().unwrap().can_out(corrected_request) {
-                Ok(result) => result,
-                Err(_) => {
-                    warn!("We got an error from controller send func");
-                    VIRTIO_CAN_RESULT_NOT_OK
+            let response = if self.controller.read().unwrap().ctrl_state != CAN_CS_STARTED {
+                VIRTIO_CAN_RESULT_NOT_OK
+            } else {
+                match self.controller.write().unwrap().can_out(corrected_request) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        warn!("We got an error from controller send func");
+                        VIRTIO_CAN_RESULT_NOT_OK
+                    }
                 }
             };
 
@@ -441,14 +450,22 @@ impl VhostUserCanBackend {
 
         let mut response = match self.controller.write().unwrap().pop() {
             Ok(item) => item,
-            Err(_) => return Err(Error::HandleEventUnknown),
+            Err(QueueEmpty) => {
+                trace!("Empty queue!");
+                return Ok(false);
+            }
+            Err(_) => {
+                trace!("Pop error!");
+                return Err(Error::HandleEventUnknown);
+            }
         };
 
         CanController::print_can_frame(response);
 
         if (response.can_id.to_native() & CAN_ERR_FLAG) != 0 {
             if (response.can_id.to_native() & CAN_ERR_BUSOFF) != 0 {
-                //TODO: vcan->busoff = true;
+                self.controller.write().unwrap().busoff = true;
+                self.controller.write().unwrap().ctrl_state = CAN_CS_STOPPED;
                 warn!("Got BusOff error frame, device does a local bus off\n");
             } else {
                 trace!("Dropping error frame 0x{:x}\n", response.can_id.to_native());
@@ -581,6 +598,7 @@ impl VhostUserCanBackend {
     /// Process the messages in the vring and dispatch replies
     fn process_rx_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         trace!("process_rx_queue");
+
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
@@ -595,11 +613,6 @@ impl VhostUserCanBackend {
                 Error::NotificationFailed
             })?;
         }
-        Ok(())
-    }
-
-    fn process_rx_queue_dump(&mut self, _vring: &VringRwLock) -> Result<()> {
-        dbg!("Do nothing, if you reach that point!");
         Ok(())
     }
 
@@ -698,10 +711,25 @@ impl VhostUserBackendMut for VhostUserCanBackend {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
+
+        if (self.controller.read().unwrap().ctrl_state != CAN_CS_STARTED)
+            && ((device_event == RX_QUEUE) || (device_event == BACKEND_EFD))
+        {
+            trace!("Device is stopped!");
+            if device_event == BACKEND_EFD {
+                let _ = self.controller.write().unwrap().rx_event_fd.read();
+            }
+            return Ok(());
+        }
+
         if device_event == RX_QUEUE {
             trace!("RX_QUEUE\n");
-            return Ok(());
+            if self.controller.write().unwrap().rx_is_empty() {
+                trace!("Empty queue!");
+                return Ok(());
+            }
         };
+
         let vring = if device_event != BACKEND_EFD {
             &vrings[device_event as usize]
         } else {
@@ -709,6 +737,7 @@ impl VhostUserBackendMut for VhostUserCanBackend {
             let _ = self.controller.write().unwrap().rx_event_fd.read();
             &vrings[RX_QUEUE as usize]
         };
+
         if self.event_idx {
             // vm-virtio's Queue implementation only checks avail_index
             // once, so to properly support EVENT_IDX we need to keep
@@ -719,7 +748,7 @@ impl VhostUserBackendMut for VhostUserCanBackend {
                 match device_event {
                     CTRL_QUEUE => self.process_ctrl_queue(vring),
                     TX_QUEUE => self.process_tx_queue(vring),
-                    RX_QUEUE => self.process_rx_queue_dump(vring),
+                    RX_QUEUE => self.process_rx_queue(vring),
                     BACKEND_EFD => self.process_rx_queue(vring),
                     _ => Err(Error::HandleEventUnknown),
                 }?;
@@ -732,7 +761,7 @@ impl VhostUserBackendMut for VhostUserCanBackend {
             match device_event {
                 CTRL_QUEUE => self.process_ctrl_queue(vring),
                 TX_QUEUE => self.process_tx_queue(vring),
-                RX_QUEUE => self.process_rx_queue_dump(vring),
+                RX_QUEUE => self.process_rx_queue(vring),
                 BACKEND_EFD => self.process_rx_queue(vring),
                 _ => Err(Error::HandleEventUnknown),
             }?;
@@ -1172,12 +1201,9 @@ mod tests {
         );
 
         let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
-        assert_eq!(
-            vu_can_backend
-                .process_rx_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::HandleEventUnknown
-        );
+        assert!(!vu_can_backend
+            .process_rx_requests(vec![desc_chain], &vring)
+            .unwrap());
 
         // Push a new can message into the can.rs queue
         let frame = VirtioCanFrame {

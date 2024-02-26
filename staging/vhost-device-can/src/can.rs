@@ -20,7 +20,7 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 extern crate queues;
 use queues::*;
 
-use crate::vhu_can::{VirtioCanFrame, VIRTIO_CAN_RESULT_OK};
+use crate::vhu_can::{VirtioCanFrame, VIRTIO_CAN_RESULT_OK, VIRTIO_CAN_S_CTRL_BUSOFF};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -35,6 +35,8 @@ pub(crate) enum Error {
     SocketRead,
     #[error("Pop can element operation failed")]
     PopFailed,
+    #[error("Queue is empty")]
+    QueueEmpty,
     #[error("Creating Eventfd for CAN events failed")]
     EventFdFailed,
     #[error("Push can element operation failed")]
@@ -65,6 +67,11 @@ pub(crate) const CAN_FRMF_ESI: u32 = 0x02; /* error state ind. of transmitting n
 pub(crate) const CAN_FRMF_TYPE_FD: u32 = 0x10; /* internal bit ind. of CAN FD frame */
 pub(crate) const CAN_ERR_BUSOFF: u32 = 0x00000040; /* bus off */
 
+/* CAN controller states */
+pub(crate) const CAN_CS_UNINIT: u8 = 0x00;
+pub(crate) const CAN_CS_STARTED: u8 = 0x01;
+pub(crate) const CAN_CS_STOPPED: u8 = 0x02;
+
 /// Virtio Can Configuration
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 #[repr(C)]
@@ -87,6 +94,8 @@ pub(crate) struct CanController {
     pub rx_event_fd: EventFd,
     rx_fifo: Queue<VirtioCanFrame>,
     pub status: bool,
+    pub busoff: bool,
+    pub ctrl_state: u8,
 }
 
 impl CanController {
@@ -109,6 +118,8 @@ impl CanController {
             rx_event_fd: rx_efd,
             rx_fifo,
             status: true,
+            busoff: false,
+            ctrl_state: CAN_CS_UNINIT,
         })
     }
 
@@ -124,11 +135,11 @@ impl CanController {
         trace!("[");
         let last_elem = canframe.length.to_native() as usize - 1;
         for (index, sdu) in canframe.sdu.iter().enumerate() {
-            trace!("0x{:x}, ", sdu);
             if index == last_elem {
                 trace!("0x{:x}", sdu);
                 break;
             }
+            trace!("0x{:x}, ", sdu);
         }
         trace!("]");
     }
@@ -144,7 +155,15 @@ impl CanController {
         }
     }
 
+    pub fn rx_is_empty(&mut self) -> bool {
+        self.rx_fifo.size() == 0
+    }
+
     pub fn pop(&mut self) -> Result<VirtioCanFrame> {
+        if self.rx_fifo.size() < 1 {
+            return Err(Error::QueueEmpty);
+        }
+
         match self.rx_fifo.remove() {
             Ok(item) => Ok(item),
             _ => Err(Error::PopFailed),
@@ -173,6 +192,15 @@ impl CanController {
             }
         };
 
+        // Set non-blocking otherwise the device will not restart immediatelly
+        // when the VM closes, and a new canfd messages needs to be received for
+        // restart to happen.
+        // This caused by the fact that the thread is stacked in read function
+        // and does not go to the next loop to check the status condition.
+        socket
+            .set_nonblocking(true)
+            .expect("Cannot set nonblocking");
+
         // Receive CAN messages
         loop {
             // If the status variable is false then break and exit.
@@ -182,6 +210,14 @@ impl CanController {
             }
 
             if let Ok(frame) = socket.read_frame() {
+                // If ctrl_state is stopped, consume the received CAN/FD frame
+                // and loop till the ctrl_state changes to started or the thread
+                // to exit.
+                if controller.read().unwrap().ctrl_state != CAN_CS_STARTED {
+                    trace!("CAN/FD frame is received but not saved!");
+                    continue;
+                }
+
                 let mut controller = controller.write().unwrap();
                 match frame {
                     CanAnyFrame::Normal(frame) => {
@@ -257,8 +293,11 @@ impl CanController {
         self.status = false;
     }
 
-    pub(crate) fn config(&self) -> &VirtioCanConfig {
+    pub(crate) fn config(&mut self) -> &VirtioCanConfig {
         trace!("Get config\n");
+        if self.busoff {
+            self.config.status = VIRTIO_CAN_S_CTRL_BUSOFF.into();
+        }
         &self.config
     }
 
@@ -332,7 +371,7 @@ mod tests {
     fn test_can_controller_config() {
         let can_in_name = "can_in".to_string();
         let can_out_name = "can_out".to_string();
-        let controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
+        let mut controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
 
         // Test config
         let config = controller.config();

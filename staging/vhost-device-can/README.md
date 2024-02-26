@@ -5,9 +5,8 @@ This program is a vhost-user backend that emulates a VirtIO CAN device.
 The device's binary takes two (2) parameters:  a socket, a 'can-devices' list.
 The socket is commonly used across all vhost-devices to communicate with
 the vhost-user frontend device. The 'can-devices' represents a list of
-CAN/FD devices appears in the host system. This list includes *can_input* and
-*can_output* devices which vhost-device-can will forward messages to and from
-the frontend side.
+CAN/FD devices appears in the host system which vhost-device-can will 
+forward messages to and from the frontend side.
 
 This program is tested with QEMU's `vhost-user-device-pci` device.
 Examples' section below.
@@ -37,29 +36,34 @@ Examples' section below.
 .. option:: -d, --can-devices='CAN/FD interfaces'
 
   CAN/FD device list at the host OS in the format:
-      <can-in_X_0>:<can_out_Y_0> [<can_in_X_1>:<can_out_Y_1>] ... [<can_in_X_N-1>:<can_out_Y_N-1>]
+      <can-_X_0> [<can_in_X_1>] ... [<can_in_X_N-1>]
 
-  Note 1: Where N (the number of tuples) is equal with the number provided via *socket_count* parameter.
+  Note 1: Where N (the number of CAN/FD interfaces) is equal with the number
+          provided via *socket_count* parameter.
 
-      Example: --can-devices "vcan0:vcan1 vcan2:vcan3"
-
-  Note 2: In most cases, the user needs to send and receive messages to/from the same interface
-          so the arguments will be `--can-devices "can0:can0"`. But there are cases, where there
-          might be the need to have 2 CAN/FD available channels (connected in the same CAN bus)
-          and use can0 as receiver and can1 as sender (--can-devices "can0:can1"). To cover
-          scenarios like this, the `--can-device` argument consists of couple structures of CAN/FD
-          devices as shown above.
-
-## Limitations
-This device is still work-in-progress (WIP) and is based on virtio-can
-Linux driver and QEMU's device presented in the following RFC:
-- https://lwn.net/Articles/934187/ 
-
-Currently version of the device has been tested only with *vcan* device.
+      Example: --can-devices "can0 can1 can2"
 
 ## Features
-Vhost-device-can can be used with multiple QEMU's VMs with both *Classic CAN*
-and *CANFD* devices.
+This device is still work-in-progress (WIP) and on [virtio-spec v1.4](https://github.com/oasis-tcs/virtio-spec/blob/virtio-1.4/device-types/can/) is based
+on virtio-can Linux's driver and QEMU's device presented in the following RFC:
+- https://lwn.net/Articles/934187/ 
+
+Vhost-device-can have be been tested in scenarios with multiple QEMU's VMs using
+host's *CAN/FD* devices.
+
+## Limitations
+
+1) The transmission of a CAN/FD frame to a host interface always is done
+   synchronously. This means that regardless the negotiation or not of the
+   feature *VIRTIO_CAN_F_LATE_TX_ACK*, the backend will always wait for the
+   transmission of the frame and after will mark the transmission request
+   as used.
+2) Does not check for undefined flags in CAN/FD frame when send and receive
+   a CAN/FD frame from the frontend (QEMU device).
+3) The host's CAN/FD devices should be already in *UP* state before staring
+   the vhost-device-can (by using `ip link set can0 [up,down]`).
+   - The control messages does not actually change host's device state
+4) Current version of the device has been tested only with *vcan* device.
 
 ## Examples
 
@@ -80,7 +84,7 @@ For testing the device the required dependencies are:
 
 The daemon should be started first:
 ```shell
-host# vhost-device-can --socket-path=can.sock --can-devices="can0:can1"
+host# vhost-device-can --socket-path=can.sock --can-devices="vcan0"
 ```
 
 The QEMU invocation needs to create a chardev socket the device can
@@ -116,7 +120,7 @@ host# qemu-system                                         \
 
 Run vhost-device-can as:
 ```text
-./vhost-device-can --socket-path /tmp/can.sock  --socket-count 2 --can-devices "vcan0:vcan0 vcan1:vcan2"
+./vhost-device-can --socket-path /tmp/can.sock  --socket-count 2 --can-devices "vcan0 vcan1"
 ```
 This command will start the device and create two new sockets: */tmp/can.sock0* and */tmp/can.sock1*.
 

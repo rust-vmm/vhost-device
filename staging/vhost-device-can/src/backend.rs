@@ -44,8 +44,6 @@ pub(crate) enum Error {
     ServeFailed(vhost_user_backend::Error),
     #[error("Thread `{0}` panicked")]
     ThreadPanic(String, Box<dyn Any + Send>),
-    #[error("Could not parse can devices")]
-    WrongPairConf,
 }
 
 #[derive(Parser, Debug)]
@@ -68,43 +66,32 @@ struct CanArgs {
 struct VuCanConfig {
     socket_path: PathBuf,
     socket_count: u32,
-    can_in_devices: Vec<String>,
-    can_out_devices: Vec<String>,
+    can_devices: Vec<String>,
 }
 
-fn check_can_devices(can_in_devices: &[String], can_out_devices: &[String]) -> Result<()> {
-    let mut can_devices = can_in_devices.to_owned();
-    can_devices.extend(can_out_devices.iter().cloned());
-
-    for can_in in &can_devices {
-        if CanSocket::open(can_in).is_err() {
-            info!("There is no interface with the following name {}", can_in);
+fn check_can_devices(can_devices: &[String]) -> Result<()> {
+    for can_dev in can_devices {
+        if CanSocket::open(can_dev).is_err() {
+            info!("There is no interface with the following name {}", can_dev);
             return Err(Error::CouldNotFindCANDevs);
         }
     }
     Ok(())
 }
 
-fn parse_can_devices(input: &CanArgs) -> Result<(Vec<String>, Vec<String>)> {
-    let mut can_in = Vec::new();
-    let mut can_out = Vec::new();
-    let pairs: Vec<&str> = input.can_devices.split_whitespace().collect();
+fn parse_can_devices(input: &CanArgs) -> Result<Vec<String>> {
+    let can_devices_vec: Vec<&str> = input.can_devices.split_whitespace().collect();
 
-    for pair in &pairs {
-        let components: Vec<&str> = pair.split(':').collect();
+    //let mut can_devices = Vec::new();
+    //for can_dev in &can_devices_vec {
+    //    can_devices.push(can_dev.to_string());
+    //}
 
-        if components.len() == 2 {
-            can_in.push(components[0].to_string());
-            can_out.push(components[1].to_string());
-        } else {
-            info!("Invalid input: {}", pair);
-            return Err(Error::WrongPairConf);
-        }
-    }
+    let can_devices: Vec<_> = can_devices_vec.iter().map(|x| x.to_string()).collect();
 
-    if (pairs.len() as u32) != input.socket_count {
+    if (can_devices.len() as u32) != input.socket_count {
         info!(
-            "Number of pairs ({}) not equal with socket count {}",
+            "Number of CAN/FD devices ({}) not equal with socket count {}",
             input.can_devices, input.socket_count
         );
         return Err(Error::SocketCountInvalid(
@@ -112,8 +99,8 @@ fn parse_can_devices(input: &CanArgs) -> Result<(Vec<String>, Vec<String>)> {
         ));
     }
 
-    match check_can_devices(&can_in, &can_out) {
-        Ok(_) => Ok((can_in, can_out)),
+    match check_can_devices(&can_devices) {
+        Ok(_) => Ok(can_devices),
         Err(_) => Err(Error::CouldNotFindCANDevs),
     }
 }
@@ -126,16 +113,15 @@ impl TryFrom<CanArgs> for VuCanConfig {
             return Err(Error::SocketCountInvalid(0));
         }
 
-        let (can_in_devices, can_out_devices) = match parse_can_devices(&args) {
-            Ok((can_in_devices, can_out_devices)) => (can_in_devices, can_out_devices),
+        let can_devices = match parse_can_devices(&args) {
+            Ok(can_devs) => can_devs,
             Err(e) => return Err(e),
         };
 
         Ok(VuCanConfig {
             socket_path: args.socket_path,
             socket_count: args.socket_count,
-            can_in_devices,
-            can_out_devices,
+            can_devices,
         })
     }
 }
@@ -163,10 +149,10 @@ impl VuCanConfig {
 
 // This is the public API through which an external program starts the
 /// vhost-device-can backend server.
-pub(crate) fn start_backend_server(socket: PathBuf, can_in: String, can_out: String) -> Result<()> {
+pub(crate) fn start_backend_server(socket: PathBuf, can_devs: String) -> Result<()> {
     loop {
-        let controller = CanController::new(can_in.clone(), can_out.clone())
-            .map_err(Error::CouldNotCreateCanController)?;
+        let controller =
+            CanController::new(can_devs.clone()).map_err(Error::CouldNotCreateCanController)?;
         let lockable_controller = Arc::new(RwLock::new(controller));
         let vu_can_backend = Arc::new(RwLock::new(
             VhostUserCanBackend::new(lockable_controller.clone())
@@ -175,7 +161,7 @@ pub(crate) fn start_backend_server(socket: PathBuf, can_in: String, can_out: Str
         lockable_controller
             .write()
             .unwrap()
-            .open_can_out_socket()
+            .open_can_socket()
             .map_err(Error::FailCreateCanControllerSocket)?;
 
         let read_handle = CanController::start_read_thread(lockable_controller.clone());
@@ -196,7 +182,7 @@ pub(crate) fn start_backend_server(socket: PathBuf, can_in: String, can_out: Str
 
         daemon.serve(&socket).map_err(Error::ServeFailed)?;
 
-        // Terminate the thread which reads CAN messages from "can_in"
+        // Terminate the thread which reads CAN messages from "can_devs"
         lockable_controller.write().unwrap().exit_read_thread();
 
         // Wait for read thread to exit
@@ -211,26 +197,25 @@ fn start_backend(config: VuCanConfig) -> Result<()> {
     let mut handles = HashMap::new();
     let (senders, receiver) = std::sync::mpsc::channel();
 
-    for (thread_id, (socket, can_in, can_out)) in config
+    for (thread_id, (socket, can_devs)) in config
         .generate_socket_paths()
         .into_iter()
-        .zip(config.can_in_devices.iter().cloned())
-        .zip(config.can_out_devices.iter().cloned())
-        .map(|((a, b), c)| (a, b.to_string(), c.to_string()))
+        .zip(config.can_devices.iter().cloned())
+        .map(|(a, b)| (a, b.to_string()))
         .enumerate()
     {
         println!(
-            "thread_id: {}, socket: {:?}, can_in: {:?}, can_out: {:?}",
-            thread_id, socket, can_in, can_out
+            "thread_id: {}, socket: {:?}, can_devs: {:?}",
+            thread_id, socket, can_devs,
         );
 
-        let name = format!("vhu-can-{}-{}", can_in, can_out);
+        let name = format!("vhu-can-{}", can_devs);
         let sender = senders.clone();
         let handle = thread::Builder::new()
             .name(name.clone())
             .spawn(move || {
                 let result =
-                    std::panic::catch_unwind(move || start_backend_server(socket, can_in, can_out));
+                    std::panic::catch_unwind(move || start_backend_server(socket, can_devs));
 
                 // Notify the main thread that we are done.
                 sender.send(thread_id).unwrap();
@@ -273,7 +258,7 @@ mod tests {
     fn test_can_valid_configuration() {
         let valid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "vcan0:vcan1".to_string(),
+            can_devices: "can0".to_string(),
             socket_count: 1,
         };
 
@@ -287,7 +272,7 @@ mod tests {
     fn test_can_valid_mult_device_configuration() {
         let valid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "vcan0:vcan1 vcan2:vcan3".to_string(),
+            can_devices: "can0 can1".to_string(),
             socket_count: 2,
         };
 
@@ -301,7 +286,7 @@ mod tests {
     fn test_can_invalid_socket_configuration() {
         let invalid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "vcan0:vcan1".to_string(),
+            can_devices: "can0".to_string(),
             socket_count: 0,
         };
 
@@ -315,7 +300,7 @@ mod tests {
     fn test_can_invalid_mult_socket_configuration_1() {
         let invalid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "vcan0:vcan1".to_string(),
+            can_devices: "can0".to_string(),
             socket_count: 2,
         };
 
@@ -329,7 +314,7 @@ mod tests {
     fn test_can_invalid_mult_socket_configuration_2() {
         let invalid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "vcan0:vcan1 vcan2:vcan3".to_string(),
+            can_devices: "can0 can1".to_string(),
             socket_count: 1,
         };
 
@@ -340,31 +325,27 @@ mod tests {
     }
 
     #[test]
-    fn test_can_invalid_devs_configuration() {
-        let invalid_args = CanArgs {
-            socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "vcan0:vcan1 vcan2".to_string(),
-            socket_count: 1,
-        };
-
-        assert_matches!(
-            VuCanConfig::try_from(invalid_args),
-            Err(Error::WrongPairConf)
-        );
-    }
-
-    #[test]
     fn test_can_valid_configuration_start_backend_fail() {
         // Instantiate the struct with the provided values
         let config = VuCanConfig {
             socket_path: PathBuf::from("/tmp/vhost.sock"),
             socket_count: 1,
-            can_in_devices: vec!["vcan0".to_string()],
-            can_out_devices: vec!["vcan1".to_string()],
+            can_devices: vec!["can0".to_string()],
         };
 
         assert_matches!(
             start_backend(config),
+            Err(FailCreateCanControllerSocket(SocketOpen))
+        );
+    }
+
+    #[test]
+    fn test_can_valid_configuration_start_backend_server_fail() {
+        let socket_path = PathBuf::from("/tmp/vhost.sock");
+        let can_devs = "can0".to_string();
+
+        assert_matches!(
+            start_backend_server(socket_path, can_devs),
             Err(FailCreateCanControllerSocket(SocketOpen))
         );
     }

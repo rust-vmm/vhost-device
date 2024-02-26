@@ -20,7 +20,7 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 extern crate queues;
 use queues::*;
 
-use crate::vhu_can::{VirtioCanFrame, VIRTIO_CAN_RESULT_OK};
+use crate::vhu_can::{VirtioCanFrame, VIRTIO_CAN_S_CTRL_BUSOFF};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -35,6 +35,8 @@ pub(crate) enum Error {
     SocketRead,
     #[error("Pop can element operation failed")]
     PopFailed,
+    #[error("Queue is empty")]
+    QueueEmpty,
     #[error("Creating Eventfd for CAN events failed")]
     EventFdFailed,
     #[error("Push can element operation failed")]
@@ -65,6 +67,10 @@ pub(crate) const CAN_FRMF_ESI: u32 = 0x02; /* error state ind. of transmitting n
 pub(crate) const CAN_FRMF_TYPE_FD: u32 = 0x10; /* internal bit ind. of CAN FD frame */
 pub(crate) const CAN_ERR_BUSOFF: u32 = 0x00000040; /* bus off */
 
+/* CAN controller states */
+pub(crate) const CAN_CS_STARTED: u8 = 0x01;
+pub(crate) const CAN_CS_STOPPED: u8 = 0x02;
+
 /// Virtio Can Configuration
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 #[repr(C)]
@@ -80,35 +86,33 @@ unsafe impl ByteValued for VirtioCanConfig {}
 #[derive(Debug)]
 pub(crate) struct CanController {
     config: VirtioCanConfig,
-    pub can_in_name: String,
-    #[allow(unused)]
-    can_out_name: String,
-    can_out_socket: Option<CanFdSocket>,
+    pub can_name: String,
+    pub can_socket: Option<CanFdSocket>,
     pub rx_event_fd: EventFd,
     rx_fifo: Queue<VirtioCanFrame>,
     pub status: bool,
+    pub busoff: bool,
+    pub ctrl_state: u8,
 }
 
 impl CanController {
     // Creates a new controller corresponding to `device`.
-    pub(crate) fn new(can_in_name: String, can_out_name: String) -> Result<CanController> {
-        let can_in_name = can_in_name.to_owned();
-        info!("can_in_name: {:?}", can_in_name);
-
-        let can_out_name = can_out_name.to_owned();
-        info!("can_out_name: {:?}", can_out_name);
+    pub(crate) fn new(can_name: String) -> Result<CanController> {
+        let can_name = can_name.to_owned();
+        info!("can_name: {:?}", can_name);
 
         let rx_fifo = Queue::new();
         let rx_efd = EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?;
 
         Ok(CanController {
             config: VirtioCanConfig { status: 0x0.into() },
-            can_in_name,
-            can_out_name,
-            can_out_socket: None,
+            can_name,
+            can_socket: None,
             rx_event_fd: rx_efd,
             rx_fifo,
             status: true,
+            busoff: false,
+            ctrl_state: CAN_CS_STOPPED,
         })
     }
 
@@ -124,11 +128,11 @@ impl CanController {
         trace!("[");
         let last_elem = canframe.length.to_native() as usize - 1;
         for (index, sdu) in canframe.sdu.iter().enumerate() {
-            trace!("0x{:x}, ", sdu);
             if index == last_elem {
                 trace!("0x{:x}", sdu);
                 break;
             }
+            trace!("0x{:x}, ", sdu);
         }
         trace!("]");
     }
@@ -144,15 +148,23 @@ impl CanController {
         }
     }
 
+    pub fn rx_is_empty(&mut self) -> bool {
+        self.rx_fifo.size() == 0
+    }
+
     pub fn pop(&mut self) -> Result<VirtioCanFrame> {
+        if self.rx_fifo.size() < 1 {
+            return Err(Error::QueueEmpty);
+        }
+
         match self.rx_fifo.remove() {
             Ok(item) => Ok(item),
             _ => Err(Error::PopFailed),
         }
     }
 
-    pub fn open_can_out_socket(&mut self) -> Result<()> {
-        self.can_out_socket = match CanFdSocket::open(&self.can_out_name) {
+    pub fn open_can_socket(&mut self) -> Result<()> {
+        self.can_socket = match CanFdSocket::open(&self.can_name) {
             Ok(socket) => Some(socket),
             Err(_) => {
                 warn!("Error opening CAN socket");
@@ -163,15 +175,24 @@ impl CanController {
     }
 
     pub fn read_can_socket(controller: Arc<RwLock<CanController>>) -> Result<()> {
-        let can_in_name = &controller.read().unwrap().can_in_name.clone();
-        dbg!("Start reading from {} socket!", &can_in_name);
-        let socket = match CanFdSocket::open(can_in_name) {
+        let can_name = &controller.read().unwrap().can_name.clone();
+        dbg!("Start reading from {} socket!", &can_name);
+        let socket = match CanFdSocket::open(can_name) {
             Ok(socket) => socket,
             Err(_) => {
                 warn!("Error opening CAN socket");
                 return Err(Error::SocketOpen);
             }
         };
+
+        // Set non-blocking otherwise the device will not restart immediatelly
+        // when the VM closes, and a new canfd messages needs to be received for
+        // restart to happen.
+        // This caused by the fact that the thread is stacked in read function
+        // and does not go to the next loop to check the status condition.
+        socket
+            .set_nonblocking(true)
+            .expect("Cannot set nonblocking");
 
         // Receive CAN messages
         loop {
@@ -182,6 +203,14 @@ impl CanController {
             }
 
             if let Ok(frame) = socket.read_frame() {
+                // If ctrl_state is stopped, consume the received CAN/FD frame
+                // and loop till the ctrl_state changes to started or the thread
+                // to exit.
+                if controller.read().unwrap().ctrl_state != CAN_CS_STARTED {
+                    trace!("CAN/FD frame is received but not saved!");
+                    continue;
+                }
+
                 let mut controller = controller.write().unwrap();
                 match frame {
                     CanAnyFrame::Normal(frame) => {
@@ -237,10 +266,12 @@ impl CanController {
                     CanAnyFrame::Remote(frame) => {
                         // Remote CAN frame
                         trace!("Received Remote CAN message: {:?}", frame);
+                        continue;
                     }
                     CanAnyFrame::Error(frame) => {
                         // Error frame
                         trace!("Received Error frame: {:?}", frame);
+                        continue;
                     }
                 }
 
@@ -257,12 +288,15 @@ impl CanController {
         self.status = false;
     }
 
-    pub(crate) fn config(&self) -> &VirtioCanConfig {
+    pub(crate) fn config(&mut self) -> &VirtioCanConfig {
         trace!("Get config\n");
+        if self.busoff {
+            self.config.status = VIRTIO_CAN_S_CTRL_BUSOFF.into();
+        }
         &self.config
     }
 
-    pub(crate) fn can_out(&self, tx_request: VirtioCanFrame) -> Result<u8> {
+    pub(crate) fn can_out(&self, tx_request: VirtioCanFrame) -> Result<()> {
         trace!("Can out\n");
 
         // Create a CAN frame with a specific CAN-ID and the data buffer
@@ -274,11 +308,11 @@ impl CanController {
         let frame = CanFdFrame::new(can_id, &data).expect("Fail to create CanFdFrame");
 
         // Send the CAN frame
-        let socket = self.can_out_socket.as_ref().ok_or("No available device");
+        let socket = self.can_socket.as_ref().ok_or("No available device");
 
         match socket {
             Ok(socket) => match socket.write_frame(&frame) {
-                Ok(_) => Ok(VIRTIO_CAN_RESULT_OK),
+                Ok(_) => Ok(()),
                 Err(_) => {
                     warn!("Error write CAN socket");
                     Err(Error::SocketWrite)
@@ -297,19 +331,16 @@ mod tests {
 
     #[test]
     fn test_can_controller_creation() {
-        let can_in_name = "can_in".to_string();
-        let can_out_name = "can_out".to_string();
+        let can_name = "can".to_string();
 
-        let controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
-        assert_eq!(controller.can_in_name, can_in_name);
-        assert_eq!(controller.can_out_name, can_out_name);
+        let controller = CanController::new(can_name.clone()).unwrap();
+        assert_eq!(controller.can_name, can_name);
     }
 
     #[test]
     fn test_can_controller_push_and_pop() {
-        let can_in_name = "can_in".to_string();
-        let can_out_name = "can_out".to_string();
-        let mut controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
+        let can_name = "can".to_string();
+        let mut controller = CanController::new(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_RX.into(),
@@ -330,9 +361,8 @@ mod tests {
 
     #[test]
     fn test_can_controller_config() {
-        let can_in_name = "can_in".to_string();
-        let can_out_name = "can_out".to_string();
-        let controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
+        let can_name = "can".to_string();
+        let mut controller = CanController::new(can_name.clone()).unwrap();
 
         // Test config
         let config = controller.config();
@@ -341,9 +371,8 @@ mod tests {
 
     #[test]
     fn test_can_controller_operation() {
-        let can_in_name = "can_in".to_string();
-        let can_out_name = "can_out".to_string();
-        let mut controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
+        let can_name = "can".to_string();
+        let mut controller = CanController::new(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_RX.into(),
@@ -354,21 +383,20 @@ mod tests {
             sdu: [0; 64],
         };
 
-        match controller.open_can_out_socket() {
+        match controller.open_can_socket() {
             Ok(_) => {
                 // Test operation
-                let operation_result = controller.can_out(frame).unwrap();
-                assert_eq!(operation_result, VIRTIO_CAN_RESULT_OK);
+                let operation_result = controller.can_out(frame);
+                assert!(operation_result.is_ok());
             }
-            Err(_) => warn!("There is no CAN interface with {} name", can_out_name),
+            Err(_) => warn!("There is no CAN interface with {} name", can_name),
         }
     }
 
     #[test]
     fn test_can_controller_start_read_thread() {
-        let can_in_name = "can_in".to_string();
-        let can_out_name = "can_out".to_string();
-        let controller = CanController::new(can_in_name.clone(), can_out_name.clone()).unwrap();
+        let can_name = "can".to_string();
+        let controller = CanController::new(can_name.clone()).unwrap();
         let arc_controller = Arc::new(RwLock::new(controller));
 
         // Test start_read_thread
@@ -378,21 +406,21 @@ mod tests {
 
     #[test]
     fn test_can_open_socket_fail() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         assert_eq!(
-            controller.write().unwrap().open_can_out_socket(),
+            controller.write().unwrap().open_can_socket(),
             Err(Error::SocketOpen)
         );
     }
 
     #[test]
     fn test_can_read_socket_fail() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 

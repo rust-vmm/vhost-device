@@ -5,10 +5,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use crate::can::Error::QueueEmpty;
 use crate::can::{
-    CanController, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF, CAN_ERR_FLAG, CAN_FRMF_TYPE_FD,
-    CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED, VIRTIO_CAN_FLAGS_FD,
-    VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_RX, VIRTIO_CAN_TX,
+    CanController, CAN_CS_STARTED, CAN_CS_STOPPED, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF,
+    CAN_ERR_FLAG, CAN_FRMF_TYPE_FD, CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED,
+    VIRTIO_CAN_FLAGS_FD, VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_RX, VIRTIO_CAN_TX,
 };
 use log::{error, trace, warn};
 use std::mem::size_of;
@@ -38,6 +39,8 @@ use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 /// Feature bit numbers
 pub const VIRTIO_CAN_F_CAN_CLASSIC: u16 = 0;
 pub const VIRTIO_CAN_F_CAN_FD: u16 = 1;
+pub const VIRTIO_CAN_S_CTRL_BUSOFF: u16 = 2; /* Controller BusOff */
+
 #[allow(dead_code)]
 pub const VIRTIO_CAN_F_LATE_TX_ACK: u16 = 2;
 pub const VIRTIO_CAN_F_RTR_FRAMES: u16 = 3;
@@ -79,6 +82,8 @@ pub(crate) enum Error {
     UnexpectedCtrlDescriptorSize(usize, u32),
     #[error("Invalid tx descriptor size, expected: size in [{0}, {1}] found: {2}")]
     UnexpectedTxDescriptorSize(usize, usize, u32),
+    #[error("Invalid rx descriptor size, expected: size equal or bigger than {0} found: {1}")]
+    UnexpectedRxDescriptorSize(usize, u32),
     #[error("Descriptor not found")]
     DescriptorNotFound,
     #[error("Descriptor read failed")]
@@ -97,6 +102,10 @@ pub(crate) enum Error {
     UnexpectedFdFlag,
     #[error("Classic CAN frames not negotiated")]
     UnexpectedClassicFlag,
+    #[error("Bus off error received")]
+    BusoffRxFrame,
+    #[error("Rx CAN frame has unknown error")]
+    RxFrameUnknownFail,
 }
 
 impl convert::From<Error> for io::Error {
@@ -190,6 +199,174 @@ impl VhostUserCanBackend {
         (self.acked_features & (1 << features)) != 0
     }
 
+    fn check_tx_frame(&self, request: VirtioCanFrame) -> Result<VirtioCanFrame> {
+        CanController::print_can_frame(request);
+
+        let msg_type = request.msg_type.to_native();
+        let mut can_id = request.can_id.to_native();
+        let mut length = request.length.to_native();
+        let mut flags = 0;
+
+        if msg_type != VIRTIO_CAN_TX {
+            warn!("TX: Message type 0x{:x} unknown\n", msg_type);
+            return Err(Error::UnexpectedCanMsgType(msg_type));
+        }
+
+        // If VIRTIO_CAN_FLAGS_EXTENDED has negotiated then use extended CAN ID
+        if (request.flags.to_native() & VIRTIO_CAN_FLAGS_EXTENDED) != 0 {
+            can_id &= CAN_EFF_MASK;
+            can_id |= CAN_EFF_FLAG;
+        } else {
+            can_id &= CAN_SFF_MASK;
+        }
+
+        // Remote transfer request is used only with classic CAN
+        if (request.flags.to_native() & VIRTIO_CAN_FLAGS_RTR) != 0 {
+            if !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC)
+                || !self.check_features(VIRTIO_CAN_F_RTR_FRAMES)
+            {
+                warn!("TX: RTR frames not negotiated");
+                return Err(Error::UnexpectedRtrFlag);
+            }
+            can_id |= CAN_RTR_FLAG;
+        }
+
+        // One of VIRTIO_CAN_F_CAN_CLASSIC and VIRTIO_CAN_F_CAN_FD must be negotiated
+        // Check if VIRTIO_CAN_F_CAN_FD is negotiated when the frame is CANFD
+        if (request.flags.to_native() & VIRTIO_CAN_FLAGS_FD) != 0 {
+            if !self.check_features(VIRTIO_CAN_F_CAN_FD) {
+                warn!("TX: FD frames not negotiated\n");
+                return Err(Error::UnexpectedFdFlag);
+            }
+            flags = CAN_FRMF_TYPE_FD;
+        } else {
+            // Check if VIRTIO_CAN_F_CAN_CLASSIC is negotiated when the frame is CAN
+            if !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC) {
+                warn!("TX: Classic frames not negotiated\n");
+                return Err(Error::UnexpectedClassicFlag);
+            }
+        }
+
+        // Adapt CAN length based on negotiated features
+        if (request.flags.to_native() & VIRTIO_CAN_FLAGS_FD) != 0 {
+            if length > 64 {
+                trace!("Cut sdu_len from {:?} to 64\n", request.length);
+                length = 64;
+            }
+        } else if length > 8 {
+            trace!("Cut sdu_len from {:?} to 8\n", request.length);
+            length = 8;
+        }
+
+        // TODO: Check for undefined bits in frame's flags
+
+        Ok(VirtioCanFrame {
+            msg_type: msg_type.into(),
+            can_id: can_id.into(),
+            length: length.into(),
+            reserved: 0.into(),
+            flags: flags.into(),
+            sdu: request.sdu[0..64].try_into().unwrap(),
+        })
+    }
+
+    fn check_rx_frame(&self, mut response: VirtioCanFrame) -> Result<VirtioCanFrame> {
+        CanController::print_can_frame(response);
+
+        let mut can_rx = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_RX.into(),
+            can_id: response.can_id,
+            length: response.length,
+            reserved: 0.into(),
+            flags: response.flags,
+            sdu: [0; 64],
+        };
+
+        // If we receive an error message check if that's a busoff.
+        // If no just drop the message, otherwise update config and return.
+        if (response.can_id.to_native() & CAN_ERR_FLAG) != 0 {
+            if (response.can_id.to_native() & CAN_ERR_BUSOFF) != 0 {
+                self.controller.write().unwrap().busoff = true;
+                self.controller.write().unwrap().ctrl_state = CAN_CS_STOPPED;
+                warn!("Got BusOff error frame, device does a local bus off\n");
+                return Err(Error::BusoffRxFrame);
+            } else {
+                trace!("Dropping error frame 0x{:x}\n", response.can_id.to_native());
+                return Err(Error::RxFrameUnknownFail);
+            }
+        }
+
+        // One of VIRTIO_CAN_F_CAN_CLASSIC and VIRTIO_CAN_F_CAN_FD must be negotiated
+        if (response.flags.to_native() & CAN_FRMF_TYPE_FD) != 0 {
+            if !self.check_features(VIRTIO_CAN_F_CAN_FD) {
+                warn!("Drop non-supported CAN FD frame");
+                return Err(Error::UnexpectedFdFlag);
+            }
+        } else if !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC) {
+            warn!("Drop non-supported CAN classic frame");
+            return Err(Error::UnexpectedClassicFlag);
+        }
+
+        // Add VIRTIO_CAN_FLAGS_EXTENDED in flag if the received frame
+        // had an extended CAN ID
+        if (response.can_id.to_native() & CAN_EFF_FLAG) != 0 {
+            can_rx.flags = VIRTIO_CAN_FLAGS_EXTENDED.into();
+            can_rx.can_id = (response.can_id.to_native() & CAN_EFF_MASK).into();
+        } else {
+            can_rx.can_id = (response.can_id.to_native() & CAN_SFF_MASK).into();
+        }
+
+        // Remote transfer request is used only with classic CAN
+        if (response.can_id.to_native() & CAN_RTR_FLAG) != 0 {
+            if !self.check_features(VIRTIO_CAN_F_RTR_FRAMES)
+                || !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC)
+            {
+                warn!("Drop non-supported RTR frame");
+                return Err(Error::UnexpectedRtrFlag);
+            }
+            // If remote transfer request is enabled add the according flag
+            can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_RTR).into();
+        }
+
+        // Treat Vcan interface as CANFD if MTU is set to 64 bytes.
+        //
+        // Vcan can not be configured as CANFD interface, but it is
+        // possible to configure its MTU to 64 bytes. So if a messages
+        // bigger than 8 bytes is being received we consider it as
+        // CANFD message.
+        let can_name = self.controller.read().unwrap().can_name.clone();
+        if self.check_features(VIRTIO_CAN_F_CAN_FD)
+            && response.length.to_native() > 8
+            && can_name == "vcan0"
+        {
+            response.flags = (response.flags.to_native() | CAN_FRMF_TYPE_FD).into();
+            warn!("\n\n\nCANFD VCAN0\n\n");
+        }
+
+        // Adapt CAN length based on negotiated features
+        if (response.flags.to_native() & CAN_FRMF_TYPE_FD) != 0 {
+            can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_FD).into();
+            if response.length.to_native() > 64 {
+                warn!(
+                    "%s(): Cut length from {} to 64\n",
+                    response.length.to_native()
+                );
+                can_rx.length = 64.into();
+            }
+        } else if response.length.to_native() > 8 {
+            warn!(
+                "%s(): Cut length from {} to 8\n",
+                response.length.to_native()
+            );
+            can_rx.length = 8.into();
+        }
+
+        can_rx.sdu.copy_from_slice(&response.sdu[0..64]);
+        CanController::print_can_frame(can_rx);
+
+        Ok(can_rx)
+    }
+
     fn process_ctrl_requests(
         &self,
         requests: Vec<CanDescriptorChain>,
@@ -232,20 +409,33 @@ impl VhostUserCanBackend {
                 .read_obj::<VirtioCanCtrlRequest>(desc_request.addr())
                 .map_err(|_| Error::DescriptorReadFailed)?;
 
-            match request.msg_type.into() {
+            // This implementation requires the CAN devices to be already in UP state
+            // before starting. This code does not trigger state changes [UP/DOWN] of
+            // the host CAN devices.
+            let response = match request.msg_type.into() {
                 VIRTIO_CAN_SET_CTRL_MODE_START => {
-                    //TODO: vcan->busoff = false;
                     trace!("VIRTIO_CAN_SET_CTRL_MODE_START");
-                    Ok(())
+                    if self.controller.write().unwrap().ctrl_state == CAN_CS_STARTED {
+                        Ok(VIRTIO_CAN_RESULT_NOT_OK)
+                    } else {
+                        self.controller.write().unwrap().busoff = false;
+                        self.controller.write().unwrap().ctrl_state = CAN_CS_STARTED;
+                        Ok(VIRTIO_CAN_RESULT_OK)
+                    }
                 }
                 VIRTIO_CAN_SET_CTRL_MODE_STOP => {
-                    //TODO: vcan->busoff = false;
                     trace!("VIRTIO_CAN_SET_CTRL_MODE_STOP");
-                    Ok(())
+                    if self.controller.write().unwrap().ctrl_state == CAN_CS_STOPPED {
+                        Ok(VIRTIO_CAN_RESULT_NOT_OK)
+                    } else {
+                        self.controller.write().unwrap().busoff = false;
+                        self.controller.write().unwrap().ctrl_state = CAN_CS_STOPPED;
+                        Ok(VIRTIO_CAN_RESULT_OK)
+                    }
                 }
                 _ => {
                     trace!("Ctrl queue: msg type 0x{:?} unknown", request.msg_type);
-                    return Err(Error::HandleEventUnknown);
+                    Err(Error::HandleEventUnknown)
                 }
             }?;
 
@@ -253,8 +443,6 @@ impl VhostUserCanBackend {
             if !desc_response.is_write_only() {
                 return Err(Error::UnexpectedReadableDescriptor(1));
             }
-
-            let response = VIRTIO_CAN_RESULT_OK;
 
             desc_chain
                 .memory()
@@ -316,83 +504,44 @@ impl VhostUserCanBackend {
                 .read_obj::<VirtioCanFrame>(desc_request.addr())
                 .map_err(|_| Error::DescriptorReadFailed)?;
 
-            CanController::print_can_frame(request);
-
-            let msg_type = request.msg_type.to_native();
-            let mut can_id = request.can_id.to_native();
-            let mut flags = request.flags.to_native();
-            let mut length = request.length.to_native();
-
-            if msg_type != VIRTIO_CAN_TX {
-                warn!("TX: Message type 0x{:x} unknown\n", msg_type);
-                return Err(Error::UnexpectedCanMsgType(msg_type));
-            }
-
-            if (flags & VIRTIO_CAN_FLAGS_FD) != 0 {
-                if length > 64 {
-                    trace!("Cut sdu_len from {:?} to 64\n", request.length);
-                    length = 64;
-                }
-            } else if length > 8 {
-                trace!("Cut sdu_len from {:?} to 8\n", request.length);
-                length = 8;
-            }
-
-            /*
-             * Copy Virtio frame structure to qemu frame structure and
-             * check while doing this whether the frame type was negotiated
-             */
-            if (flags & VIRTIO_CAN_FLAGS_EXTENDED) != 0 {
-                flags &= CAN_EFF_MASK;
-                flags |= CAN_EFF_FLAG;
-            } else {
-                flags &= CAN_SFF_MASK;
-            }
-
-            if (flags & VIRTIO_CAN_FLAGS_RTR) != 0 {
-                if !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC)
-                    || !self.check_features(VIRTIO_CAN_F_RTR_FRAMES)
-                {
-                    warn!("TX: RTR frames not negotiated");
-                    return Err(Error::UnexpectedRtrFlag);
-                }
-                can_id |= flags | CAN_RTR_FLAG;
-            }
-
-            if (flags & VIRTIO_CAN_FLAGS_FD) != 0 {
-                if !self.check_features(VIRTIO_CAN_F_CAN_FD) {
-                    warn!("TX: FD frames not negotiated\n");
-                    return Err(Error::UnexpectedFdFlag);
-                }
-                flags |= CAN_FRMF_TYPE_FD;
-            } else {
-                if !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC) {
-                    warn!("TX: Classic frames not negotiated\n");
-                    return Err(Error::UnexpectedClassicFlag);
-                }
-                flags = 0;
-            }
-
-            let corrected_request = VirtioCanFrame {
-                msg_type: msg_type.into(),
-                can_id: can_id.into(),
-                length: length.into(),
-                reserved: 0.into(),
-                flags: flags.into(),
-                sdu: request.sdu[0..64].try_into().unwrap(),
-            };
-
             let desc_response = descriptors[1];
             if !desc_response.is_write_only() {
                 return Err(Error::UnexpectedReadableDescriptor(1));
             }
 
-            let response = match self.controller.write().unwrap().can_out(corrected_request) {
-                Ok(result) => result,
-                Err(_) => {
-                    warn!("We got an error from controller send func");
-                    VIRTIO_CAN_RESULT_NOT_OK
+            let response = if self.controller.read().unwrap().ctrl_state == CAN_CS_STOPPED {
+                trace!("Device is stopped!");
+                VIRTIO_CAN_RESULT_NOT_OK
+            } else {
+                let _response = match self.check_tx_frame(request) {
+                    Ok(frame) => {
+                        // If the VIRTIO_CAN_F_CAN_LATE_TX_ACK is negotiated sent the
+                        // frame and wait for it to be sent.
+                        // TODO: Otherwise send it asynchronously.
+                        match self.controller.write().unwrap().can_out(frame) {
+                            Ok(_) => VIRTIO_CAN_RESULT_OK,
+                            Err(_) => {
+                                warn!("we got an error from controller send func");
+                                VIRTIO_CAN_RESULT_NOT_OK
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("The tx frame had the following error: {}", e);
+                        VIRTIO_CAN_RESULT_NOT_OK
+                    }
+                };
+
+                // If the device cannot send the frame either because socket doesnot
+                // exist or the writing the frame fails for another unknown reason
+                // then behave as receiving a busoff error.
+                if _response == VIRTIO_CAN_RESULT_NOT_OK {
+                    trace!("Change controller status to STOPPED and busoff to true");
+                    self.controller.write().unwrap().busoff = true;
+                    self.controller.write().unwrap().ctrl_state = CAN_CS_STOPPED;
                 }
+
+                _response
             };
 
             desc_chain
@@ -404,7 +553,6 @@ impl VhostUserCanBackend {
                 .add_used(desc_chain.head_index(), desc_response.len())
                 .is_err()
             {
-                trace!("Couldn't return used descriptors to the ring");
                 warn!("Couldn't return used descriptors to the ring");
             }
         }
@@ -439,89 +587,37 @@ impl VhostUserCanBackend {
             return Err(Error::UnexpectedReadableDescriptor(1));
         }
 
-        let mut response = match self.controller.write().unwrap().pop() {
+        if (desc_response.len() as usize) < size_of::<VirtioCanFrame>() {
+            trace!(
+                "desc_len: {}, virtio_can_len: {:?}\n",
+                desc_response.len() as usize,
+                size_of::<VirtioCanFrame>()
+            );
+            return Err(Error::UnexpectedRxDescriptorSize(
+                size_of::<VirtioCanFrame>(),
+                desc_response.len(),
+            ));
+        }
+
+        let response = match self.controller.write().unwrap().pop() {
             Ok(item) => item,
-            Err(_) => return Err(Error::HandleEventUnknown),
+            Err(QueueEmpty) => {
+                trace!("Empty queue!");
+                return Ok(false);
+            }
+            Err(_) => {
+                trace!("Pop error!");
+                return Err(Error::HandleEventUnknown);
+            }
         };
 
-        CanController::print_can_frame(response);
-
-        if (response.can_id.to_native() & CAN_ERR_FLAG) != 0 {
-            if (response.can_id.to_native() & CAN_ERR_BUSOFF) != 0 {
-                //TODO: vcan->busoff = true;
-                warn!("Got BusOff error frame, device does a local bus off\n");
-            } else {
-                trace!("Dropping error frame 0x{:x}\n", response.can_id.to_native());
+        let can_rx = match self.check_rx_frame(response) {
+            Ok(frame) => frame,
+            Err(e) => {
+                warn!("The tx frame had the following error: {}", e);
+                return Err(e);
             }
-            return Ok(true);
-        }
-
-        let mut can_rx = VirtioCanFrame::default();
-        can_rx.msg_type = VIRTIO_CAN_RX.into();
-        can_rx.can_id = response.can_id;
-        can_rx.length = response.length;
-        can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_FD).into();
-
-        if (response.flags.to_native() & CAN_FRMF_TYPE_FD) != 0 {
-            if !self.check_features(VIRTIO_CAN_F_CAN_FD) {
-                warn!("Drop non-supported CAN FD frame");
-                return Err(Error::UnexpectedFdFlag);
-            }
-        } else if !self.check_features(VIRTIO_CAN_F_CAN_CLASSIC) {
-            warn!("Drop non-supported CAN classic frame");
-            return Err(Error::UnexpectedClassicFlag);
-        }
-        if (response.can_id.to_native() & CAN_RTR_FLAG) != 0
-            && !self.check_features(VIRTIO_CAN_F_RTR_FRAMES)
-        {
-            warn!("Drop non-supported RTR frame");
-            return Err(Error::UnexpectedRtrFlag);
-        }
-
-        if (response.can_id.to_native() & CAN_EFF_FLAG) != 0 {
-            can_rx.flags = VIRTIO_CAN_FLAGS_EXTENDED.into();
-            can_rx.can_id = (response.can_id.to_native() & CAN_EFF_MASK).into();
-        } else {
-            can_rx.can_id = (response.can_id.to_native() & CAN_SFF_MASK).into();
-        }
-        if (response.can_id.to_native() & CAN_RTR_FLAG) != 0 {
-            can_rx.flags = (can_rx.flags.to_native() & VIRTIO_CAN_FLAGS_RTR).into();
-        }
-
-        // Treat Vcan interface as CANFD if MTU is set to 64 bytes.
-        //
-        // Vcan can not be configured as CANFD interface, but it is
-        // possible to configure its MTU to 64 bytes. So if a messages
-        // bigger than 8 bytes is being received we consider it as
-        // CANFD message.
-        let can_in_name = self.controller.read().unwrap().can_in_name.clone();
-        if self.check_features(VIRTIO_CAN_F_CAN_FD)
-            && response.length.to_native() > 8
-            && can_in_name == "vcan0"
-        {
-            response.flags = (response.flags.to_native() | CAN_FRMF_TYPE_FD).into();
-            warn!("\n\n\nCANFD VCAN0\n\n");
-        }
-
-        if (response.flags.to_native() & CAN_FRMF_TYPE_FD) != 0 {
-            can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_FD).into();
-            if response.length.to_native() > 64 {
-                warn!(
-                    "%s(): Cut length from {} to 64\n",
-                    response.length.to_native()
-                );
-                can_rx.length = 64.into();
-            }
-        } else if response.length.to_native() > 8 {
-            warn!(
-                "%s(): Cut length from {} to 8\n",
-                response.length.to_native()
-            );
-            can_rx.length = 8.into();
-        }
-
-        can_rx.sdu.copy_from_slice(&response.sdu[0..64]);
-        CanController::print_can_frame(can_rx);
+        };
 
         desc_chain
             .memory()
@@ -581,6 +677,7 @@ impl VhostUserCanBackend {
     /// Process the messages in the vring and dispatch replies
     fn process_rx_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         trace!("process_rx_queue");
+
         let requests: Vec<_> = vring
             .get_mut()
             .get_queue_mut()
@@ -595,11 +692,6 @@ impl VhostUserCanBackend {
                 Error::NotificationFailed
             })?;
         }
-        Ok(())
-    }
-
-    fn process_rx_queue_dump(&mut self, _vring: &VringRwLock) -> Result<()> {
-        dbg!("Do nothing, if you reach that point!");
         Ok(())
     }
 
@@ -698,10 +790,26 @@ impl VhostUserBackendMut for VhostUserCanBackend {
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
         }
+
+        // If the device is in STOPPED state only TX and CTRL messages can be handled
+        if (self.controller.read().unwrap().ctrl_state == CAN_CS_STOPPED)
+            && ((device_event == RX_QUEUE) || (device_event == BACKEND_EFD))
+        {
+            trace!("Device is stopped!");
+            if device_event == BACKEND_EFD {
+                let _ = self.controller.write().unwrap().rx_event_fd.read();
+            }
+            return Ok(());
+        }
+
         if device_event == RX_QUEUE {
             trace!("RX_QUEUE\n");
-            return Ok(());
+            if self.controller.write().unwrap().rx_is_empty() {
+                trace!("Empty queue!");
+                return Ok(());
+            }
         };
+
         let vring = if device_event != BACKEND_EFD {
             &vrings[device_event as usize]
         } else {
@@ -709,6 +817,7 @@ impl VhostUserBackendMut for VhostUserCanBackend {
             let _ = self.controller.write().unwrap().rx_event_fd.read();
             &vrings[RX_QUEUE as usize]
         };
+
         if self.event_idx {
             // vm-virtio's Queue implementation only checks avail_index
             // once, so to properly support EVENT_IDX we need to keep
@@ -719,7 +828,7 @@ impl VhostUserBackendMut for VhostUserCanBackend {
                 match device_event {
                     CTRL_QUEUE => self.process_ctrl_queue(vring),
                     TX_QUEUE => self.process_tx_queue(vring),
-                    RX_QUEUE => self.process_rx_queue_dump(vring),
+                    RX_QUEUE => self.process_rx_queue(vring),
                     BACKEND_EFD => self.process_rx_queue(vring),
                     _ => Err(Error::HandleEventUnknown),
                 }?;
@@ -732,7 +841,7 @@ impl VhostUserBackendMut for VhostUserCanBackend {
             match device_event {
                 CTRL_QUEUE => self.process_ctrl_queue(vring),
                 TX_QUEUE => self.process_tx_queue(vring),
-                RX_QUEUE => self.process_rx_queue_dump(vring),
+                RX_QUEUE => self.process_rx_queue(vring),
                 BACKEND_EFD => self.process_rx_queue(vring),
                 _ => Err(Error::HandleEventUnknown),
             }?;
@@ -783,8 +892,8 @@ mod tests {
 
     #[test]
     fn test_virtio_can_empty_requests() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -811,8 +920,8 @@ mod tests {
 
     #[test]
     fn test_virtio_can_empty_handle_request() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -881,10 +990,12 @@ mod tests {
             .unwrap()
     }
 
+    // -------------------------------------------------------------------------- //
+
     #[test]
     fn test_virtio_can_ctrl_request() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1003,10 +1114,284 @@ mod tests {
             .unwrap());
     }
 
+    // -------------------------------------------------------------------------- //
+
     #[test]
-    fn test_virtio_can_tx_request() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+    fn test_virtio_can_check_tx_unknown_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 0.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedCanMsgType(0)
+        );
+    }
+
+    #[test]
+    fn test_virtio_can_check_tx_can_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Test 1: UnexpectedClassicFlag
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 4.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedClassicFlag
+        );
+
+        // Test 2: Return the same length
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap().length,
+            frame.length
+        );
+
+        // Test 3: Return the length equal to 8
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(vu_can_backend.check_tx_frame(frame).unwrap().length, 8);
+    }
+
+    #[test]
+    fn test_virtio_can_check_tx_canfd_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller).expect("Could not build vhucan device");
+
+        // Enable VIRTIO_CAN_F_CAN_FD feature
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_FD);
+
+        // Test 1: If no VIRTIO_CAN_FLAGS_FD in flag return UnexpectedClassicFlag
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedClassicFlag
+        );
+
+        // Test 2: If VIRTIO_CAN_FLAGS_FD is in flag check if return message has
+        //         CAN_FRMF_TYPE_FD in flags.
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: VIRTIO_CAN_FLAGS_FD.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend
+                .check_tx_frame(frame)
+                .unwrap()
+                .flags
+                .to_native()
+                & CAN_FRMF_TYPE_FD,
+            CAN_FRMF_TYPE_FD
+        );
+
+        // Test 3: receive frame with the same length if length is < 64
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: VIRTIO_CAN_FLAGS_FD.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap().length,
+            frame.length
+        );
+
+        // Test 4: receive frame with length == 64 if length is > 64
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 80.into(),
+            reserved: 0.into(),
+            flags: VIRTIO_CAN_FLAGS_FD.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(vu_can_backend.check_tx_frame(frame).unwrap().length, 64);
+    }
+
+    #[test]
+    fn test_virtio_can_check_tx_rtr_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Test 1: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC and
+        //         VIRTIO_CAN_F_RTR_FRAMES are not negotiated.
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: VIRTIO_CAN_FLAGS_RTR.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedRtrFlag
+        );
+
+        // Test 2: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated.
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_RTR_FRAMES);
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedRtrFlag
+        );
+
+        // Test 3: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should succeed because VIRTIO_CAN_F_CAN_CLASSIC is negotiated.
+        vu_can_backend
+            .acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_CLASSIC));
+
+        assert_eq!(
+            vu_can_backend
+                .check_tx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                & CAN_RTR_FLAG,
+            CAN_RTR_FLAG
+        );
+
+        // Test 4: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated,
+        //         and RTR does not work with VIRTIO_CAN_F_CAN_FD.
+        vu_can_backend.acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_FD));
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedRtrFlag
+        );
+    }
+
+    #[test]
+    /// Test
+    fn test_virtio_can_check_tx_eff_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // This test is valid for both CAN & CANFD messages, so for simplicity
+        // we will check only CAN case.
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        // Test 1: Received message should not have CAN_EFF_FLAG in can_id
+        let mut frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend
+                .check_tx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                & CAN_EFF_FLAG,
+            0
+        );
+
+        // Test 2: Received message's can_id should be smaller than CAN_SFF_MASK
+        frame.can_id = (CAN_SFF_MASK + 1).into(); // CAN_SFF_MASK = 0x7FFU
+        assert!(
+            vu_can_backend
+                .check_tx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                < CAN_SFF_MASK,
+        );
+
+        // Test 3: Received message should have CAN_EFF_MASK in can_id
+        frame.flags = VIRTIO_CAN_FLAGS_EXTENDED.into();
+        assert_eq!(
+            vu_can_backend
+                .check_tx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                & CAN_EFF_FLAG,
+            CAN_EFF_FLAG
+        );
+
+        // Test 4: Received message's can_id should be smaller than CAN_EFF_MASK,
+        //         after removing the CAN_EFF_FLAG bit.
+        frame.can_id = (CAN_EFF_MASK + 1).into(); // CAN_EFF_MASK = 0x1FFFFFFFU
+        assert!(
+            vu_can_backend
+                .check_tx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                & (!CAN_EFF_FLAG)
+                < CAN_EFF_MASK,
+        );
+    }
+
+    #[test]
+    fn test_virtio_can_tx_general_tests() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1049,7 +1434,7 @@ mod tests {
         let len = desc[0].len();
         assert_eq!(
             vu_can_backend
-                .process_tx_requests(vec![desc_chain], &vring)
+                .process_tx_requests(vec![desc_chain.clone()], &vring)
                 .unwrap_err(),
             Error::UnexpectedTxDescriptorSize(
                 size_of::<VirtioCanFrame>() - 64,
@@ -1064,40 +1449,6 @@ mod tests {
             vu_can_backend
                 .process_tx_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
-            Error::UnexpectedCanMsgType(0)
-        );
-
-        let can_mes_len = size_of::<VirtioCanFrame>();
-        let desc_chain = build_desc_chain(2, vec![0, 0], can_mes_len.try_into().unwrap());
-
-        let frame = VirtioCanFrame {
-            msg_type: VIRTIO_CAN_TX.into(),
-            can_id: 123.into(),
-            length: 64.into(),
-            reserved: 0.into(),
-            flags: 0.into(),
-            sdu: [0; 64],
-        };
-
-        desc_chain
-            .memory()
-            .write_obj(frame, vm_memory::GuestAddress(0x100_u64))
-            .unwrap();
-
-        assert_eq!(
-            vu_can_backend
-                .process_tx_requests(vec![desc_chain.clone()], &vring)
-                .unwrap_err(),
-            Error::UnexpectedClassicFlag
-        );
-
-        // Enable VIRTIO_CAN_F_CAN_FD feature
-        vu_can_backend.acked_features(VIRTIO_CAN_F_CAN_FD.into());
-
-        assert_eq!(
-            vu_can_backend
-                .process_tx_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
             Error::UnexpectedReadableDescriptor(1)
         );
 
@@ -1107,33 +1458,15 @@ mod tests {
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
-
-        let frame = VirtioCanFrame {
-            msg_type: VIRTIO_CAN_TX.into(),
-            can_id: 123.into(),
-            length: 64.into(),
-            reserved: 0.into(),
-            flags: 0.into(),
-            sdu: [0; 64],
-        };
-
-        desc_chain
-            .memory()
-            .write_obj(frame, vm_memory::GuestAddress(0x100_u64))
-            .unwrap();
-
-        // Enable VIRTIO_CAN_F_CAN_FD feature
-        vu_can_backend.acked_features(VIRTIO_CAN_F_CAN_FD.into());
-
         assert!(vu_can_backend
             .process_tx_requests(vec![desc_chain], &vring)
-            .unwrap());
+            .unwrap(),);
     }
 
     #[test]
-    fn test_virtio_can_rx_request() {
-        let controller = CanController::new("can0".to_string(), "can1".to_string())
-            .expect("Could not build controller");
+    fn test_virtio_can_tx_device_stopped_test() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1149,12 +1482,558 @@ mod tests {
         // Artificial Vring
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
-        // Any number of descriptor higher than 1 will generate an error
+        // Enable VIRTIO_CAN_F_CAN_CLASSIC feature
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        let can_mes_len = size_of::<VirtioCanFrame>();
+        let desc_chain = build_desc_chain(
+            2,
+            vec![0, VRING_DESC_F_WRITE as u16],
+            can_mes_len.try_into().unwrap(),
+        );
+
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 123.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        desc_chain
+            .memory()
+            .write_obj(frame, vm_memory::GuestAddress(0x100_u64))
+            .unwrap();
+
+        desc_chain
+            .memory()
+            .write_obj(5, vm_memory::GuestAddress(0x200_u64))
+            .unwrap();
+
+        assert!(vu_can_backend
+            .process_tx_requests(vec![desc_chain.clone()], &vring)
+            .unwrap());
+
+        let can_frame_res = desc_chain
+            .memory()
+            .read_obj::<u8>(vm_memory::GuestAddress(0x200_u64))
+            .map_err(|_| Error::DescriptorReadFailed)
+            .unwrap();
+
+        assert_eq!(VIRTIO_CAN_RESULT_NOT_OK, can_frame_res);
+    }
+
+    #[test]
+    fn test_virtio_can_tx_device_started_test_send_fail() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Update memory
+        vu_can_backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // Enable VIRTIO_CAN_F_CAN_CLASSIC feature
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        // Start the device
+        controller.write().unwrap().ctrl_state = CAN_CS_STARTED;
+
+        let can_mes_len = size_of::<VirtioCanFrame>();
+        let desc_chain = build_desc_chain(
+            2,
+            vec![0, VRING_DESC_F_WRITE as u16],
+            can_mes_len.try_into().unwrap(),
+        );
+
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 123.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        desc_chain
+            .memory()
+            .write_obj(frame, vm_memory::GuestAddress(0x100_u64))
+            .unwrap();
+
+        desc_chain
+            .memory()
+            .write_obj(5, vm_memory::GuestAddress(0x200_u64))
+            .unwrap();
+
+        assert!(vu_can_backend
+            .process_tx_requests(vec![desc_chain.clone()], &vring)
+            .unwrap());
+
+        let can_frame_res = desc_chain
+            .memory()
+            .read_obj::<u8>(vm_memory::GuestAddress(0x200_u64))
+            .map_err(|_| Error::DescriptorReadFailed)
+            .unwrap();
+
+        assert_eq!(VIRTIO_CAN_RESULT_NOT_OK, can_frame_res);
+    }
+
+    #[test]
+    fn test_virtio_can_tx_device_started_check_frame_fail() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Update memory
+        vu_can_backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // Start the device
+        controller.write().unwrap().ctrl_state = CAN_CS_STARTED;
+
+        let can_mes_len = size_of::<VirtioCanFrame>();
+        let desc_chain = build_desc_chain(
+            2,
+            vec![0, VRING_DESC_F_WRITE as u16],
+            can_mes_len.try_into().unwrap(),
+        );
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 123.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        desc_chain
+            .memory()
+            .write_obj(frame, vm_memory::GuestAddress(0x100_u64))
+            .unwrap();
+
+        desc_chain
+            .memory()
+            .write_obj(5, vm_memory::GuestAddress(0x200_u64))
+            .unwrap();
+
+        assert!(vu_can_backend
+            .process_tx_requests(vec![desc_chain.clone()], &vring)
+            .unwrap());
+
+        let can_frame_res = desc_chain
+            .memory()
+            .read_obj::<u8>(vm_memory::GuestAddress(0x200_u64))
+            .map_err(|_| Error::DescriptorReadFailed)
+            .unwrap();
+
+        assert_eq!(VIRTIO_CAN_RESULT_NOT_OK, can_frame_res);
+    }
+
+    // -------------------------------------------------------------------------- //
+
+    #[test]
+    fn test_virtio_can_check_rx_err_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: CAN_ERR_FLAG.into(),
+            length: 0.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::RxFrameUnknownFail
+        );
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: (CAN_ERR_FLAG | CAN_ERR_BUSOFF).into(),
+            length: 0.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::BusoffRxFrame
+        );
+
+        assert!(controller.read().unwrap().busoff);
+        assert_eq!(controller.read().unwrap().ctrl_state, CAN_CS_STOPPED);
+    }
+
+    #[test]
+    fn test_virtio_can_check_rx_features_not_negotiated() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 0.into(),
+            reserved: 0.into(),
+            flags: CAN_FRMF_TYPE_FD.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::UnexpectedFdFlag
+        );
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 0.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::UnexpectedClassicFlag
+        );
+    }
+
+    #[test]
+    /// Test
+    fn test_virtio_can_check_rx_eff_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // This test is valid for both CAN & CANFD messages, so for simplicity
+        // we will check only CAN case.
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        // Test 1: Received message should not have CAN_EFF_FLAG in can_id
+        let mut frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                & CAN_EFF_FLAG,
+            0
+        );
+
+        // Test 2: Received message's can_id should be smaller than CAN_SFF_MASK
+        frame.can_id = (CAN_SFF_MASK + 1).into(); // CAN_SFF_MASK = 0x7FFU
+        assert!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                < CAN_SFF_MASK,
+        );
+
+        // Test 3: Received message should have CAN_EFF_MASK in can_id
+        frame.can_id = CAN_EFF_FLAG.into();
+        assert_eq!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .flags
+                .to_native()
+                & VIRTIO_CAN_FLAGS_EXTENDED,
+            VIRTIO_CAN_FLAGS_EXTENDED
+        );
+
+        // Test 4: Received message's can_id should be smaller than CAN_EFF_MASK,
+        //         after removing the CAN_EFF_FLAG bit.
+        frame.can_id = (frame.can_id.to_native() | CAN_EFF_MASK).into(); // CAN_EFF_MASK = 0x1FFFFFFFU
+        assert!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .can_id
+                .to_native()
+                & (!CAN_EFF_FLAG)
+                == CAN_EFF_MASK,
+        );
+    }
+
+    #[test]
+    fn test_virtio_can_check_rx_rtr_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: CAN_RTR_FLAG.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        // Test 1: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated.
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::UnexpectedRtrFlag
+        );
+
+        // Test 2: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should succeed because VIRTIO_CAN_F_CAN_CLASSIC is negotiated.
+        vu_can_backend
+            .acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_CLASSIC));
+
+        assert_eq!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .flags
+                .to_native()
+                & VIRTIO_CAN_FLAGS_RTR,
+            VIRTIO_CAN_FLAGS_RTR
+        );
+
+        // Test 3: Take a valid CAN / CANFD message and try to enable RTR in flags.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated,
+        //         and RTR does not work with VIRTIO_CAN_F_CAN_FD.
+
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: CAN_RTR_FLAG.into(),
+            length: 8.into(),
+            reserved: 0.into(),
+            flags: CAN_FRMF_TYPE_FD.into(), // Mark it as CAN FD frame
+            sdu: [0; 64],
+        };
+
+        vu_can_backend.acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_FD));
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::UnexpectedRtrFlag
+        );
+    }
+
+    #[test]
+    fn test_virtio_can_check_rx_can_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Test 1: UnexpectedClassicFlag
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 4.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::UnexpectedClassicFlag
+        );
+
+        // Test 2: Return the same length
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
+
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap().length,
+            frame.length
+        );
+
+        // Test 3: Return the length equal to 8
+        let frame = VirtioCanFrame {
+            msg_type: VIRTIO_CAN_TX.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(vu_can_backend.check_rx_frame(frame).unwrap().length, 8);
+    }
+
+    #[test]
+    fn test_virtio_can_check_rx_canfd_frame() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Enable VIRTIO_CAN_F_CAN_FD feature
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_FD);
+
+        // Test 1: If no CAN_FRMF_TYPE_FD in flags return UnexpectedClassicFlag
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap_err(),
+            Error::UnexpectedClassicFlag
+        );
+
+        // Test 2: If VIRTIO_CAN_FLAGS_FD is in flag check if return message has
+        //         VIRTIO_CAN_FLAGS_FD in flags.
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: CAN_FRMF_TYPE_FD.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .flags
+                .to_native()
+                & VIRTIO_CAN_FLAGS_FD,
+            VIRTIO_CAN_FLAGS_FD
+        );
+
+        // Test 3: receive frame with the same length if length is < 64
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap().length,
+            frame.length
+        );
+
+        // Test 4: receive frame with length == 64 if length is > 64
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 80.into(),
+            reserved: 0.into(),
+            flags: CAN_FRMF_TYPE_FD.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(vu_can_backend.check_rx_frame(frame).unwrap().length, 64);
+    }
+
+    #[test]
+    fn test_virtio_can_check_rx_canfd_vcan0() {
+        let controller =
+            CanController::new("vcan0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Enable VIRTIO_CAN_F_CAN_FD feature
+        vu_can_backend.acked_features((1 << VIRTIO_CAN_F_CAN_FD) | (1 << VIRTIO_CAN_F_CAN_CLASSIC));
+
+        // If VIRTIO_CAN_F_CAN_FD  and VIRTIO_CAN_F_CAN_CLASSIC are negotiated
+        // and interface is "vcan0" check if return message has
+        // VIRTIO_CAN_FLAGS_FD in flags and has been treated as CANFD frame.
+        let frame = VirtioCanFrame {
+            msg_type: 0.into(),
+            can_id: 0.into(),
+            length: 40.into(),
+            reserved: 0.into(),
+            flags: 0.into(),
+            sdu: [0; 64],
+        };
+
+        assert_eq!(
+            vu_can_backend
+                .check_rx_frame(frame)
+                .unwrap()
+                .flags
+                .to_native()
+                & VIRTIO_CAN_FLAGS_FD,
+            VIRTIO_CAN_FLAGS_FD
+        );
+
+        assert_eq!(
+            vu_can_backend.check_rx_frame(frame).unwrap().length,
+            frame.length
+        );
+    }
+
+    #[test]
+    fn test_virtio_can_rx_request() {
+        let controller =
+            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = Arc::new(RwLock::new(controller));
+        let mut vu_can_backend =
+            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
+
+        // Artificial memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
+        );
+
+        // Update memory
+        vu_can_backend.update_memory(mem.clone()).unwrap();
+
+        // Artificial Vring
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        // Test 1: This should fail because we have more descriptors in one chain
+        //         Any number of descriptor higher than 1 will generate an error.
+        //
+        // Note: The following test are focusing only to simple CAN messages.
         let count = 4;
-
-        // The guest driver is supposed to send us only unchained descriptors
         let desc_chain = build_desc_chain(count, vec![VRING_DESC_F_WRITE as u16, 0, 0, 0], 0x200);
-
         assert_eq!(
             vu_can_backend
                 .process_rx_requests(vec![desc_chain], &vring)
@@ -1162,7 +2041,7 @@ mod tests {
             Error::UnexpectedDescriptorCount(count as usize)
         );
 
-        // The guest driver is supposed to send us only unchained descriptors
+        // Test 2: This should fail because the descriptor is read-only
         let desc_chain = build_desc_chain(1, vec![0], 0x200);
         assert_eq!(
             vu_can_backend
@@ -1171,17 +2050,30 @@ mod tests {
             Error::UnexpectedReadableDescriptor(1)
         );
 
-        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        // Test 3: This should fail because the descriptor length is less
+        //         than VirtioCanFrame size.
+        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x10);
         assert_eq!(
             vu_can_backend
                 .process_rx_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
-            Error::HandleEventUnknown
+            Error::UnexpectedRxDescriptorSize(size_of::<VirtioCanFrame>(), 0x10)
         );
+
+        // Test 4: This should succeed because there is no element inserted in the
+        //         CAN/FD frames' queue
+        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        assert!(!vu_can_backend
+            .process_rx_requests(vec![desc_chain], &vring)
+            .unwrap(),);
+
+        // Test 5: This should fail because there is a simple CAN frame
+        //         inserted in the CAN/FD frames' queue, but this does not
+        //         pass the checks.
 
         // Push a new can message into the can.rs queue
         let frame = VirtioCanFrame {
-            msg_type: VIRTIO_CAN_RX.into(),
+            msg_type: 0.into(),
             can_id: 123.into(),
             length: 64.into(),
             reserved: 0.into(),
@@ -1189,7 +2081,6 @@ mod tests {
             sdu: [0; 64],
         };
 
-        // Test push
         controller.write().unwrap().push(frame).unwrap();
 
         let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
@@ -1200,12 +2091,16 @@ mod tests {
             Error::UnexpectedClassicFlag
         );
 
-        // Enable VIRTIO_CAN_F_CAN_FD feature
-        vu_can_backend.acked_features(VIRTIO_CAN_F_CAN_FD.into());
+        // Test 6: This should succeed because there is a simple CAN frame
+        //         inserted in the CAN/FD frames' queue, and this does
+        //         pass the checks.
+
+        // Enable VIRTIO_CAN_F_CAN_CLASSIC feature
+        vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
 
         // Push a new can message into the can.rs queue
         let frame = VirtioCanFrame {
-            msg_type: VIRTIO_CAN_RX.into(),
+            msg_type: 0.into(),
             can_id: 123.into(),
             length: 64.into(),
             reserved: 0.into(),
@@ -1213,12 +2108,11 @@ mod tests {
             sdu: [0; 64],
         };
 
-        // Test push
         controller.write().unwrap().push(frame).unwrap();
 
         let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
         assert!(vu_can_backend
             .process_rx_requests(vec![desc_chain], &vring)
-            .unwrap());
+            .unwrap(),);
     }
 }

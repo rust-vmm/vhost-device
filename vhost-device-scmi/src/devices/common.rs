@@ -224,7 +224,7 @@ pub fn devices_help() -> String {
 #[derive(Debug)]
 pub struct Sensor {
     /// The sensor name (possibly truncated) as reported to the guest.
-    pub name: String,
+    pub name: Option<String>,
     /// Whether the sensor is enabled.
     ///
     /// Sensors can be enabled and disabled using SCMI.  [Sensor]s created
@@ -233,10 +233,9 @@ pub struct Sensor {
 }
 
 impl Sensor {
-    pub fn new(properties: &DeviceProperties, default_name: &str) -> Self {
-        let name = properties.get("name").unwrap_or(default_name);
+    pub fn new(properties: &DeviceProperties) -> Self {
         Self {
-            name: name.to_owned(),
+            name: properties.get("name").map(|s| (*s).to_owned()),
             enabled: false,
         }
     }
@@ -323,7 +322,8 @@ pub trait SensorT: Send {
         } else {
             self.format_unit(0)
         };
-        let name = self.sensor().name.clone();
+        // During initialization, sensor name has be set.
+        let name = self.sensor().name.clone().unwrap();
         let values: MessageValues = vec![
             // attributes low
             MessageValue::Unsigned(low),

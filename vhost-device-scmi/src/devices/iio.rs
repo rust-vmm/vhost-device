@@ -58,7 +58,7 @@ const UNIT_MAPPING: &[UnitMapping] = &[
         unit_exponent: 0,
     },
     UnitMapping {
-        channel: "in_anglevel",
+        channel: "in_anglvel",
         unit: scmi::SENSOR_UNIT_RADIANS_PER_SECOND,
         unit_exponent: 0,
     },

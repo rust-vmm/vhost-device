@@ -159,6 +159,8 @@ const UNIT_MAPPING: &[UnitMapping] = &[
     },
 ];
 
+const IIO_DEFAULT_NAME: &str = "iio";
+
 /// Representation of an IIO channel axis.
 ///
 /// Used also for scalar values.
@@ -223,6 +225,10 @@ impl SensorT for IIOSensor {
                 }
             }
             Err(error) => return Err(DeviceError::IOError(self.path.clone(), error)),
+        }
+        // If both no name param and no name sysfs exist, use default name
+        if self.sensor.name.is_none() {
+            self.sensor.name = Some(IIO_DEFAULT_NAME.to_owned());
         }
         if axes.is_empty() {
             return Err(DeviceError::GenericError(format!(
@@ -329,7 +335,7 @@ impl IIOSensor {
     #[allow(clippy::new_ret_no_self)]
     pub fn new(properties: &DeviceProperties) -> Result<Self, DeviceError> {
         properties.check(&["path", "channel"], &["name"])?;
-        let sensor = Sensor::new(properties, "iio");
+        let sensor = Sensor::new(properties);
         Ok(Self {
             sensor,
             path: OsString::from(properties.get("path").unwrap()),
@@ -347,7 +353,7 @@ impl IIOSensor {
 
     fn set_sensor_name_from_file(&mut self, path: &PathBuf) {
         match fs::read_to_string(path) {
-            Ok(name) => self.sensor_mut().name = name,
+            Ok(name) => self.sensor_mut().name = Some(name),
             Err(error) => warn!(
                 "Error reading IIO device name from {}: {}",
                 path.display(),
@@ -396,7 +402,9 @@ impl IIOSensor {
         let os_file_name = file.file_name();
         let file_name = os_file_name.to_str().unwrap_or_default();
         let raw_suffix = "_raw";
-        if file_name == "name" {
+        // Only override name when no defined by parameter.
+        // If both fs and parameter exist, use parameter first and skip from file.
+        if file_name == "name" && self.sensor.name.is_none() {
             self.set_sensor_name_from_file(&file.path());
         } else if file_name.starts_with(channel) && file_name.ends_with(raw_suffix) {
             let infix = &file_name[channel.len()..file_name.len() - raw_suffix.len()];
@@ -634,18 +642,18 @@ mod tests {
     #[test]
     fn test_sensor_name_from_fs() {
         let directory = IIODirectory::new(&[("in_accel_raw", "123"), ("name", "foo")]);
-        let mut sensor =
-            make_iio_sensor(&directory, "in_accel".to_owned(), Some("accel".to_owned()));
+        let mut sensor = make_iio_sensor(&directory, "in_accel".to_owned(), None);
         sensor.initialize().unwrap();
-        assert_eq!(sensor.sensor.name, "foo");
+        assert_eq!(sensor.sensor.name, Some("foo".to_owned()));
     }
 
     #[test]
     fn test_sensor_name_from_params() {
-        let directory = IIODirectory::new(&[("in_accel_raw", "123")]);
-        let mut sensor = make_iio_sensor(&directory, "in_accel".to_owned(), Some("foo".to_owned()));
+        let directory = IIODirectory::new(&[("in_accel_raw", "123"), ("name", "foo")]);
+        let mut sensor =
+            make_iio_sensor(&directory, "in_accel".to_owned(), Some("accel".to_owned()));
         sensor.initialize().unwrap();
-        assert_eq!(sensor.sensor.name, "foo");
+        assert_eq!(sensor.sensor.name, Some("accel".to_owned()));
     }
 
     #[test]
@@ -653,7 +661,7 @@ mod tests {
         let directory = IIODirectory::new(&[("in_accel_raw", "123")]);
         let mut sensor = make_iio_sensor(&directory, "in_accel".to_owned(), None);
         sensor.initialize().unwrap();
-        assert_eq!(sensor.sensor.name, "iio");
+        assert_eq!(sensor.sensor.name, Some("iio".to_owned()));
     }
 
     #[test]

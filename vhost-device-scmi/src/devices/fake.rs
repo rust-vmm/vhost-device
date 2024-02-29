@@ -59,7 +59,7 @@ impl SensorT for FakeSensor {
 impl FakeSensor {
     pub fn new_device(properties: &DeviceProperties) -> MaybeDevice {
         properties.check(&[], &["name"])?;
-        let sensor = Sensor::new(properties, "fake");
+        let sensor = Sensor::new(properties);
         let fake_sensor = Self { sensor, value: 0 };
         let sensor_device = SensorDevice(Box::new(fake_sensor));
         Ok(Box::new(sensor_device))

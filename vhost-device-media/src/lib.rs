@@ -1,0 +1,286 @@
+// Copyright 2026 Red Hat Inc
+//
+// SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+
+mod descriptor_chain;
+mod media_allocator;
+mod null_backend;
+mod vhu_adapters;
+pub mod vhu_media;
+mod vhu_media_thread;
+
+use std::{path::PathBuf, sync::Arc};
+
+use ::virtio_media::protocol::VirtioMediaDeviceConfig;
+use log::debug;
+use thiserror::Error as ThisError;
+use vhost_user_backend::VhostUserDaemon;
+use vhu_media::VuMediaBackend;
+pub use vhu_media::{BackendType, VuMediaError};
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+const VIRTIO_V4L2_CARD_NAME_LEN: usize = 32;
+
+/// V4L2 device types as defined by the V4L2 framework.
+///
+/// These correspond to the VFL_TYPE_* constants in the Linux kernel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+enum V4l2DeviceType {
+    Video = 0, // VFL_TYPE_VIDEO
+    Vbi = 1,   // VFL_TYPE_VBI
+    Radio = 2, // VFL_TYPE_RADIO
+    Sdr = 3,   // VFL_TYPE_SDR
+    Touch = 5, // VFL_TYPE_TOUCH
+}
+
+impl V4l2DeviceType {
+    #[cfg(feature = "v4l2-proxy")]
+    fn from_path(device_path: &std::path::Path) -> Self {
+        // Resolve symlinks (e.g., /dev/v4l/by-id/...) to the actual device node
+        let actual_path =
+            std::fs::canonicalize(device_path).unwrap_or_else(|_| device_path.to_path_buf());
+
+        let filename = actual_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        match filename {
+            f if f.starts_with("video") => Self::Video,
+            f if f.starts_with("vbi") => Self::Vbi,
+            f if f.starts_with("radio") => Self::Radio,
+            f if f.starts_with("swradio") || f.starts_with("sdr") => Self::Sdr,
+            f if f.starts_with("touch") => Self::Touch,
+            _ => Self::Video, // Default to VIDEO for unknown paths
+        }
+    }
+}
+
+#[derive(Debug, ThisError)]
+/// Errors related to vhost-device-media daemon.
+pub enum Error {
+    #[error("Could not create backend: {0}")]
+    CouldNotCreateBackend(vhu_media::VuMediaError),
+    #[error("Could not open device `{0}`: {1}")]
+    CouldNotOpenDevice(PathBuf, String),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct VuMediaConfig {
+    pub socket_path: PathBuf,
+    pub v4l2_device: PathBuf,
+    pub backend: BackendType,
+}
+
+#[cfg(feature = "simple-capture")]
+pub fn create_simple_capture_device_config() -> VirtioMediaDeviceConfig {
+    use v4l2r::ioctl::Capabilities;
+    let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
+    let card_name = "simple_device";
+    card[0..card_name.len()].copy_from_slice(card_name.as_bytes());
+    VirtioMediaDeviceConfig {
+        device_caps: (Capabilities::VIDEO_CAPTURE | Capabilities::STREAMING).bits(),
+        device_type: V4l2DeviceType::Video as u32,
+        card,
+    }
+}
+
+#[cfg(feature = "v4l2-proxy")]
+pub fn create_v4l2_proxy_device_config(device_path: &PathBuf) -> Result<VirtioMediaDeviceConfig> {
+    use virtio_media::v4l2r::ioctl::Capabilities;
+
+    let device = virtio_media::v4l2r::device::Device::open(
+        device_path.as_ref(),
+        virtio_media::v4l2r::device::DeviceConfig::new().non_blocking_dqbuf(),
+    )
+    .map_err(|e| Error::CouldNotOpenDevice(device_path.clone(), e.to_string()))?;
+    let mut device_caps = device.caps().device_caps();
+
+    // We are only exposing one device worth of capabilities.
+    device_caps.remove(Capabilities::DEVICE_CAPS);
+
+    // Read-write is not supported by design.
+    device_caps.remove(Capabilities::READWRITE);
+
+    let mut config = VirtioMediaDeviceConfig {
+        device_caps: device_caps.bits(),
+        device_type: V4l2DeviceType::from_path(device_path.as_path()) as u32,
+        card: Default::default(),
+    };
+    let card = &device.caps().card;
+    let len = card.len().min(config.card.len());
+    config.card.as_mut_slice()[0..len].copy_from_slice(&card.as_bytes()[0..len]);
+
+    Ok(config)
+}
+
+#[cfg(feature = "ffmpeg")]
+pub fn create_ffmpeg_decoder_config() -> VirtioMediaDeviceConfig {
+    use v4l2r::ioctl::Capabilities;
+    let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
+    let card_name = "ffmpeg_decoder";
+    card[0..card_name.len()].copy_from_slice(card_name.as_bytes());
+    VirtioMediaDeviceConfig {
+        device_caps: (Capabilities::VIDEO_M2M_MPLANE
+            | Capabilities::EXT_PIX_FORMAT
+            | Capabilities::STREAMING
+            | Capabilities::DEVICE_CAPS)
+            .bits(),
+        device_type: V4l2DeviceType::Video as u32,
+        card,
+    }
+}
+
+#[cfg(feature = "simple-capture")]
+fn serve_simple_capture(media_config: &VuMediaConfig) -> Result<()> {
+    let vu_media_backend = Arc::new(
+        VuMediaBackend::new(
+            media_config.v4l2_device.as_path(),
+            create_simple_capture_device_config(),
+            move |event_queue, _, host_mapper| {
+                Ok(virtio_media::devices::SimpleCaptureDevice::new(
+                    event_queue,
+                    host_mapper,
+                ))
+            },
+        )
+        .map_err(Error::CouldNotCreateBackend)?,
+    );
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-media".to_owned(),
+        vu_media_backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(Error::CouldNotCreateDaemon)?;
+
+    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+
+    daemon
+        .serve(&media_config.socket_path)
+        .map_err(Error::ServeFailed)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "v4l2-proxy")]
+fn serve_v4l2_proxy_daemon(media_config: &VuMediaConfig) -> Result<()> {
+    let path = media_config.v4l2_device.clone();
+    let vu_media_backend = Arc::new(
+        VuMediaBackend::new(
+            media_config.v4l2_device.as_path(),
+            create_v4l2_proxy_device_config(&path)?,
+            move |event_queue, guest_mapper, host_mapper| {
+                Ok(virtio_media::devices::V4l2ProxyDevice::new(
+                    path.clone(),
+                    event_queue,
+                    guest_mapper,
+                    host_mapper,
+                ))
+            },
+        )
+        .map_err(Error::CouldNotCreateBackend)?,
+    );
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-media".to_owned(),
+        vu_media_backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(Error::CouldNotCreateDaemon)?;
+
+    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+    daemon
+        .serve(&media_config.socket_path)
+        .map_err(Error::ServeFailed)?;
+
+    Ok(())
+}
+
+fn serve_null(media_config: &VuMediaConfig) -> Result<()> {
+    let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
+    card[..4].copy_from_slice(b"null");
+    let vu_media_backend = Arc::new(
+        VuMediaBackend::new(
+            media_config.v4l2_device.as_path(),
+            VirtioMediaDeviceConfig {
+                device_caps: 0,
+                device_type: V4l2DeviceType::Video as u32,
+                card,
+            },
+            |_, _, _| Ok(null_backend::NullMediaDevice),
+        )
+        .map_err(Error::CouldNotCreateBackend)?,
+    );
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-media".to_owned(),
+        vu_media_backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(Error::CouldNotCreateDaemon)?;
+
+    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+    daemon
+        .serve(&media_config.socket_path)
+        .map_err(Error::ServeFailed)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "ffmpeg")]
+fn serve_ffmpeg_decoder(media_config: &VuMediaConfig) -> Result<()> {
+    let vu_media_backend = Arc::new(
+        VuMediaBackend::new(
+            media_config.v4l2_device.as_path(),
+            create_ffmpeg_decoder_config(),
+            move |event_queue, _, host_mapper| {
+                Ok(virtio_media::devices::video_decoder::VideoDecoder::new(
+                    virtio_media_ffmpeg_decoder::FfmpegDecoder::new(),
+                    event_queue,
+                    host_mapper,
+                ))
+            },
+        )
+        .map_err(Error::CouldNotCreateBackend)?,
+    );
+
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-media".to_owned(),
+        vu_media_backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(Error::CouldNotCreateDaemon)?;
+
+    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+    daemon
+        .serve(&media_config.socket_path)
+        .map_err(Error::ServeFailed)?;
+
+    Ok(())
+}
+
+/// Starts the vhost-device-media daemon.
+///
+/// This function does not return under normal operation, it loops indefinitely,
+/// re-spawning the chosen backend after each guest disconnect. It only returns
+/// `Err` if the backend itself fails to start.
+pub fn start_backend(media_config: VuMediaConfig) -> Result<()> {
+    loop {
+        debug!("Starting backend");
+        match media_config.backend {
+            BackendType::Null => serve_null(&media_config),
+            #[cfg(feature = "simple-capture")]
+            BackendType::SimpleCapture => serve_simple_capture(&media_config),
+            #[cfg(feature = "v4l2-proxy")]
+            BackendType::V4l2Proxy => serve_v4l2_proxy_daemon(&media_config),
+            #[cfg(feature = "ffmpeg")]
+            BackendType::FfmpegDecoder => serve_ffmpeg_decoder(&media_config),
+        }?;
+        debug!("Finishing backend");
+    }
+}

@@ -8,6 +8,7 @@ members = [
     "vhost-device-gpu",
     "vhost-device-i2c",
     "vhost-device-input",
+    "vhost-device-media",
     "vhost-device-rng",
     "vhost-device-scsi",
     "vhost-device-scmi",

@@ -16,6 +16,7 @@ use thiserror::Error as ThisError;
 use vmm_sys_util::errno::Error as IoError;
 
 use super::AdapterConfig;
+use crate::AdapterIdentifier;
 
 // The type of the `req` parameter is different for the `musl` library. This will enable
 // successful build for other non-musl libraries.
@@ -305,8 +306,8 @@ pub(crate) struct I2cReq {
 /// mock implementation for the I2C driver so that we can test the I2C
 /// functionality without the need of a physical device.
 pub(crate) trait I2cDevice {
-    // Open the device specified by the adapter name.
-    fn open(adapter_name: &str) -> Result<Self>
+    // Open the device specified by the adapter identifier, number or name.
+    fn open(adapter_identifier: &AdapterIdentifier) -> Result<Self>
     where
         Self: Sized;
 
@@ -369,8 +370,11 @@ impl PhysDevice {
 }
 
 impl I2cDevice for PhysDevice {
-    fn open(adapter_name: &str) -> Result<Self> {
-        let adapter_no = PhysDevice::find_adapter(adapter_name)?;
+    fn open(adapter_identifier: &AdapterIdentifier) -> Result<Self> {
+        let adapter_no = match adapter_identifier {
+            AdapterIdentifier::Name(adapter_name) => PhysDevice::find_adapter(adapter_name)?,
+            AdapterIdentifier::Number(no) => *no,
+        };
         let device_path = format!("/dev/i2c-{}", adapter_no);
 
         Self::open_with(&device_path, adapter_no)
@@ -558,7 +562,7 @@ impl<D: I2cDevice> I2cMap<D> {
         let mut adapters: Vec<I2cAdapter<D>> = Vec::new();
 
         for (i, device_cfg) in device_config.inner.iter().enumerate() {
-            let device = D::open(&device_cfg.adapter_name)?;
+            let device = D::open(&device_cfg.adapter)?;
             let adapter = I2cAdapter::new(device)?;
 
             // Check that all addresses corresponding to the adapter are valid.
@@ -630,6 +634,12 @@ pub(crate) mod tests {
         adapter_no: u32,
     }
 
+    impl DummyDevice {
+        fn find_adapter(_name: &str) -> Result<u32> {
+            Ok(11)
+        }
+    }
+
     impl Default for DummyDevice {
         fn default() -> Self {
             Self {
@@ -643,16 +653,20 @@ pub(crate) mod tests {
     }
 
     impl I2cDevice for DummyDevice {
-        fn open(adapter_name: &str) -> Result<Self>
+        fn open(adapter_identifier: &AdapterIdentifier) -> Result<Self>
         where
             Self: Sized,
         {
-            Ok(DummyDevice {
-                adapter_no: adapter_name
-                    .parse::<u32>()
-                    .map_err(|_| Error::ParseFailure)?,
-                ..Default::default()
-            })
+            match adapter_identifier {
+                AdapterIdentifier::Name(adapter_name) => Ok(DummyDevice {
+                    adapter_no: DummyDevice::find_adapter(adapter_name)?,
+                    ..Default::default()
+                }),
+                AdapterIdentifier::Number(adapter_no) => Ok(DummyDevice {
+                    adapter_no: *adapter_no,
+                    ..Default::default()
+                }),
+            }
         }
 
         fn funcs(&mut self) -> Result<u64> {
@@ -730,9 +744,9 @@ pub(crate) mod tests {
     #[test]
     fn test_i2c_map() {
         let adapter_config = AdapterConfig::new_with(vec![
-            DeviceConfig::new_with(1, vec![4]),
-            DeviceConfig::new_with(2, vec![32, 21]),
-            DeviceConfig::new_with(5, vec![10, 23]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(1), vec![4]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(2), vec![32, 21]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(5), vec![10, 23]),
         ]);
         let i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
@@ -750,7 +764,10 @@ pub(crate) mod tests {
 
     #[test]
     fn test_i2c_transfer() {
-        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(
+            AdapterIdentifier::Number(1),
+            vec![3],
+        )]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         i2c_map.adapters[0].smbus = false;
@@ -809,7 +826,10 @@ pub(crate) mod tests {
 
     #[test]
     fn test_smbus_transfer() {
-        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(
+            AdapterIdentifier::Number(1),
+            vec![3],
+        )]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         i2c_map.adapters[0].smbus = true;
@@ -915,7 +935,10 @@ pub(crate) mod tests {
 
     #[test]
     fn test_transfer_failure() {
-        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(
+            AdapterIdentifier::Number(1),
+            vec![3],
+        )]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
 
         i2c_map.adapters[0].smbus = false;
@@ -936,7 +959,10 @@ pub(crate) mod tests {
 
     #[test]
     fn test_smbus_transfer_failure() {
-        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(1, vec![3])]);
+        let adapter_config = AdapterConfig::new_with(vec![DeviceConfig::new_with(
+            AdapterIdentifier::Number(1),
+            vec![3],
+        )]);
         let mut i2c_map: I2cMap<DummyDevice> = I2cMap::new(&adapter_config).unwrap();
         i2c_map.adapters[0].smbus = true;
 
@@ -1095,8 +1121,13 @@ pub(crate) mod tests {
     fn test_phys_device_failure() {
         // Open failure
         assert_eq!(
-            PhysDevice::open("555555").unwrap_err(),
+            PhysDevice::open(&AdapterIdentifier::Name("555555".to_string())).unwrap_err(),
             Error::AdapterNotFound
+        );
+
+        assert_eq!(
+            PhysDevice::open(&AdapterIdentifier::Number(55555)).unwrap_err(),
+            Error::DeviceOpenFailed(55555)
         );
 
         assert_eq!(

@@ -8,6 +8,7 @@
 mod i2c;
 mod vhu_i2c;
 
+use core::fmt;
 use log::error;
 use std::num::ParseIntError;
 use std::path::PathBuf;
@@ -30,8 +31,10 @@ type Result<T> = std::result::Result<T, Error>;
 pub(crate) enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
+    #[error("Failed while parsing adapter identifier")]
+    CoulodNotFindAdapterIdentifier,
     #[error("Duplicate adapter detected: {0}")]
-    AdapterDuplicate(String),
+    AdapterDuplicate(AdapterIdentifier),
     #[error("Invalid client address: {0}")]
     ClientAddressInvalid(u16),
     #[error("Duplicate client address detected: {0}")]
@@ -68,15 +71,37 @@ struct I2cArgs {
 }
 
 #[derive(Debug, PartialEq)]
+enum AdapterIdentifier {
+    Name(String),
+    Number(u32),
+}
+
+impl fmt::Display for AdapterIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AdapterIdentifier::Name(name) => write!(f, "adapter_name: {}", name),
+            AdapterIdentifier::Number(no) => write!(f, "adapter_no:: {}", no),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 struct DeviceConfig {
-    adapter_name: String,
+    adapter: AdapterIdentifier,
     addr: Vec<u16>,
 }
 
 impl DeviceConfig {
-    fn new(name: &str) -> Result<Self> {
+    fn new_with_no(no: u32) -> Result<Self> {
         Ok(DeviceConfig {
-            adapter_name: name.trim().to_string(),
+            adapter: AdapterIdentifier::Number(no),
+            addr: Vec::new(),
+        })
+    }
+
+    fn new_with_name(name: &str) -> Result<Self> {
+        Ok(DeviceConfig {
+            adapter: AdapterIdentifier::Name(name.trim().to_string()),
             addr: Vec::new(),
         })
     }
@@ -104,11 +129,10 @@ impl AdapterConfig {
     fn new() -> Self {
         Self { inner: Vec::new() }
     }
-
-    fn contains_adapter(&self, adapter_name: &str) -> bool {
+    fn contains_adapter(&self, adapter: &DeviceConfig) -> bool {
         self.inner
             .iter()
-            .any(|elem| elem.adapter_name == adapter_name)
+            .any(|elem| elem.adapter == adapter.adapter)
     }
 
     fn contains_addr(&self, addr: u16) -> bool {
@@ -116,8 +140,8 @@ impl AdapterConfig {
     }
 
     fn push(&mut self, device: DeviceConfig) -> Result<()> {
-        if self.contains_adapter(&device.adapter_name) {
-            return Err(Error::AdapterDuplicate(device.adapter_name));
+        if self.contains_adapter(&device) {
+            return Err(Error::AdapterDuplicate(device.adapter));
         }
 
         for addr in device.addr.iter() {
@@ -135,12 +159,16 @@ impl TryFrom<&str> for AdapterConfig {
     type Error = Error;
 
     fn try_from(list: &str) -> Result<Self> {
-        let busses: Vec<&str> = list.split(',').collect();
+        let adapter_identifiers: Vec<&str> = list.split(',').collect();
         let mut devices = AdapterConfig::new();
 
-        for businfo in busses.iter() {
-            let list: Vec<&str> = businfo.split(':').collect();
-            let mut adapter = DeviceConfig::new(list[0])?;
+        for identifier_info in adapter_identifiers.iter() {
+            let list: Vec<&str> = identifier_info.split(':').collect();
+            let identifier = list.first().ok_or(Error::CoulodNotFindAdapterIdentifier)?;
+            let mut adapter = match identifier.parse::<u32>() {
+                Ok(no) => DeviceConfig::new_with_no(no)?,
+                Err(_) => DeviceConfig::new_with_name(identifier)?,
+            };
 
             for device_str in list[1..].iter() {
                 let addr = device_str.parse::<u16>().map_err(Error::ParseFailure)?;
@@ -291,9 +319,9 @@ mod tests {
     use crate::i2c::tests::DummyDevice;
 
     impl DeviceConfig {
-        pub fn new_with(adapter_no: u32, addr: Vec<u16>) -> Self {
+        pub fn new_with(adaper_id: AdapterIdentifier, addr: Vec<u16>) -> Self {
             DeviceConfig {
-                adapter_name: adapter_no.to_string(),
+                adapter: adaper_id,
                 addr,
             }
         }
@@ -317,7 +345,26 @@ mod tests {
 
     #[test]
     fn test_device_config() {
-        let mut config = DeviceConfig::new_with(5, Vec::new());
+        let id_name = AdapterIdentifier::Name("i915 gmbus dpd".to_string());
+        let mut config = DeviceConfig::new_with(id_name, Vec::new());
+        assert_eq!(
+            config,
+            DeviceConfig {
+                adapter: AdapterIdentifier::Name("i915 gmbus dpd".to_string()),
+                addr: Vec::new()
+            }
+        );
+
+        let id_no = AdapterIdentifier::Number(11);
+        config = DeviceConfig::new_with(id_no, Vec::new());
+        assert_eq!(
+            config,
+            DeviceConfig {
+                adapter: AdapterIdentifier::Number(11),
+                addr: Vec::new()
+            }
+        );
+
         let invalid_addr = (MAX_I2C_VDEV + 1) as u16;
 
         config.push(5).unwrap();
@@ -379,16 +426,48 @@ mod tests {
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
         Listener::new(config.socket_path, true).unwrap();
 
-        // Valid configuration
+        // Valid configuration with number as identifier
         let cmd_args = I2cArgs::from_args(socket_name, "1:4,2:32:21,5:5:23", 5);
         let config = I2cConfiguration::try_from(cmd_args).unwrap();
 
         let expected_devices = AdapterConfig::new_with(vec![
-            DeviceConfig::new_with(1, vec![4]),
-            DeviceConfig::new_with(2, vec![32, 21]),
-            DeviceConfig::new_with(5, vec![5, 23]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(1), vec![4]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(2), vec![32, 21]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(5), vec![5, 23]),
         ]);
 
+        let expected_config = I2cConfiguration {
+            socket_count: 5,
+            socket_path: socket_name.into(),
+            devices: expected_devices,
+        };
+
+        assert_eq!(config, expected_config);
+
+        // Valid configuration with name as identifier
+        let cmd_args = I2cArgs::from_args(socket_name, "bus1:4,bus2:32:21,bus5:5:23", 5);
+        let config = I2cConfiguration::try_from(cmd_args).unwrap();
+        let expected_devices = AdapterConfig::new_with(vec![
+            DeviceConfig::new_with(AdapterIdentifier::Name("bus1".to_string()), vec![4]),
+            DeviceConfig::new_with(AdapterIdentifier::Name("bus2".to_string()), vec![32, 21]),
+            DeviceConfig::new_with(AdapterIdentifier::Name("bus5".to_string()), vec![5, 23]),
+        ]);
+        let expected_config = I2cConfiguration {
+            socket_count: 5,
+            socket_path: socket_name.into(),
+            devices: expected_devices,
+        };
+
+        assert_eq!(config, expected_config);
+
+        //Valid configuration with mixing name and number identifier
+        let cmd_args = I2cArgs::from_args(socket_name, "123asd:4,11:32:21,23:5:23", 5);
+        let config = I2cConfiguration::try_from(cmd_args).unwrap();
+        let expected_devices = AdapterConfig::new_with(vec![
+            DeviceConfig::new_with(AdapterIdentifier::Name("123asd".to_string()), vec![4]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(11), vec![32, 21]),
+            DeviceConfig::new_with(AdapterIdentifier::Number(23), vec![5, 23]),
+        ]);
         let expected_config = I2cConfiguration {
             socket_count: 5,
             socket_path: socket_name.into(),
@@ -414,14 +493,25 @@ mod tests {
     fn test_i2c_map_duplicate_device4() {
         let mut config = AdapterConfig::new();
 
-        config.push(DeviceConfig::new_with(1, vec![4])).unwrap();
         config
-            .push(DeviceConfig::new_with(2, vec![32, 21]))
+            .push(DeviceConfig::new_with(
+                AdapterIdentifier::Number(1),
+                vec![4],
+            ))
+            .unwrap();
+        config
+            .push(DeviceConfig::new_with(
+                AdapterIdentifier::Number(2),
+                vec![32, 21],
+            ))
             .unwrap();
 
         assert_matches!(
             config
-                .push(DeviceConfig::new_with(5, vec![4, 23]))
+                .push(DeviceConfig::new_with(
+                    AdapterIdentifier::Number(5),
+                    vec![4, 23]
+                ))
                 .unwrap_err(),
             Error::ClientAddressDuplicate(4)
         );
@@ -431,16 +521,49 @@ mod tests {
     fn test_duplicated_adapter_no() {
         let mut config = AdapterConfig::new();
 
-        config.push(DeviceConfig::new_with(1, vec![4])).unwrap();
         config
-            .push(DeviceConfig::new_with(5, vec![10, 23]))
+            .push(DeviceConfig::new_with(
+                AdapterIdentifier::Number(1),
+                vec![4],
+            ))
+            .unwrap();
+        config
+            .push(DeviceConfig::new_with(
+                AdapterIdentifier::Number(5),
+                vec![10, 23],
+            ))
             .unwrap();
 
         assert_matches!(
             config
-                .push(DeviceConfig::new_with(1, vec![32, 21]))
+                .push(DeviceConfig::new_with(AdapterIdentifier::Number(1), vec![32, 21]))
                 .unwrap_err(),
-            Error::AdapterDuplicate(n) if n == "1"
+            Error::AdapterDuplicate(n) if n == AdapterIdentifier::Number(1)
+        );
+    }
+
+    #[test]
+    fn test_duplicated_adapter_name() {
+        let mut config = AdapterConfig::new();
+
+        config
+            .push(DeviceConfig::new_with(
+                AdapterIdentifier::Name("bus1".to_string()),
+                vec![4],
+            ))
+            .unwrap();
+        config
+            .push(DeviceConfig::new_with(
+                AdapterIdentifier::Name("bus5".to_string()),
+                vec![10, 23],
+            ))
+            .unwrap();
+
+        assert_matches!(
+            config
+                .push(DeviceConfig::new_with(AdapterIdentifier::Name("bus5".to_string()), vec![32, 21]))
+                .unwrap_err(),
+            Error::AdapterDuplicate(n) if n == AdapterIdentifier::Name("bus5".to_string())
         );
     }
 

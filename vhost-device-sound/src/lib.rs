@@ -168,14 +168,8 @@ pub enum Error {
     NoMemoryConfigured,
     #[error("Invalid virtio_snd_hdr size, expected: {0}, found: {1}")]
     UnexpectedSoundHeaderSize(usize, u32),
-    #[error("Received unexpected write only descriptor at index {0}")]
-    UnexpectedWriteOnlyDescriptor(usize),
     #[error("Received unexpected readable descriptor at index {0}")]
-    UnexpectedReadableDescriptor(usize),
-    #[error("Invalid descriptor count {0}")]
     UnexpectedDescriptorCount(usize),
-    #[error("Invalid descriptor size, expected: {0}, found: {1}")]
-    UnexpectedDescriptorSize(usize, u32),
     #[error("Protocol or device error: {0}")]
     Stream(stream::Error),
     #[error("Stream with id {0} not found")]

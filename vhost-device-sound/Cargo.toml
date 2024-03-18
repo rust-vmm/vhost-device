@@ -21,11 +21,11 @@ clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
 thiserror = "1.0"
-vhost = { version = "0.10", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.13"
+vhost = { version = "0.11", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.14"
 virtio-bindings = "0.2.1"
 virtio-queue = "0.11"
-vm-memory = "0.14.0"
+vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
 
 # Make alsa and pipewire backends available only on gnu
@@ -37,4 +37,4 @@ pw = { package = "pipewire", version = "0.8", optional = true }
 rstest = "0.18.2"
 tempfile = "3.10"
 virtio-queue = { version = "0.11", features = ["test-utils"] }
-vm-memory = { version = "0.14.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic"] }

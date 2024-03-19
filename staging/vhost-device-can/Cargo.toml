@@ -22,14 +22,14 @@ log = "0.4"
 thiserror = "1.0"
 queues = "1.0.2"
 socketcan = "3.2"
-vhost = { version = "0.10", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.13"
+vhost = { version = "0.11", git = "https://github.com/MatiasVara/vhost.git", features = ["vhost-user-backend"] }
+vhost-user-backend = { version = "0.14", git = "https://github.com/MatiasVara/vhost.git" }
 virtio-bindings = "0.2.2"
-virtio-queue = "0.11"
-vm-memory = "0.14.0"
+virtio-queue = { version = "0.11", git = "https://github.com/rust-vmm/vm-virtio.git" }
+vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.11", features = ["test-utils"] }
-vm-memory = { version = "0.14", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { version = "0.11", git = "https://github.com/rust-vmm/vm-virtio.git", features = ["test-utils"] }
+vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic"] }

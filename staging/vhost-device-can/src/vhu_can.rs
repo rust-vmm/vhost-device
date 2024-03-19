@@ -30,8 +30,8 @@ use virtio_bindings::bindings::virtio_ring::{
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
-    ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
-    Le16, Le32,
+    ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le16,
+    Le32,
 };
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -76,12 +76,10 @@ pub(crate) enum Error {
     UnexpectedWriteOnlyDescriptor(usize),
     #[error("Received unexpected readable descriptor at index {0}")]
     UnexpectedReadableDescriptor(usize),
-    #[error("Invalid descriptor count {0}")]
-    UnexpectedDescriptorCount(usize),
     #[error("Invalid ctrl descriptor size, expected: {0}, found: {1}")]
     UnexpectedCtrlDescriptorSize(usize, u32),
-    #[error("Invalid tx descriptor size, expected: size in [{0}, {1}] found: {2}")]
-    UnexpectedTxDescriptorSize(usize, usize, u32),
+    #[error("Invalid tx descriptor size, expected: {0} found: {1}")]
+    UnexpectedTxDescriptorSize(usize, u32),
     #[error("Invalid rx descriptor size, expected: size equal or bigger than {0} found: {1}")]
     UnexpectedRxDescriptorSize(usize, u32),
     #[error("Descriptor not found")]
@@ -96,6 +94,8 @@ pub(crate) enum Error {
     EventFdFailed,
     #[error("Unknown can message type: {0}")]
     UnexpectedCanMsgType(u16),
+    #[error("Failed to handle unknown control message")]
+    HandleCtrlUnknown,
     #[error("RTR frames not negotiated")]
     UnexpectedRtrFlag,
     #[error("Can FD frames not negotiated")]
@@ -141,6 +141,16 @@ pub struct VirtioCanFrame {
     pub sdu: [u8; 64],
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
+#[repr(C)]
+pub struct VirtioCanHeader {
+    pub msg_type: Le16,
+    pub length: Le16,   /* 0..8 CC, 0..64 CAN­FD, 0..2048 CAN­XL, 12 bits */
+    pub reserved: Le32, /* May be needed in part for CAN XL priority */
+    pub flags: Le32,
+    pub can_id: Le32,
+}
+
 impl Default for VirtioCanFrame {
     fn default() -> Self {
         VirtioCanFrame {
@@ -153,6 +163,10 @@ impl Default for VirtioCanFrame {
         }
     }
 }
+
+// SAFETY: The layout of the structure is fixed and can be initialized by
+// reading its content from byte array.
+unsafe impl ByteValued for VirtioCanHeader {}
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
 // reading its content from byte array.
@@ -389,34 +403,44 @@ impl VhostUserCanBackend {
         }
 
         for desc_chain in requests {
-            let descriptors: Vec<_> = desc_chain.clone().collect();
+            let atomic_mem = self.mem.as_ref().unwrap().memory();
 
-            if descriptors.len() != 2 {
-                return Err(Error::UnexpectedDescriptorCount(descriptors.len()));
-            }
-
-            trace!("descriptors.len(): {:?}", descriptors.len());
-
-            let desc_request = descriptors[0];
-            if desc_request.is_write_only() {
-                warn!("Error::UnexpectedWriteOnlyDescriptor");
+            let Ok(mut reader) = desc_chain.clone().reader(&atomic_mem) else {
+                trace!("Error::UnexpectedWriteOnlyDescriptor");
                 return Err(Error::UnexpectedWriteOnlyDescriptor(0));
-            }
+            };
 
-            if desc_request.len() as usize != size_of::<VirtioCanCtrlRequest>() {
+            let reader_len = reader.available_bytes();
+            if reader_len < size_of::<VirtioCanCtrlRequest>() {
                 trace!(
                     "UnexpectedCtrlDescriptorSize, len = {:?}",
-                    desc_request.len()
+                    reader_len as u32
                 );
                 return Err(Error::UnexpectedCtrlDescriptorSize(
                     size_of::<VirtioCanCtrlRequest>(),
-                    desc_request.len(),
+                    reader_len as u32,
                 ));
             }
 
-            let request = desc_chain
-                .memory()
-                .read_obj::<VirtioCanCtrlRequest>(desc_request.addr())
+            let Ok(mut writer) = desc_chain.clone().writer(&atomic_mem) else {
+                trace!("Error::UnexpectedReadableDescriptor");
+                return Err(Error::UnexpectedReadableDescriptor(1));
+            };
+
+            let writer_len = writer.available_bytes();
+            if writer_len < size_of::<u8>() {
+                trace!(
+                    "UnexpectedCtrlDescriptorSize, len = {:?}",
+                    writer_len as u32
+                );
+                return Err(Error::UnexpectedCtrlDescriptorSize(
+                    size_of::<u8>(),
+                    writer_len as u32,
+                ));
+            }
+
+            let request = reader
+                .read_obj::<VirtioCanCtrlRequest>()
                 .map_err(|_| Error::DescriptorReadFailed)?;
 
             // This implementation requires the CAN devices to be already in UP state
@@ -445,22 +469,16 @@ impl VhostUserCanBackend {
                 }
                 _ => {
                     trace!("Ctrl queue: msg type 0x{:?} unknown", request.msg_type);
-                    Err(Error::HandleEventUnknown)
+                    Err(Error::HandleCtrlUnknown)
                 }
             }?;
 
-            let desc_response = descriptors[1];
-            if !desc_response.is_write_only() {
-                return Err(Error::UnexpectedReadableDescriptor(1));
-            }
-
-            desc_chain
-                .memory()
-                .write_slice(response.as_slice(), desc_response.addr())
+            writer
+                .write_obj(response)
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
             if vring
-                .add_used(desc_chain.head_index(), desc_response.len())
+                .add_used(desc_chain.head_index(), writer.bytes_written() as u32)
                 .is_err()
             {
                 warn!("Couldn't return used descriptors to the ring");
@@ -483,41 +501,70 @@ impl VhostUserCanBackend {
         }
 
         for desc_chain in requests {
-            let descriptors: Vec<_> = desc_chain.clone().collect();
+            let atomic_mem = self.mem.as_ref().unwrap().memory();
 
-            if descriptors.len() != 2 {
-                return Err(Error::UnexpectedDescriptorCount(descriptors.len()));
-            }
-
-            let desc_request = descriptors[0];
-            if desc_request.is_write_only() {
+            let Ok(mut reader) = desc_chain.clone().reader(&atomic_mem) else {
+                trace!("Error::UnexpectedWriteOnlyDescriptor");
                 return Err(Error::UnexpectedWriteOnlyDescriptor(0));
-            }
+            };
 
-            if (desc_request.len() as usize) > size_of::<VirtioCanFrame>()
-                || (desc_request.len() as usize) < (size_of::<VirtioCanFrame>() - 64)
-            {
+            let Ok(mut writer) = desc_chain.clone().writer(&atomic_mem) else {
+                trace!("Error::UnexpectedReadableDescriptor");
+                return Err(Error::UnexpectedReadableDescriptor(0));
+            };
+
+            let reader_len = reader.available_bytes();
+            if reader_len < size_of::<VirtioCanHeader>() {
                 trace!(
                     "desc_len: {}, virtio_can_len: {:?}\n",
-                    desc_request.len() as usize,
-                    size_of::<VirtioCanFrame>()
+                    reader_len,
+                    size_of::<VirtioCanHeader>()
                 );
-                return Err(Error::UnexpectedTxDescriptorSize(
-                    size_of::<VirtioCanFrame>() - 64,
-                    size_of::<VirtioCanFrame>(),
-                    desc_request.len(),
+                return Err(Error::UnexpectedRxDescriptorSize(
+                    size_of::<VirtioCanHeader>(),
+                    reader_len as u32,
                 ));
             }
 
-            let request = desc_chain
-                .memory()
-                .read_obj::<VirtioCanFrame>(desc_request.addr())
+            let writer_len = writer.available_bytes();
+            if writer_len < size_of::<u8>() {
+                trace!(
+                    "UnexpectedCtrlDescriptorSize, len = {:?}",
+                    writer_len as u32
+                );
+                return Err(Error::UnexpectedTxDescriptorSize(
+                    size_of::<u8>(),
+                    writer_len as u32,
+                ));
+            }
+
+            let request_header = reader
+                .read_obj::<VirtioCanHeader>()
                 .map_err(|_| Error::DescriptorReadFailed)?;
 
-            let desc_response = descriptors[1];
-            if !desc_response.is_write_only() {
-                return Err(Error::UnexpectedReadableDescriptor(1));
+            let data_len = request_header.length.to_native() as usize;
+            let mut request_data: Vec<u8> = Vec::new();
+            for _i in 0..data_len {
+                let data_byte = reader
+                    .read_obj::<u8>()
+                    .map_err(|_| Error::DescriptorReadFailed)?;
+                request_data.push(data_byte);
             }
+
+            let request = VirtioCanFrame {
+                msg_type: request_header.msg_type,
+                can_id: request_header.can_id,
+                length: request_header.length,
+                reserved: request_header.reserved,
+                flags: request_header.flags,
+                sdu: {
+                    let mut sdu_data: [u8; 64] = [0; 64];
+                    sdu_data[..request_header.length.to_native() as usize]
+                        .copy_from_slice(request_data.as_slice());
+                    sdu_data
+                },
+            };
+            CanController::print_can_frame(request);
 
             let response = if self.controller.read().unwrap().ctrl_state == CAN_CS_STOPPED {
                 trace!("Device is stopped!");
@@ -554,13 +601,12 @@ impl VhostUserCanBackend {
                 _response
             };
 
-            desc_chain
-                .memory()
-                .write_slice(response.as_slice(), desc_response.addr())
+            writer
+                .write_obj(response)
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
             if vring
-                .add_used(desc_chain.head_index(), desc_response.len())
+                .add_used(desc_chain.head_index(), writer.bytes_written() as u32)
                 .is_err()
             {
                 warn!("Couldn't return used descriptors to the ring");
@@ -582,63 +628,56 @@ impl VhostUserCanBackend {
             return Ok(true);
         }
 
-        let desc_chain = &requests[0];
-        let descriptors: Vec<_> = desc_chain.clone().collect();
-        trace!("descriptors.len(): {:?}", descriptors.len());
+        for desc_chain in requests {
+            let atomic_mem = self.mem.as_ref().unwrap().memory();
+            let Ok(mut writer) = desc_chain.clone().writer(&atomic_mem) else {
+                trace!("Error::UnexpectedReadableDescriptor");
+                return Err(Error::UnexpectedReadableDescriptor(1));
+            };
 
-        if descriptors.len() != 1 {
-            trace!("Error::UnexpectedDescriptorCount");
-            return Err(Error::UnexpectedDescriptorCount(descriptors.len()));
-        }
-
-        let desc_response = descriptors[0];
-        if !desc_response.is_write_only() {
-            trace!("Error::UnexpectedReadableDescriptor");
-            return Err(Error::UnexpectedReadableDescriptor(1));
-        }
-
-        if (desc_response.len() as usize) < size_of::<VirtioCanFrame>() {
-            trace!(
-                "desc_len: {}, virtio_can_len: {:?}\n",
-                desc_response.len() as usize,
-                size_of::<VirtioCanFrame>()
-            );
-            return Err(Error::UnexpectedRxDescriptorSize(
-                size_of::<VirtioCanFrame>(),
-                desc_response.len(),
-            ));
-        }
-
-        let response = match self.controller.write().unwrap().pop() {
-            Ok(item) => item,
-            Err(QueueEmpty) => {
-                trace!("Empty queue!");
-                return Ok(false);
+            let writer_len = writer.available_bytes();
+            if writer_len < size_of::<VirtioCanFrame>() {
+                trace!(
+                    "desc_len: {}, virtio_can_len: {:?}\n",
+                    writer_len,
+                    size_of::<VirtioCanFrame>()
+                );
+                return Err(Error::UnexpectedRxDescriptorSize(
+                    size_of::<VirtioCanFrame>(),
+                    writer_len as u32,
+                ));
             }
-            Err(_) => {
-                trace!("Pop error!");
-                return Err(Error::HandleEventUnknown);
+
+            let response = match self.controller.write().unwrap().pop() {
+                Ok(item) => item,
+                Err(QueueEmpty) => {
+                    trace!("Empty queue!");
+                    return Ok(false);
+                }
+                Err(_) => {
+                    trace!("Pop error!");
+                    return Err(Error::HandleEventUnknown);
+                }
+            };
+
+            let can_rx = match self.check_rx_frame(response) {
+                Ok(frame) => frame,
+                Err(e) => {
+                    warn!("The tx frame had the following error: {}", e);
+                    return Err(e);
+                }
+            };
+
+            writer
+                .write_obj(can_rx)
+                .map_err(|_| Error::DescriptorWriteFailed)?;
+
+            if vring
+                .add_used(desc_chain.head_index(), writer.bytes_written() as u32)
+                .is_err()
+            {
+                warn!("Couldn't return used descriptors to the ring");
             }
-        };
-
-        let can_rx = match self.check_rx_frame(response) {
-            Ok(frame) => frame,
-            Err(e) => {
-                warn!("The tx frame had the following error: {}", e);
-                return Err(e);
-            }
-        };
-
-        desc_chain
-            .memory()
-            .write_slice(can_rx.as_slice(), desc_response.addr())
-            .map_err(|_| Error::DescriptorWriteFailed)?;
-
-        if vring
-            .add_used(desc_chain.head_index(), desc_response.len())
-            .is_err()
-        {
-            warn!("Couldn't return used descriptors to the ring");
         }
 
         Ok(true)
@@ -647,7 +686,7 @@ impl VhostUserCanBackend {
     /// Process the messages in the vring and dispatch replies
     fn process_ctrl_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         trace!("process_ctrl_queue");
-        let requests: Vec<_> = vring
+        let requests: Vec<CanDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
             .iter(self.mem.as_ref().unwrap().memory())
@@ -666,7 +705,7 @@ impl VhostUserCanBackend {
     /// Process the messages in the vring and dispatch replies
     fn process_tx_queue(&self, vring: &VringRwLock) -> Result<()> {
         trace!("process_tx_queue");
-        let requests: Vec<_> = vring
+        let requests: Vec<CanDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
             .iter(self.mem.as_ref().unwrap().memory())
@@ -688,7 +727,7 @@ impl VhostUserCanBackend {
     fn process_rx_queue(&mut self, vring: &VringRwLock) -> Result<()> {
         trace!("process_rx_queue");
 
-        let requests: Vec<_> = vring
+        let requests: Vec<CanDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
             .iter(self.mem.as_ref().unwrap().memory())
@@ -869,7 +908,7 @@ mod tests {
     use super::*;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
-    use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+    use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     #[test]
     fn test_virtio_can_tx_response_default() {
@@ -967,9 +1006,14 @@ mod tests {
             .unwrap();
     }
 
-    fn build_desc_chain(count: u16, flags: Vec<u16>, len: u32) -> CanDescriptorChain {
-        let mem = &GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+    fn build_desc_chain_mem(
+        mem: &GuestMemoryMmap,
+        count: u16,
+        flags: Vec<u16>,
+        len: u32,
+    ) -> CanDescriptorChain {
         let vq = MockSplitQueue::new(mem, 16);
+        let mut desc_vec = Vec::new();
 
         //Create a descriptor chain with @count descriptors.
         for i in 0..count {
@@ -980,16 +1024,10 @@ mod tests {
             };
 
             let desc = Descriptor::new((0x100 * (i + 1)) as u64, len, desc_flags, i + 1);
-            vq.desc_table().store(i, desc).unwrap();
+            desc_vec.push(desc);
         }
 
-        // Put the descriptor index 0 in the first available ring position.
-        mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))
-            .unwrap();
-
-        // Set `avail_idx` to 1.
-        mem.write_obj(1u16, vq.avail_addr().unchecked_add(2))
-            .unwrap();
+        vq.add_desc_chains(&desc_vec, 0).unwrap();
 
         // Create descriptor chain from pre-filled memory
         vq.create_queue::<Queue>()
@@ -1004,6 +1042,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_ctrl_request() {
+        // Initialize can device and vhost-device-can backend
         let controller =
             CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
@@ -1011,90 +1050,109 @@ mod tests {
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         // Artificial memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
-        );
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
-        // Update memory
-        vu_can_backend.update_memory(mem.clone()).unwrap();
-
-        // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000).unwrap();
-
-        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
-        assert_eq!(
-            vu_can_backend
-                .process_ctrl_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::UnexpectedDescriptorCount(1)
-        );
-
-        // The guest driver is supposed to send us only unchained descriptors
-        let desc_chain = build_desc_chain(2, vec![VRING_DESC_F_WRITE as u16, 0], 0x200);
-        assert_eq!(
-            vu_can_backend
-                .process_ctrl_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::UnexpectedWriteOnlyDescriptor(0)
-        );
-
-        let desc_chain = build_desc_chain(2, vec![0, 0], 0x200);
-        let desc: Vec<_> = desc_chain.clone().collect();
-        let len = desc[0].len();
-        assert_eq!(
-            vu_can_backend
-                .process_ctrl_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::UnexpectedCtrlDescriptorSize(size_of::<VirtioCanCtrlRequest>(), len)
-        );
-
+        // Test 1: Since we provide only one write only, an error will be trigger
+        //         the reader will have 0 data.
         let can_mes_len = size_of::<VirtioCanCtrlRequest>();
-        let desc_chain = build_desc_chain(2, vec![0, 0], can_mes_len.try_into().unwrap());
-        assert_eq!(
-            vu_can_backend
-                .process_ctrl_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::HandleEventUnknown
+        let desc_chain = build_desc_chain_mem(
+            &mem,
+            1,
+            vec![VRING_DESC_F_WRITE as u16],
+            can_mes_len.try_into().unwrap(),
         );
-
-        let can_mes_len = size_of::<VirtioCanCtrlRequest>();
-        let desc_chain = build_desc_chain(2, vec![0, 0], can_mes_len.try_into().unwrap());
-
-        let ctrl_msg: u16 = VIRTIO_CAN_SET_CTRL_MODE_START;
-        desc_chain
-            .memory()
-            .write_obj(ctrl_msg, vm_memory::GuestAddress(0x100_u64))
-            .unwrap();
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         assert_eq!(
             vu_can_backend
                 .process_ctrl_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
-            Error::UnexpectedReadableDescriptor(1)
+            Error::UnexpectedCtrlDescriptorSize(size_of::<VirtioCanCtrlRequest>(), 0)
         );
 
+        // Test 2: Since we provide only one read only, an error will be trigger
+        //         about the writer having 0 data
         let can_mes_len = size_of::<VirtioCanCtrlRequest>();
-        let desc_chain = build_desc_chain(2, vec![0, 0], can_mes_len.try_into().unwrap());
-
-        let ctrl_msg: u16 = VIRTIO_CAN_SET_CTRL_MODE_STOP;
-        desc_chain
-            .memory()
-            .write_obj(ctrl_msg, vm_memory::GuestAddress(0x100_u64))
-            .unwrap();
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![0], can_mes_len.try_into().unwrap());
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         assert_eq!(
             vu_can_backend
                 .process_ctrl_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
-            Error::UnexpectedReadableDescriptor(1)
+            Error::UnexpectedCtrlDescriptorSize(size_of::<u8>(), 0)
         );
 
+        // Test 3: Two write only descriptors are available, so the reader
+        //         will complain for having 0 data
         let can_mes_len = size_of::<VirtioCanCtrlRequest>();
-        let desc_chain = build_desc_chain(
+        let desc_chain = build_desc_chain_mem(
+            &mem,
+            2,
+            vec![VRING_DESC_F_WRITE as u16, VRING_DESC_F_WRITE as u16],
+            can_mes_len.try_into().unwrap(),
+        );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
+        assert_eq!(
+            vu_can_backend
+                .process_ctrl_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedCtrlDescriptorSize(size_of::<VirtioCanCtrlRequest>(), 0)
+        );
+
+        // Test 4: Two read only descriptors are available, so the writer
+        //         will complain for having 0 data
+        let can_mes_len = size_of::<VirtioCanCtrlRequest>();
+        let desc_chain = build_desc_chain_mem(&mem, 2, vec![0, 0], can_mes_len.try_into().unwrap());
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
+        assert_eq!(
+            vu_can_backend
+                .process_ctrl_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::UnexpectedCtrlDescriptorSize(size_of::<u8>(), 0)
+        );
+
+        // Test 5: The reader descriptor reads has two bytes of data
+        //         but are initialized to 0 -> Unknown control message
+        let can_mes_len = size_of::<VirtioCanCtrlRequest>();
+        let desc_chain = build_desc_chain_mem(
+            &mem,
             2,
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
+        assert_eq!(
+            vu_can_backend
+                .process_ctrl_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::HandleCtrlUnknown
+        );
+
+        // Test 6: Successfull test for VIRTIO_CAN_SET_CTRL_MODE_START
+        let can_mes_len = size_of::<VirtioCanCtrlRequest>();
+        let desc_chain = build_desc_chain_mem(
+            &mem,
+            2,
+            vec![0, VRING_DESC_F_WRITE as u16],
+            can_mes_len.try_into().unwrap(),
+        );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         let ctrl_msg: u16 = VIRTIO_CAN_SET_CTRL_MODE_START;
         desc_chain
@@ -1106,12 +1164,17 @@ mod tests {
             .process_ctrl_requests(vec![desc_chain], &vring)
             .unwrap());
 
+        // Test 7: Successfull test for VIRTIO_CAN_SET_CTRL_MODE_STOP
         let can_mes_len = size_of::<VirtioCanCtrlRequest>();
-        let desc_chain = build_desc_chain(
+        let desc_chain = build_desc_chain_mem(
+            &mem,
             2,
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         let ctrl_msg: u16 = VIRTIO_CAN_SET_CTRL_MODE_STOP;
         desc_chain
@@ -1122,6 +1185,32 @@ mod tests {
         assert!(vu_can_backend
             .process_ctrl_requests(vec![desc_chain], &vring)
             .unwrap());
+
+        // Test 8: If we interchange the write read descriptor then
+        //         it will fail!
+        let can_mes_len = size_of::<VirtioCanCtrlRequest>();
+        let desc_chain = build_desc_chain_mem(
+            &mem,
+            2,
+            vec![VRING_DESC_F_WRITE as u16, 0],
+            can_mes_len.try_into().unwrap(),
+        );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
+        let ctrl_msg: u16 = VIRTIO_CAN_SET_CTRL_MODE_START;
+        desc_chain
+            .memory()
+            .write_obj(ctrl_msg, vm_memory::GuestAddress(0x100_u64))
+            .unwrap();
+
+        assert_eq!(
+            vu_can_backend
+                .process_ctrl_requests(vec![desc_chain], &vring)
+                .unwrap_err(),
+            Error::HandleCtrlUnknown
+        );
     }
 
     // -------------------------------------------------------------------------- //
@@ -1329,7 +1418,6 @@ mod tests {
     }
 
     #[test]
-    /// Test
     fn test_virtio_can_check_tx_eff_frame() {
         let controller =
             CanController::new("can0".to_string()).expect("Could not build controller");
@@ -1399,70 +1487,94 @@ mod tests {
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         // Artificial memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
-        );
-
-        // Update memory
-        vu_can_backend.update_memory(mem.clone()).unwrap();
-
-        // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Any number of descriptor different than 2 will generate an error
         let count = 1;
 
-        // The guest driver is supposed to send us only unchained descriptors
-        let desc_chain = build_desc_chain(count, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        // Test 1: Provide only write only descriptor -> Fail
+        let desc_chain = build_desc_chain_mem(&mem, count, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
-        assert_eq!(
-            vu_can_backend
-                .process_tx_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::UnexpectedDescriptorCount(count as usize)
-        );
-
-        // The guest driver is supposed to send us only unchained descriptors
-        let desc_chain = build_desc_chain(2, vec![VRING_DESC_F_WRITE as u16, 0], 0x200);
-        assert_eq!(
-            vu_can_backend
-                .process_tx_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::UnexpectedWriteOnlyDescriptor(0)
-        );
-
-        let desc_chain = build_desc_chain(2, vec![0, 0], 0x200);
-        let desc: Vec<_> = desc_chain.clone().collect();
-        let len = desc[0].len();
         assert_eq!(
             vu_can_backend
                 .process_tx_requests(vec![desc_chain.clone()], &vring)
                 .unwrap_err(),
-            Error::UnexpectedTxDescriptorSize(
-                size_of::<VirtioCanFrame>() - 64,
-                size_of::<VirtioCanFrame>(),
-                len
-            )
+            Error::UnexpectedRxDescriptorSize(size_of::<VirtioCanHeader>(), 0)
         );
 
-        let can_mes_len = size_of::<VirtioCanFrame>();
-        let desc_chain = build_desc_chain(2, vec![0, 0], can_mes_len.try_into().unwrap());
+        // Test 2: Provide only read only descriptor -> Fail
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![0], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
         assert_eq!(
             vu_can_backend
-                .process_tx_requests(vec![desc_chain], &vring)
+                .process_tx_requests(vec![desc_chain.clone()], &vring)
                 .unwrap_err(),
-            Error::UnexpectedReadableDescriptor(1)
+            Error::UnexpectedTxDescriptorSize(size_of::<u8>(), 0)
         );
 
+        // Test 3: Provide only write only descriptors -> Fail
+        let desc_chain = build_desc_chain_mem(
+            &mem,
+            2,
+            vec![VRING_DESC_F_WRITE as u16, VRING_DESC_F_WRITE as u16],
+            0x200,
+        );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
+        assert_eq!(
+            vu_can_backend
+                .process_tx_requests(vec![desc_chain.clone()], &vring)
+                .unwrap_err(),
+            Error::UnexpectedRxDescriptorSize(size_of::<VirtioCanHeader>(), 0)
+        );
+
+        // Test 4: Provide only read only descriptors -> Fail
+        let desc_chain = build_desc_chain_mem(&mem, 2, vec![0, 0], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+        assert_eq!(
+            vu_can_backend
+                .process_tx_requests(vec![desc_chain.clone()], &vring)
+                .unwrap_err(),
+            Error::UnexpectedTxDescriptorSize(size_of::<u8>(), 0)
+        );
+
+        // Test 5: Provide correct descriptors but 0 size -> Fail
+        let desc_chain = build_desc_chain_mem(&mem, 2, vec![0, VRING_DESC_F_WRITE as u16], 0x0);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
+        assert_eq!(
+            vu_can_backend
+                .process_tx_requests(vec![desc_chain.clone()], &vring)
+                .unwrap_err(),
+            Error::UnexpectedRxDescriptorSize(size_of::<VirtioCanHeader>(), 0)
+        );
+
+        // Test 6: Provide correct descriptors and size
         let can_mes_len = size_of::<VirtioCanFrame>();
-        let desc_chain = build_desc_chain(
+        let desc_chain = build_desc_chain_mem(
+            &mem,
             2,
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
         assert!(vu_can_backend
             .process_tx_requests(vec![desc_chain], &vring)
-            .unwrap(),);
+            .unwrap());
     }
 
     #[test]
@@ -1474,25 +1586,21 @@ mod tests {
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         // Artificial memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
-        );
-
-        // Update memory
-        vu_can_backend.update_memory(mem.clone()).unwrap();
-
-        // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Enable VIRTIO_CAN_F_CAN_CLASSIC feature
         vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
 
         let can_mes_len = size_of::<VirtioCanFrame>();
-        let desc_chain = build_desc_chain(
+        let desc_chain = build_desc_chain_mem(
+            &mem,
             2,
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_TX.into(),
@@ -1535,15 +1643,7 @@ mod tests {
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         // Artificial memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
-        );
-
-        // Update memory
-        vu_can_backend.update_memory(mem.clone()).unwrap();
-
-        // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Enable VIRTIO_CAN_F_CAN_CLASSIC feature
         vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
@@ -1552,11 +1652,15 @@ mod tests {
         controller.write().unwrap().ctrl_state = CAN_CS_STARTED;
 
         let can_mes_len = size_of::<VirtioCanFrame>();
-        let desc_chain = build_desc_chain(
+        let desc_chain = build_desc_chain_mem(
+            &mem,
             2,
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_TX.into(),
@@ -1599,25 +1703,21 @@ mod tests {
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         // Artificial memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
-        );
-
-        // Update memory
-        vu_can_backend.update_memory(mem.clone()).unwrap();
-
-        // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Start the device
         controller.write().unwrap().ctrl_state = CAN_CS_STARTED;
 
         let can_mes_len = size_of::<VirtioCanFrame>();
-        let desc_chain = build_desc_chain(
+        let desc_chain = build_desc_chain_mem(
+            &mem,
             2,
             vec![0, VRING_DESC_F_WRITE as u16],
             can_mes_len.try_into().unwrap(),
         );
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: 0.into(),
@@ -1731,7 +1831,6 @@ mod tests {
     }
 
     #[test]
-    /// Test
     fn test_virtio_can_check_rx_eff_frame() {
         let controller =
             CanController::new("can0".to_string()).expect("Could not build controller");
@@ -2020,56 +2119,47 @@ mod tests {
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
         // Artificial memory
-        let mem = GuestMemoryAtomic::new(
-            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
-        );
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
-        // Update memory
-        vu_can_backend.update_memory(mem.clone()).unwrap();
-
-        // Artificial Vring
-        let vring = VringRwLock::new(mem, 0x1000).unwrap();
-
-        // Test 1: This should fail because we have more descriptors in one chain
-        //         Any number of descriptor higher than 1 will generate an error.
-        //
         // Note: The following test are focusing only to simple CAN messages.
-        let count = 4;
-        let desc_chain = build_desc_chain(count, vec![VRING_DESC_F_WRITE as u16, 0, 0, 0], 0x200);
+
+        // Test 1: This should fail because the descriptor is read-only
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![0], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
+
         assert_eq!(
             vu_can_backend
-                .process_rx_requests(vec![desc_chain], &vring)
+                .process_rx_requests(vec![desc_chain.clone()], &vring)
                 .unwrap_err(),
-            Error::UnexpectedDescriptorCount(count as usize)
+            Error::UnexpectedRxDescriptorSize(size_of::<VirtioCanFrame>(), 0)
         );
 
-        // Test 2: This should fail because the descriptor is read-only
-        let desc_chain = build_desc_chain(1, vec![0], 0x200);
-        assert_eq!(
-            vu_can_backend
-                .process_rx_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::UnexpectedReadableDescriptor(1)
-        );
-
-        // Test 3: This should fail because the descriptor length is less
+        // Test 2: This should fail because the descriptor length is less
         //         than VirtioCanFrame size.
-        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x10);
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x10);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
         assert_eq!(
             vu_can_backend
-                .process_rx_requests(vec![desc_chain], &vring)
+                .process_rx_requests(vec![desc_chain.clone()], &vring)
                 .unwrap_err(),
             Error::UnexpectedRxDescriptorSize(size_of::<VirtioCanFrame>(), 0x10)
         );
 
-        // Test 4: This should succeed because there is no element inserted in the
+        // Test 3: This should succeed because there is no element inserted in the
         //         CAN/FD frames' queue
-        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
         assert!(!vu_can_backend
             .process_rx_requests(vec![desc_chain], &vring)
             .unwrap(),);
 
-        // Test 5: This should fail because there is a simple CAN frame
+        // Test 4: This should fail because there is a simple CAN frame
         //         inserted in the CAN/FD frames' queue, but this does not
         //         pass the checks.
 
@@ -2085,7 +2175,10 @@ mod tests {
 
         controller.write().unwrap().push(frame).unwrap();
 
-        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
         assert_eq!(
             vu_can_backend
                 .process_rx_requests(vec![desc_chain], &vring)
@@ -2093,7 +2186,7 @@ mod tests {
             Error::UnexpectedClassicFlag
         );
 
-        // Test 6: This should succeed because there is a simple CAN frame
+        // Test 5: This should succeed because there is a simple CAN frame
         //         inserted in the CAN/FD frames' queue, and this does
         //         pass the checks.
 
@@ -2112,9 +2205,12 @@ mod tests {
 
         controller.write().unwrap().push(frame).unwrap();
 
-        let desc_chain = build_desc_chain(1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let desc_chain = build_desc_chain_mem(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
+        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        vu_can_backend.update_memory(mem1).unwrap();
         assert!(vu_can_backend
             .process_rx_requests(vec![desc_chain], &vring)
-            .unwrap(),);
+            .unwrap());
     }
 }

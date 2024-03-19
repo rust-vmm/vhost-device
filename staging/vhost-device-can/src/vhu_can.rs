@@ -100,6 +100,8 @@ pub(crate) enum Error {
     UnexpectedRtrFlag,
     #[error("Can FD frames not negotiated")]
     UnexpectedFdFlag,
+    #[error("Unexpected CAN ID bigger than: {0} bits")]
+    UnexpectedCanId(u16),
     #[error("Classic CAN frames not negotiated")]
     UnexpectedClassicFlag,
     #[error("Bus off error received")]
@@ -214,10 +216,18 @@ impl VhostUserCanBackend {
 
         // If VIRTIO_CAN_FLAGS_EXTENDED has negotiated then use extended CAN ID
         if (request.flags.to_native() & VIRTIO_CAN_FLAGS_EXTENDED) != 0 {
-            can_id &= CAN_EFF_MASK;
+            // If we have a extended frame there is no way to check if
+            // can_id > 29 bits. The reason is that bit 29, 30, 31 are
+            // dedicated to features.
+            if can_id > CAN_EFF_MASK {
+                return Err(Error::UnexpectedCanId(29_u16));
+            }
             can_id |= CAN_EFF_FLAG;
         } else {
-            can_id &= CAN_SFF_MASK;
+            // If we have a standard frame and can_id > 11 bits then fail
+            if can_id > CAN_SFF_MASK {
+                return Err(Error::UnexpectedCanId(11_u16));
+            }
         }
 
         // Remote transfer request is used only with classic CAN
@@ -1351,15 +1361,12 @@ mod tests {
             0
         );
 
-        // Test 2: Received message's can_id should be smaller than CAN_SFF_MASK
+        // Test 2: If VIRTIO_CAN_FLAGS_EXTENDED is NOT enabled, CAN ID should
+        //         be smaller than 11 bits
         frame.can_id = (CAN_SFF_MASK + 1).into(); // CAN_SFF_MASK = 0x7FFU
-        assert!(
-            vu_can_backend
-                .check_tx_frame(frame)
-                .unwrap()
-                .can_id
-                .to_native()
-                < CAN_SFF_MASK,
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedCanId(11)
         );
 
         // Test 3: Received message should have CAN_EFF_MASK in can_id
@@ -1374,17 +1381,12 @@ mod tests {
             CAN_EFF_FLAG
         );
 
-        // Test 4: Received message's can_id should be smaller than CAN_EFF_MASK,
-        //         after removing the CAN_EFF_FLAG bit.
+        // Test 4: If VIRTIO_CAN_FLAGS_EXTENDED is enabled, CAN ID should be
+        //         smaller than 29 bits
         frame.can_id = (CAN_EFF_MASK + 1).into(); // CAN_EFF_MASK = 0x1FFFFFFFU
-        assert!(
-            vu_can_backend
-                .check_tx_frame(frame)
-                .unwrap()
-                .can_id
-                .to_native()
-                & (!CAN_EFF_FLAG)
-                < CAN_EFF_MASK,
+        assert_eq!(
+            vu_can_backend.check_tx_frame(frame).unwrap_err(),
+            Error::UnexpectedCanId(29)
         );
     }
 

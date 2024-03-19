@@ -12,7 +12,10 @@ use thiserror::Error as ThisError;
 use vm_memory::{ByteValued, Le16};
 
 extern crate socketcan;
-use socketcan::{CanAnyFrame, CanFdFrame, CanFdSocket, EmbeddedFrame, Frame, Socket, StandardId};
+use socketcan::{
+    CanAnyFrame, CanDataFrame, CanFdFrame, CanFdSocket, EmbeddedFrame, ExtendedId, Frame, Id,
+    Socket, StandardId,
+};
 
 use std::thread::{spawn, JoinHandle};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
@@ -300,14 +303,34 @@ impl CanController {
         trace!("Can out\n");
 
         // Create a CAN frame with a specific CAN-ID and the data buffer
-        let can_id = StandardId::new(tx_request.can_id.to_native().try_into().unwrap())
-            .expect("Fail to create StandardId");
+        let can_id: Id = if (tx_request.can_id.to_native() & CAN_EFF_FLAG) != 0 {
+            // SAFETY: Use new_unchecked cause checks have been taken place
+            // to prior stage. Also flags have beem already added on can_id
+            // so tnew will fail (can_id + can_flags) > 29 bits
+            unsafe { Id::Extended(ExtendedId::new_unchecked(tx_request.can_id.into())) }
+        } else {
+            // SAFETY: Use new_unchecked cause checks have been taken place
+            // to prior stage. Also flags have beem already added on can_id
+            // so tnew will fail (can_id + can_flags) > 11 bits
+            unsafe {
+                Id::Standard(StandardId::new_unchecked(
+                    tx_request.can_id.to_native() as u16
+                ))
+            }
+        };
+
+        // Grab the data to be tranfered
         let data_len = tx_request.length.to_native() as usize;
-
         let data: Vec<u8> = tx_request.sdu.iter().cloned().take(data_len).collect();
-        let frame = CanFdFrame::new(can_id, &data).expect("Fail to create CanFdFrame");
 
-        // Send the CAN frame
+        // Format CAN/FD frame
+        let frame: CanAnyFrame = if (tx_request.flags.to_native() & CAN_FRMF_TYPE_FD) != 0 {
+            CanAnyFrame::Fd(CanFdFrame::new(can_id, &data).expect("Fail to create CanFdFrame"))
+        } else {
+            CanAnyFrame::Normal(CanDataFrame::new(can_id, &data).expect("Fail to create CanFrame"))
+        };
+
+        // Send the CAN/FD frame
         let socket = self.can_socket.as_ref().ok_or("No available device");
 
         match socket {

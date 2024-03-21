@@ -48,6 +48,8 @@ pub(crate) enum Error {
     ClientAddressInvalid,
     #[error("Adapter not found")]
     AdapterNotFound,
+    #[error("Multiple adapters share the same name")]
+    AdapterShareSameName,
     #[error("Std IO Error")]
     StdIoErr,
     #[error("Failed while parsing to integer")]
@@ -348,6 +350,8 @@ impl PhysDevice {
     }
 
     fn find_adapter(name: &str) -> Result<u32> {
+        let mut adapter_no = None;
+
         for entry in
             fs::read_dir(Path::new("/sys/bus/i2c/devices/")).map_err(|_| Error::StdIoErr)?
         {
@@ -357,15 +361,15 @@ impl PhysDevice {
             let adapter_name = fs::read_to_string(path).map_err(|_| Error::StdIoErr)?;
 
             if adapter_name.trim() == name {
+                if adapter_no.is_some() {
+                    return Err(Error::AdapterShareSameName);
+                }
                 let path = entry.path();
                 let list: Vec<&str> = path.to_str().unwrap().split('-').collect();
-                let adapter_no = list[1].parse::<u32>().map_err(|_| Error::ParseFailure)?;
-
-                return Ok(adapter_no);
+                adapter_no = Some(list[1].parse::<u32>().map_err(|_| Error::ParseFailure)?);
             }
         }
-
-        Err(Error::AdapterNotFound)
+        adapter_no.ok_or(Error::AdapterNotFound)
     }
 }
 

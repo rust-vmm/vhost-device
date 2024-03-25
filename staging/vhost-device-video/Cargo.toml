@@ -17,7 +17,7 @@ default = ["v4l2-decoder"]
 v4l2-decoder = ["v4l2r"]
 
 [dependencies]
-bitflags = "2.4.2"
+bitflags = "2.5.0"
 clap = { version = "4.5",  features = ["derive"] }
 env_logger = "0.11"
 epoll = "4.3"

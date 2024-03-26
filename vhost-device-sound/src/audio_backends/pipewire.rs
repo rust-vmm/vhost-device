@@ -379,10 +379,9 @@ impl AudioBackend for PwBackend {
                                         return;
                                     };
 
-                                    let mut buf_pos = buffer.pos;
                                     let avail = usize::try_from(buffer.desc_len())
                                         .unwrap()
-                                        .saturating_sub(buf_pos);
+                                        .saturating_sub(buffer.pos);
                                     let n_bytes = n_samples.min(avail);
                                     let p = &slice[start..start + n_bytes];
 
@@ -394,12 +393,10 @@ impl AudioBackend for PwBackend {
                                         break;
                                     }
 
-                                    buf_pos += n_bytes;
-                                    buffer.pos = buf_pos;
                                     n_samples -= n_bytes;
                                     start += n_bytes;
 
-                                    if buf_pos >= buffer.desc_len() as usize {
+                                    if buffer.pos >= buffer.desc_len() as usize {
                                         stream.buffers.pop_front();
                                     }
                                 }

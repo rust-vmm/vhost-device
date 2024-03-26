@@ -21,10 +21,10 @@ clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
 thiserror = "1.0"
-vhost = { version = "0.11", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.14"
+vhost = { version = "0.11", git = "https://github.com/rust-vmm/vhost.git", features = ["vhost-user-backend"] }
+vhost-user-backend = { version = "0.14", git = "https://github.com/rust-vmm/vhost.git" }
 virtio-bindings = "0.2.1"
-virtio-queue = "0.11"
+virtio-queue = "0.12"
 vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
 
@@ -36,5 +36,5 @@ pw = { package = "pipewire", version = "0.8", optional = true }
 [dev-dependencies]
 rstest = "0.18.2"
 tempfile = "3.10"
-virtio-queue = { version = "0.11", features = ["test-utils"] }
+virtio-queue = { version = "0.12", features = ["test-utils"] }
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic"] }

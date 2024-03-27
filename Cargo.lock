@@ -1473,6 +1473,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost-device-spi"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "bitflags 2.4.1",
+ "clap",
+ "env_logger",
+ "libc",
+ "log",
+ "thiserror",
+ "vhost",
+ "vhost-user-backend",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-template"
 version = "0.1.0"
 dependencies = [

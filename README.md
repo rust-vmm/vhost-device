@@ -22,6 +22,7 @@ Here is the list of device backends that we support:
 - [SCSI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-scsi/README.md)
 - [Sound](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-sound/README.md)
 - [VSOCK](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-vsock/README.md)
+- [SPI](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-spi/README.md)
 
 The vhost-device workspace also provides a
 [template](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-template/README.md)

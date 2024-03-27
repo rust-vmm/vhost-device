@@ -9,6 +9,7 @@ members = [
     "vhost-device-scsi",
     "vhost-device-scmi",
     "vhost-device-sound",
+    "vhost-device-spi",
     "vhost-device-template",
     "vhost-device-vsock",
 ]

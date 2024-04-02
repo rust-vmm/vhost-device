@@ -22,7 +22,7 @@ thiserror = "1.0"
 vhost = { version = "0.11", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.14"
 virtio-bindings = "0.2.2"
-virtio-queue = "0.11"
+virtio-queue = "0.12"
 virtio-vsock = "0.5"
 vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
@@ -32,5 +32,5 @@ serde_yaml = "0.9"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.11", features = ["test-utils"] }
+virtio-queue = { version = "0.12", features = ["test-utils"] }
 tempfile = "3.10.1"

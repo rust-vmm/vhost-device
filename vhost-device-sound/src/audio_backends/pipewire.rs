@@ -36,7 +36,7 @@ use spa::{
 
 use super::AudioBackend;
 use crate::{
-    stream::PCMState,
+    stream::{Error as StreamError, PCMState},
     virtio_sound::{
         VirtioSndPcmSetParams, VIRTIO_SND_PCM_FMT_A_LAW, VIRTIO_SND_PCM_FMT_FLOAT,
         VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW, VIRTIO_SND_PCM_FMT_S16,
@@ -207,6 +207,14 @@ impl AudioBackend for PwBackend {
             let stream_params = self.stream_params.read().unwrap();
 
             let params = &stream_params[stream_id as usize].params;
+
+            if let Some(stream) = stream_hash.remove(&stream_id) {
+                stream_listener.remove(&stream_id);
+                if let Err(err) = stream.disconnect() {
+                    log::error!("Stream {} disconnect {}", stream_id, err);
+                    return Err(Error::Stream(StreamError::CouldNotDisconnectStream));
+                }
+            }
 
             let mut pos: [u32; 64] = [SPA_AUDIO_CHANNEL_UNKNOWN; 64];
 

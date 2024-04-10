@@ -160,9 +160,9 @@ fn update_pcm(
 
             // Finally, calculate the size of a period (in frames):
 
-            let period_frames = period_bytes / frame_size;
+            let period_frames = alsa::pcm::Frames::from((period_bytes / frame_size) as i32);
 
-            hwp.set_period_size(i64::from(period_frames), alsa::ValueOr::Less)?;
+            hwp.set_period_size(period_frames, alsa::ValueOr::Less)?;
 
             // Online ALSA driver recommendations seem to be that the buffer should be at
             // least 2 * period_size.
@@ -175,7 +175,7 @@ fn update_pcm(
             // > as well as the parameters set in the snd_pcm_hardware structure (in the driver).
             //
             // So, if the operation fails let's assume the ALSA runtime has set a better value.
-            if let Err(err) = hwp.set_buffer_size_near(2 * i64::from(period_frames)) {
+            if let Err(err) = hwp.set_buffer_size_near(2 * period_frames) {
                 log::error!("could not set buffer size {}: {}", 2 * period_frames, err);
             }
 

@@ -500,9 +500,15 @@ impl AlsaBackend {
             let (sender, receiver) = channel();
             // Initialize with a dummy value, which will be updated every time we call
             // `update_pcm`.
-            let pcm = Arc::new(Mutex::new(
-                PCM::new("default", Direction::Output.into(), false).unwrap(),
-            ));
+            let pcm_result = PCM::new("default", Direction::Output.into(), false);
+            let pcm = match pcm_result {
+                Ok(pcm) => pcm,
+                Err(err) => {
+                    log::error!("Failed to initialize PCM device: {}", err);
+                    continue;
+                }
+            };
+            let pcm = Arc::new(Mutex::new(pcm));
 
             let mtx = Arc::clone(&pcm);
             let streams = Arc::clone(&streams);

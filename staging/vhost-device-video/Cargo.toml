@@ -29,14 +29,14 @@ futures-executor = { version = "0.3", features = ["thread-pool"] }
 vhost = { version = "0.11", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.14"
 virtio-bindings = "0.2.1"
-virtio-queue = "0.11"
+virtio-queue = "0.12"
 vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
 v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "110fd77", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
-rstest = "0.18.2"
+rstest = "0.19.0"
 tempfile = "3.10.1"
-virtio-queue = { version = "0.11", features = ["test-utils"] }
+virtio-queue = { version = "0.12", features = ["test-utils"] }
 vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic"] }

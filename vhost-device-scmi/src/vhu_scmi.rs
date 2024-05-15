@@ -9,8 +9,10 @@ use log::{debug, error, warn};
 use std::io;
 use std::io::Result as IoResult;
 use std::mem::size_of;
+use std::sync::{Arc, RwLock};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost_user_backend::VringEpollHandler;
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
 use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::bindings::virtio_ring::{
@@ -34,6 +36,9 @@ const NUM_QUEUES: usize = 2;
 
 const COMMAND_QUEUE: u16 = 0;
 const EVENT_QUEUE: u16 = 1;
+// The first allow fd for notification device.
+// [0...NUM_QUEUES] is already used by COMMAND_QUEUE, EVENT_QUEUE, exit
+pub const NOTIFY_ALLOW_START_FD: u16 = 3;
 
 const VIRTIO_SCMI_F_P2A_CHANNELS: u16 = 0;
 
@@ -57,6 +62,8 @@ pub enum VuScmiError {
     InsufficientDescriptorSize(usize, usize),
     #[error("Failed to send notification")]
     SendNotificationFailed,
+    #[error("Failed to get notification data from scmi device")]
+    GetNotificationFailed,
     #[error("Invalid descriptor count {0}")]
     UnexpectedDescriptorCount(usize),
     #[error("Invalid descriptor size, expected: {0}, found: {1}")]
@@ -130,6 +137,20 @@ impl VuScmiBackend {
             event_descriptors: vec![],
             scmi_handler: handler,
         })
+    }
+
+    /// Registers all the devices that can provide notifications
+    /// Create a hashmap to store the relationship about device's notify_fd and scmibackend eventfd.
+    pub fn register_device_event_fd(
+        &self,
+        handlers: Vec<Arc<VringEpollHandler<Arc<RwLock<VuScmiBackend>>>>>,
+    ) {
+        let eventfd_list = self.scmi_handler.get_device_eventfd_list();
+        for (device_notify_fd, device_event) in eventfd_list {
+            handlers[0]
+                .register_listener(device_notify_fd, EventSet::IN, device_event as u64)
+                .unwrap();
+        }
     }
 
     pub fn process_requests(
@@ -326,6 +347,67 @@ impl VuScmiBackend {
         debug!("Processing event queue finished");
         Ok(())
     }
+
+    fn notify_event_queue(&mut self, vring: &VringRwLock, device_event: u16) -> Result<()> {
+        if self.event_descriptors.is_empty() {
+            vring
+                .signal_used_queue()
+                .map_err(|_| VuScmiError::DescriptorNotFound)?;
+            return Ok(());
+        }
+
+        let desc_chain = &self.event_descriptors.pop().unwrap();
+        let descriptors: Vec<_> = desc_chain.clone().collect();
+
+        if descriptors.len() != 1 {
+            return Err(VuScmiError::UnexpectedDescriptorCount(descriptors.len()));
+        }
+        let desc = descriptors[0];
+        if !desc.is_write_only() {
+            return Err(VuScmiError::UnexpectedReadableDescriptor(0));
+        }
+        debug!(
+            "SCMI event response avail descriptor length: {}",
+            desc.len()
+        );
+        debug!("Calling SCMI notify");
+        if let Some(mut response) = self.scmi_handler.notify(device_event) {
+            let write_desc_len: usize = desc.len() as usize;
+            if response.len() > write_desc_len {
+                error!(
+                    "Response of length {} cannot fit into the descriptor size {}",
+                    response.len(),
+                    write_desc_len
+                );
+                response = response.communication_error();
+                if response.len() > write_desc_len {
+                    return Err(VuScmiError::InsufficientDescriptorSize(
+                        response.len(),
+                        write_desc_len,
+                    ));
+                }
+            }
+            desc_chain
+                .memory()
+                .write_slice(response.as_slice(), desc.addr())
+                .map_err(|_| VuScmiError::DescriptorWriteFailed)?;
+
+            if vring
+                .add_used(desc_chain.head_index(), response.len() as u32)
+                .is_err()
+            {
+                log::error!("Failed to send notification data to the ring");
+                return Err(VuScmiError::SendNotificationFailed);
+            }
+
+            let _ = vring
+                .signal_used_queue()
+                .map_err(|_| VuScmiError::SendNotificationFailed);
+        } else {
+            debug!("Get Notification Failed!");
+        }
+        Ok(())
+    }
 }
 
 /// VhostUserBackend trait methods
@@ -382,6 +464,8 @@ impl VhostUserBackendMut for VuScmiBackend {
             return Err(VuScmiError::HandleEventNotEpollIn.into());
         }
 
+        let max_device_event = self.scmi_handler.get_max_eventfd();
+
         match device_event {
             COMMAND_QUEUE => {
                 let vring = &vrings[COMMAND_QUEUE as usize];
@@ -426,8 +510,15 @@ impl VhostUserBackendMut for VuScmiBackend {
             }
 
             _ => {
-                warn!("unhandled device_event: {}", device_event);
-                return Err(VuScmiError::HandleEventUnknownEvent.into());
+                if device_event >= NOTIFY_ALLOW_START_FD && device_event <= max_device_event {
+                    let vring = &vrings[EVENT_QUEUE as usize];
+                    vring.disable_notification().unwrap();
+                    self.notify_event_queue(vring, device_event)?;
+                    vring.enable_notification().unwrap();
+                } else {
+                    warn!("unhandled device_event: {}", device_event);
+                    return Err(VuScmiError::HandleEventUnknownEvent.into());
+                }
             }
         }
         debug!("Handle event finished");

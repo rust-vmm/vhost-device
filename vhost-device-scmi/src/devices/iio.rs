@@ -12,7 +12,11 @@
 use std::cmp::{max, min};
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::ErrorKind;
+use std::fs::File;
+use std::io::{ErrorKind, Read};
+use std::os::unix::io::AsRawFd;
+use std::os::unix::io::RawFd;
+
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -161,6 +165,82 @@ const UNIT_MAPPING: &[UnitMapping] = &[
 
 const IIO_DEFAULT_NAME: &str = "iio";
 
+#[derive(PartialEq, Debug, Clone, Copy)]
+enum IioEndian {
+    IioBe,
+    IioLe,
+}
+
+/// Representation of an IIO channel axis's scan type.
+/// It is read from sysfs "scan_element/<channel>_type"
+///
+/// Used also for scalar values.
+#[derive(PartialEq, Debug, Clone, Copy)]
+struct ChanScanType {
+    sign: char,
+    realbits: u8,
+    storagebits: u8,
+    shift: u8,
+    repeat: u8,
+    endianness: IioEndian,
+}
+
+impl ChanScanType {
+    /// Construct a ChanScanType from fs value
+    ///
+    /// The channel scan type follows the rule
+    /// If repeat > 1, "%s:%c%d/%dX%d>>%u\n"
+    /// Else, "%s:%c%d/%d>>%u\n".
+    /// For more details, see kernel "drivers/iio/industrialio-buffer.c"
+    fn new(value: String) -> Option<ChanScanType> {
+        let error_message = "Error format from iio device!";
+        let endianness = match &value[0..2] {
+            "le" => IioEndian::IioLe,
+            "be" => IioEndian::IioBe,
+            _ => panic!("{}", error_message),
+        };
+        let sign = match &value[3..4] {
+            "s" => 's',
+            "u" => 'u',
+            _ => panic!("{}", error_message),
+        };
+        let index_split = value.find('/').expect(error_message);
+        let index_shift = value.find('>').expect(error_message);
+
+        let realbits: u8 = value[4..index_split].parse().expect(error_message);
+        let (storagebits, repeat, shift): (u8, u8, u8) = match value.find('X') {
+            Some(index_repeat) => (
+                value[index_split + 1..index_repeat]
+                    .parse()
+                    .expect(error_message),
+                value[index_repeat + 1..index_shift]
+                    .parse()
+                    .expect(error_message),
+                value[index_shift + 2..value.len() - 1]
+                    .parse()
+                    .expect(error_message),
+            ),
+            None => (
+                value[index_split + 1..index_shift]
+                    .parse()
+                    .expect(error_message),
+                0,
+                value[index_shift + 2..value.len() - 1]
+                    .parse()
+                    .expect(error_message),
+            ),
+        };
+        Some(ChanScanType {
+            sign,
+            realbits,
+            storagebits,
+            shift,
+            repeat,
+            endianness,
+        })
+    }
+}
+
 /// Representation of an IIO channel axis.
 ///
 /// Used also for scalar values.
@@ -175,6 +255,35 @@ struct Axis {
     /// sufficiently accurate SCMI value that is represented by an integer (not
     /// a float) + decadic exponent.
     custom_exponent: i8,
+    /// Channel scan type, necessary if the sensor supports notifications.
+    /// The data from /dev/iio:deviceX will be formatted according to this.
+    /// The ChanScanType is parsed from "scan_elements/<channel>_type"
+    scan_type: Option<ChanScanType>,
+}
+
+impl Axis {
+    fn new(path: OsString, unit_exponent: i8, custom_exponent: i8) -> Axis {
+        let scan_path = Path::new(&path).parent().unwrap().join("scan_elements");
+        let mut scan_name = path.clone();
+        scan_name.push("_type");
+        let scan_type_path = scan_path.join(Path::new(&scan_name).file_name().unwrap());
+        if scan_type_path.is_file() {
+            let scan_type = fs::read_to_string(scan_type_path).unwrap();
+            Axis {
+                path,
+                unit_exponent,
+                custom_exponent,
+                scan_type: ChanScanType::new(scan_type),
+            }
+        } else {
+            Axis {
+                path,
+                unit_exponent,
+                custom_exponent,
+                scan_type: None,
+            }
+        }
+    }
 }
 
 /// Particular IIO sensor specification.
@@ -238,6 +347,15 @@ impl SensorT for IIOSensor {
         }
         axes.sort_by(|a1, a2| a1.path.cmp(&a2.path));
         self.axes = axes;
+
+        // If /dev/iio:deviceX exists, it means that this device can notify
+        // Open it and store it in SensorT.
+        let path_split: Vec<_> = self.path.to_str().unwrap().split('/').collect();
+        let dev_path = "/dev/".to_owned() + path_split[path_split.len() - 1];
+        if Path::new(&dev_path.clone()).exists() {
+            self.sensor_mut().notify_dev = Some(File::open(dev_path.clone()).unwrap());
+        }
+
         Ok(())
     }
 
@@ -286,6 +404,105 @@ impl SensorT for IIOSensor {
             result.push(MessageValue::Unsigned(0));
         }
         Ok(result)
+    }
+
+    fn get_notify_fd(&self) -> Option<RawFd> {
+        self.sensor.notify_dev.as_ref().map(|fd| fd.as_raw_fd())
+    }
+
+    fn reading_update(&mut self, device_index: u32) -> DeviceResult {
+        let mut result = vec![];
+        // The buffer length should correspond to the IIO device type.
+        // The type is available from /sys/bus/iio/devices/iio:deviceX/scan_elements/in_XXX_type.
+        // For example, if the content of in_XXX_type is le:s16/16>>0, each value is a little endian
+        // signed 16-bit integer. For a 3-axes sensor with [x, y, z, (t)] values, i.e. the 3 axes plus an
+        // optional timestamp, we need 6 or 8 bytes buffer.
+        // Currently, the only supported type is "le:s16/16>>0".
+        let scan_type = self.axes[0].scan_type.unwrap();
+
+        let signed = scan_type.sign == 's';
+        let le_endian = scan_type.endianness == IioEndian::IioLe;
+        if !signed || !le_endian {
+            error!("Unsupported notification format: {:?}", scan_type);
+            return Err(ScmiDeviceError::GenericError);
+        }
+
+        let sample_byte = (scan_type.realbits as f64 / 8_f64).ceil() as usize;
+        let sample_buffer_len = sample_byte * self.axes.len();
+        let mut buffer = vec![0u8; sample_buffer_len];
+        let mut file = self.sensor().notify_dev.as_ref().unwrap();
+
+        match file.read(&mut buffer) {
+            Ok(len) => {
+                if len > 0 {
+                    result.push(MessageValue::Unsigned(0)); // Agentid
+                    result.push(MessageValue::Unsigned(device_index)); // Sensorid
+
+                    // If SCMI sensor_attributes_low Bit[9] ("Timestamp supported") is set
+                    // then the sensor can provide timestamped values and the timestamp
+                    // should be read (and reported below), for example:
+                    /*
+                    let _time_stamp = i16::from_le_bytes(
+                        buffer[self.axes.len() * 2..self.axes.len() * 2 + 2]
+                            .try_into()
+                            .unwrap(),
+                    );
+                    */
+                    for i in 0..self.axes.len() {
+                        let value =
+                            i16::from_le_bytes(buffer[i * 2..i * 2 + 2].try_into().unwrap());
+                        let value_i64 = self
+                            .deal_axis_raw_data(value as i64, &self.axes[i])
+                            .unwrap();
+                        let sensor_value_low = (value_i64 & 0xffff_ffff) as i32;
+                        let sensor_value_high = (value_i64 >> 32) as i32;
+                        result.push(MessageValue::Signed(sensor_value_low));
+                        result.push(MessageValue::Signed(sensor_value_high));
+                        // Timestamp, currently not provided:
+                        result.push(MessageValue::Unsigned(0));
+                        result.push(MessageValue::Unsigned(0));
+                    }
+                }
+            }
+            Err(_) => {
+                return Err(ScmiDeviceError::GenericError);
+            }
+        }
+        Ok(result)
+    }
+
+    fn notify_status_set(&self, enabled: bool) -> Result<(), DeviceError> {
+        let path_split: Vec<_> = self.path.to_str().unwrap().split('/').collect();
+        let iio_name = path_split[path_split.len() - 1];
+        let buffer_enable = format!("/sys/bus/iio/devices/{}/buffer/enable", iio_name);
+        let mut scan_enable = vec![];
+        for i in 0..self.number_of_axes() {
+            scan_enable.push(format!(
+                "/sys/bus/iio/devices/{}/scan_elements/{}_{}_en",
+                iio_name,
+                self.channel.clone().into_string().unwrap(),
+                self.axis_name_suffix(i).to_lowercase()
+            ));
+        }
+        match enabled {
+            true => {
+                for scan_path in scan_enable {
+                    fs::write(scan_path.clone(), "1")
+                        .map_err(|e| DeviceError::IOError(scan_path.into(), e))?;
+                }
+                fs::write(buffer_enable.clone(), "1")
+                    .map_err(|e| DeviceError::IOError(buffer_enable.into(), e))?;
+            }
+            false => {
+                fs::write(buffer_enable.clone(), "0")
+                    .map_err(|e| DeviceError::IOError(buffer_enable.into(), e))?;
+                for scan_path in scan_enable {
+                    fs::write(scan_path.clone(), "0")
+                        .map_err(|e| DeviceError::IOError(scan_path.into(), e))?;
+                }
+            }
+        };
+        Ok(())
     }
 }
 
@@ -390,11 +607,11 @@ impl IIOSensor {
         // To get meaningful integer values, we must adjust exponent to
         // the provided scale if any.
         let custom_exponent = self.custom_exponent(path, unit_exponent);
-        axes.push(Axis {
-            path: OsString::from(path),
+        axes.push(Axis::new(
+            OsString::from(path),
             unit_exponent,
             custom_exponent,
-        });
+        ));
     }
 
     fn register_iio_file(&mut self, file: fs::DirEntry, axes: &mut Vec<Axis>) {
@@ -432,6 +649,11 @@ impl IIOSensor {
         for value_path in [
             Path::new(&(String::from(path.to_str().unwrap()) + "_" + name)),
             &Path::new(&path).parent().unwrap().join(name),
+            Path::new(&format!(
+                "{}_{}",
+                &String::from(path.to_str().unwrap())[..path.len() - 2],
+                name
+            )),
         ]
         .iter()
         {
@@ -812,6 +1034,34 @@ mod tests {
     }
 
     #[test]
+    fn test_iio_reading_scalar_multiple_axis() {
+        let directory = IIODirectory::new(&[
+            ("in_accel_x_raw", "205\n"),
+            ("in_accel_y_raw", "-392\n"),
+            ("in_accel_z_raw", "16518\n"),
+            ("in_accel_scale", "0.000598205\n"),
+        ]);
+        let mut sensor = make_iio_sensor(&directory, "in_accel".to_owned(), None);
+        sensor.initialize().unwrap();
+        let result = sensor.reading_get().unwrap();
+        assert_eq!(result.len(), 12);
+        assert_eq!(result.first().unwrap(), &MessageValue::Signed(1226));
+        assert_eq!(result.get(4).unwrap(), &MessageValue::Signed(-2345));
+        assert_eq!(result.get(8).unwrap(), &MessageValue::Signed(98812));
+        for i in 0..12 {
+            if i % 4 == 2 || i % 4 == 3 {
+                assert_eq!(result.get(i).unwrap(), &MessageValue::Unsigned(0));
+            }
+            if i != 5 && i % 4 == 1 {
+                assert_eq!(result.get(i).unwrap(), &MessageValue::Signed(0));
+            }
+            if i == 5 {
+                assert_eq!(result.get(i).unwrap(), &MessageValue::Signed(-1));
+            }
+        }
+    }
+
+    #[test]
     fn test_iio_reading_axes() {
         let directory = IIODirectory::new(&[
             ("in_accel_x_raw", "10"),
@@ -838,5 +1088,42 @@ mod tests {
                 assert_eq!(result.get(i).unwrap(), &MessageValue::Signed(0));
             }
         }
+    }
+
+    #[test]
+    fn test_scan_type_parse() {
+        assert_eq!(
+            ChanScanType::new(String::from("le:s16/16>>0\n")).unwrap(),
+            ChanScanType {
+                sign: 's',
+                realbits: 16,
+                storagebits: 16,
+                shift: 0,
+                repeat: 0,
+                endianness: IioEndian::IioLe,
+            }
+        );
+        assert_eq!(
+            ChanScanType::new(String::from("be:u24/28>>5\n")).unwrap(),
+            ChanScanType {
+                sign: 'u',
+                realbits: 24,
+                storagebits: 28,
+                shift: 5,
+                repeat: 0,
+                endianness: IioEndian::IioBe,
+            }
+        );
+        assert_eq!(
+            ChanScanType::new(String::from("le:s12/16X4>>3\n")).unwrap(),
+            ChanScanType {
+                sign: 's',
+                realbits: 12,
+                storagebits: 16,
+                shift: 3,
+                repeat: 4,
+                endianness: IioEndian::IioLe,
+            }
+        );
     }
 }

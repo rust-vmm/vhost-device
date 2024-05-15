@@ -13,6 +13,7 @@
 use std::{
     cmp::min,
     collections::HashMap,
+    os::unix::io::RawFd,
     sync::{Arc, Mutex},
 };
 
@@ -23,6 +24,7 @@ use thiserror::Error as ThisError;
 use crate::devices::common::DeviceError;
 
 pub type MessageHeader = u32;
+use super::vhu_scmi::NOTIFY_ALLOW_START_FD;
 
 pub const MAX_SIMPLE_STRING_LENGTH: usize = 16; // incl. NULL terminator
 
@@ -56,8 +58,9 @@ pub type MessageValues = Vec<MessageValue>;
 #[derive(Debug, PartialEq)]
 enum MessageType {
     // 4-bit unsigned integer
-    Command,     // 0
-    Unsupported, // anything else
+    Command,          // 0
+    Notification = 3, // Notifications have a message type of 3
+    Unsupported,      // anything else
 }
 pub type MessageId = u8;
 pub type ProtocolId = u8;
@@ -126,10 +129,19 @@ impl From<&MessageValues> for Response {
     }
 }
 
+impl Response {
+    // Notification is different from general response, it doesn't need ReturnStatus.
+    pub fn from_notification(value: &MessageValues) -> Self {
+        Self {
+            values: value.to_vec(),
+        }
+    }
+}
+
 /// SCMI response in SCMI representation byte.
 ///
 /// Use [ScmiResponse::from] function to construct it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ScmiResponse {
     header: MessageHeader,
     ret_bytes: Vec<u8>,
@@ -247,6 +259,8 @@ pub const SENSOR_AXIS_DESCRIPTION_GET: MessageId = 0x7;
 pub const SENSOR_CONFIG_GET: MessageId = 0x9;
 pub const SENSOR_CONFIG_SET: MessageId = 0xA;
 pub const SENSOR_CONTINUOUS_UPDATE_NOTIFY: MessageId = 0xB;
+// Notification message ids:
+pub const SENSOR_UPDATE: MessageId = 0x1;
 
 #[allow(dead_code)]
 pub const SENSOR_UNIT_NONE: u8 = 0;
@@ -550,6 +564,8 @@ pub enum ScmiDeviceError {
     NotEnabled,
     #[error("Unsupported request")]
     UnsupportedRequest,
+    #[error("Unsupported notify")]
+    UnsupportedNotify,
 }
 
 /// The highest representation of an SCMI device.
@@ -575,6 +591,26 @@ pub trait ScmiDevice: Send {
         message_id: MessageId,
         parameters: &[MessageValue],
     ) -> Result<MessageValues, ScmiDeviceError>;
+
+    // Get device notify fd
+    fn get_notify_fd(&self) -> Option<RawFd>;
+
+    // Set id for this ScmiDeivce
+    fn set_id(&mut self, id: usize);
+
+    // Get id of this ScmiDevice
+    fn get_id(&self) -> usize;
+
+    /// Get notify message from this device.
+    ///
+    /// Usually need to redefine it for different protocols.
+    /// device_index is the index of this device in its protocol list.
+    /// message_id is the notification message id to be used.
+    fn notify(
+        &mut self,
+        device_index: u32,
+        message_id: MessageId,
+    ) -> Result<MessageValues, ScmiDeviceError>;
 }
 
 type DeviceList = Vec<Box<dyn ScmiDevice>>;
@@ -591,7 +627,8 @@ impl DeviceMap {
     // SENSOR_DESCRIPTION_GET supports -- the upper 16 bits of the response.
     const MAX_NUMBER_OF_PROTOCOL_DEVICES: usize = 0xFFFF;
 
-    fn insert(&mut self, device: Box<dyn ScmiDevice>) {
+    // Return device_index and protocol of this device in backend
+    fn insert(&mut self, mut device: Box<dyn ScmiDevice>) -> DeviceIdentify {
         let mut device_map = self.0.lock().unwrap();
         let devices = device_map.entry(device.protocol()).or_default();
         if devices.len() >= Self::MAX_NUMBER_OF_PROTOCOL_DEVICES {
@@ -600,7 +637,10 @@ impl DeviceMap {
                 device.protocol()
             );
         }
+        device.set_id(devices.len());
+        let device_identify = (device.protocol(), device.get_id());
         devices.push(device);
+        device_identify
     }
 
     fn number_of_devices(&self, protocol_id: ProtocolId) -> u16 {
@@ -629,9 +669,39 @@ impl DeviceMap {
 
 pub type DeviceResult = Result<MessageValues, ScmiDeviceError>;
 
+pub type DeviceIdentify = (ProtocolId, usize);
+
+/// EventfdMap is a structure used to construct the relationship between device_event and DeviceIdentify
+/// Once a device supports notification, it should insert a key-value to this hashmap
+/// "device_event" is automatically assigned according to "available device event",
+/// then function handle_event can find the device via this hashmap.
+struct EventfdMap {
+    // Next available device_event, it should be initialized with NOTIFY_ALLOW_START_FD
+    available_device_event: u16,
+    // Hashmap of device_event -> (ProtocolID, DeviceID) for device lookup
+    map: Arc<Mutex<HashMap<u16, DeviceIdentify>>>,
+}
+
+impl EventfdMap {
+    fn new() -> Self {
+        Self {
+            available_device_event: NOTIFY_ALLOW_START_FD,
+            map: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    // If this device has eventfd for notification, insert it into map with a device_eventfd
+    fn insert(&mut self, device_identify: DeviceIdentify) {
+        let mut map = self.map.lock().unwrap();
+        map.insert(self.available_device_event, device_identify);
+        self.available_device_event += 1;
+    }
+}
+
 pub struct ScmiHandler {
     handlers: HandlerMap,
     devices: DeviceMap,
+    event_fds: EventfdMap,
 }
 
 impl ScmiHandler {
@@ -646,6 +716,7 @@ impl ScmiHandler {
         Self {
             handlers: HandlerMap::new(),
             devices: DeviceMap::new(),
+            event_fds: EventfdMap::new(),
         }
     }
 
@@ -666,9 +737,69 @@ impl ScmiHandler {
                 }
                 _ => Response::from(ReturnStatus::NotSupported),
             },
+            MessageType::Notification => Response::from(ReturnStatus::NotSupported),
             MessageType::Unsupported => Response::from(ReturnStatus::NotSupported),
         };
         ScmiResponse::from(request.header, response)
+    }
+
+    pub fn get_device_eventfd_list(&self) -> Vec<(RawFd, u16)> {
+        let mut list = vec![];
+        for (eventfd, (protocol_id, device_index)) in self.event_fds.map.lock().unwrap().iter() {
+            if let Some(devices) = self.devices.0.lock().unwrap().get_mut(protocol_id) {
+                if let Some(device) = devices.get_mut(*device_index) {
+                    list.push((device.get_notify_fd().unwrap(), *eventfd));
+                }
+            }
+        }
+        list
+    }
+
+    pub fn get_max_eventfd(&self) -> u16 {
+        self.event_fds.available_device_event - 1
+    }
+
+    /// According to device_event, find out the device which will do notification.
+    /// Then call its notify function to return a ScmiResponse.
+    /// Now only SENSOR PROTOCOL can do notification.
+    /// And it supports only the `SENSOR_UPDATE` message.
+    pub fn notify(&mut self, device_event: u16) -> Option<ScmiResponse> {
+        let event_fds_locked = self.event_fds.map.lock().unwrap();
+        let device_identify = event_fds_locked.get(&device_event).unwrap();
+        let mut devices_locked = self.devices.0.lock().unwrap();
+        let devices = devices_locked.get_mut(&device_identify.0).unwrap();
+        let dev = devices.get_mut(device_identify.1).unwrap();
+
+        if dev.protocol() == SENSOR_PROTOCOL_ID {
+            let device_index: u32 = dev.get_id() as u32;
+            match dev.notify(device_index, SENSOR_UPDATE) {
+                Ok(message_values) => {
+                    if !message_values.is_empty() {
+                        // message_id=0x1 [7:0]
+                        // message_type = 0x3 [9:8]
+                        // protocol_id=0x15; [17:10]
+                        // 0x1 | (0x3<<8) | (0x15<<10)
+                        let notify_header: MessageHeader = (SENSOR_UPDATE as u32)
+                            | ((MessageType::Notification as u32) << 8)
+                            | ((SENSOR_PROTOCOL_ID as u32) << 10);
+
+                        Some(ScmiResponse::from(
+                            notify_header,
+                            Response::from_notification(&message_values),
+                        ))
+                    } else {
+                        error!("No data from device!");
+                        None
+                    }
+                }
+                Err(_) => {
+                    error!("Fail to read from device!");
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
 
     pub fn number_of_parameters(&self, request: &ScmiRequest) -> Option<NParameters> {
@@ -720,8 +851,13 @@ impl ScmiHandler {
             .expect("Impossibly large number of SCMI protocols")
     }
 
+    // If a device can notify, record its event_fd, which will be assigned to the device later.
     pub fn register_device(&mut self, device: Box<dyn ScmiDevice>) {
-        self.devices.insert(device);
+        let register_event = device.get_notify_fd().is_some();
+        let device_identify = self.devices.insert(device);
+        if register_event {
+            self.event_fds.insert(device_identify);
+        }
     }
 
     fn handle_device(
@@ -747,6 +883,10 @@ impl ScmiHandler {
                 }
                 ScmiDeviceError::UnsupportedRequest => {
                     info!("Unsupported request for {}", device_index);
+                    Response::from(ReturnStatus::NotSupported)
+                }
+                ScmiDeviceError::UnsupportedNotify => {
+                    info!("Unsupported notify for {}", device_index);
                     Response::from(ReturnStatus::NotSupported)
                 }
                 ScmiDeviceError::GenericError => {
@@ -1343,6 +1483,30 @@ mod tests {
         );
     }
 
+    fn check_notify_enabled(sensor: u32, notify_enabled: bool, handler: &mut ScmiHandler) {
+        let notify_enabled_flag = u32::from(notify_enabled);
+        let parameters = vec![
+            MessageValue::Unsigned(sensor),
+            MessageValue::Unsigned(notify_enabled_flag),
+        ];
+        let result = vec![MessageValue::Unsigned(notify_enabled_flag)];
+        test_message_with_handler(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONTINUOUS_UPDATE_NOTIFY,
+            parameters,
+            ReturnStatus::Success,
+            result,
+            handler,
+        );
+    }
+
+    #[test]
+    fn test_sensor_continuous_update_notify() {
+        let mut handler = make_handler();
+        check_notify_enabled(0, true, &mut handler);
+        check_notify_enabled(0, false, &mut handler)
+    }
+
     #[test]
     fn test_sensor_reading_get() {
         let mut handler = make_handler();
@@ -1374,6 +1538,41 @@ mod tests {
                     result,
                     &mut handler,
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_sensor_reading_update() {
+        let mut handler = ScmiHandler::new();
+        for sensor_id in 0..2 {
+            let properties =
+                DeviceProperties::new(vec![("name".to_owned(), format!("fake{}", sensor_id))]);
+            let fake_sensor = FakeSensor::new_device(&properties).unwrap();
+            handler.register_device(fake_sensor);
+            enable_sensor(sensor_id, true, &mut handler);
+            check_notify_enabled(sensor_id, true, &mut handler);
+        }
+
+        for iteration in 0..2 {
+            for sensor_id in 0..2 {
+                let notification = handler.notify(NOTIFY_ALLOW_START_FD + sensor_id).unwrap();
+                let notify_header: MessageHeader = (SENSOR_UPDATE as u32)
+                    | ((MessageType::Notification as u32) << 8)
+                    | ((SENSOR_PROTOCOL_ID as u32) << 10);
+                let mut result = vec![];
+                result.push(MessageValue::Unsigned(0));
+                result.push(MessageValue::Unsigned(sensor_id as u32));
+                for i in 0..3 {
+                    result.push(MessageValue::Signed(iteration + 100 * i));
+                    result.push(MessageValue::Signed(0));
+                    result.push(MessageValue::Signed(0));
+                    result.push(MessageValue::Signed(0));
+                }
+                let response =
+                    ScmiResponse::from(notify_header, Response::from_notification(&result));
+
+                assert_eq!(notification, response);
             }
         }
     }

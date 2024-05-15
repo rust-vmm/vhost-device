@@ -9,9 +9,9 @@
 //! arranging SCMI virtualization setup without the need to bind real host
 //! devices.
 
-use crate::scmi::{self, DeviceResult, MessageValue};
-
 use super::common::{DeviceProperties, MaybeDevice, Sensor, SensorDevice, SensorT};
+use crate::scmi::{self, DeviceResult, MessageValue};
+use std::os::unix::io::RawFd;
 
 pub struct FakeSensor {
     sensor: Sensor,
@@ -51,6 +51,25 @@ impl SensorT for FakeSensor {
             result.push(MessageValue::Unsigned(0));
             result.push(MessageValue::Unsigned(0));
             result.push(MessageValue::Unsigned(0));
+        }
+        Ok(result)
+    }
+
+    fn get_notify_fd(&self) -> Option<RawFd> {
+        Some(1)
+    }
+
+    fn reading_update(&mut self, device_index: u32) -> DeviceResult {
+        let value = self.value;
+        self.value = self.value.overflowing_add(1).0;
+        let mut result = vec![];
+        result.push(MessageValue::Unsigned(0));
+        result.push(MessageValue::Unsigned(device_index));
+        for i in 0..3 {
+            result.push(MessageValue::Signed(i32::from(value) + 100 * i));
+            result.push(MessageValue::Signed(0));
+            result.push(MessageValue::Signed(0));
+            result.push(MessageValue::Signed(0));
         }
         Ok(result)
     }

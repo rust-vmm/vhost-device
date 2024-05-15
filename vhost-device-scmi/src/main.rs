@@ -126,6 +126,11 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
         )
         .unwrap();
 
+        // Register devices such as "/dev/iio:deviceX" which can actively notify the frontend to epoll the handler.
+        // Then once there is data coming from these devices, an event will be created. (device_event=3)
+        let handlers = daemon.get_epoll_handlers();
+        backend.read().unwrap().register_device_event_fd(handlers);
+
         daemon
             .serve(&config.socket_path)
             .map_err(|e| format!("{e}"))?;

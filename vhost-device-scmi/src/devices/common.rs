@@ -12,6 +12,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::Write;
+use std::fs::File;
+use std::os::unix::io::RawFd;
 
 use itertools::Itertools;
 use log::debug;
@@ -21,7 +23,7 @@ use crate::scmi::{
     self, DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice,
     ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET,
     SENSOR_CONFIG_SET, SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
-    SENSOR_READING_GET,
+    SENSOR_READING_GET, SENSOR_UPDATE,
 };
 
 use super::{fake, iio};
@@ -230,6 +232,15 @@ pub struct Sensor {
     /// Sensors can be enabled and disabled using SCMI.  [Sensor]s created
     /// using [Sensor::new] are disabled initially.
     enabled: bool,
+
+    /// Sensor notification can be enabled or disabled when frontend sends SENSOR_CONTINUOUS_UPDATE_NOTIFY.
+    notify_enabled: bool,
+    /// If this sensor supports notifying the frontend actively, it should record
+    /// notification device file here. (e.g. For iio device, the file is /dev/iio:deviceX)
+    pub notify_dev: Option<File>,
+
+    /// Sensor id, to identify the sensor in notification lookup.
+    pub sensor_id: usize,
 }
 
 impl Sensor {
@@ -237,6 +248,9 @@ impl Sensor {
         Self {
             name: properties.get("name").map(|s| (*s).to_owned()),
             enabled: false,
+            notify_enabled: false,
+            notify_dev: None,
+            sensor_id: 0,
         }
     }
 }
@@ -322,7 +336,7 @@ pub trait SensorT: Send {
         } else {
             self.format_unit(0)
         };
-        // During initialization, sensor name has be set.
+        // During initialization, sensor name has been set.
         let name = self.sensor().name.clone().unwrap();
         let values: MessageValues = vec![
             // attributes low
@@ -401,6 +415,15 @@ pub trait SensorT: Send {
             return Result::Err(ScmiDeviceError::UnsupportedRequest);
         }
         self.sensor_mut().enabled = config != 0;
+
+        if self.sensor().enabled {
+            self.notify_status_set(true)
+                .map_err(|_| ScmiDeviceError::GenericError)?;
+        } else {
+            self.notify_status_set(false)
+                .map_err(|_| ScmiDeviceError::GenericError)?;
+        }
+
         debug!("Sensor enabled: {}", self.sensor().enabled);
         Ok(vec![])
     }
@@ -440,17 +463,91 @@ pub trait SensorT: Send {
                 self.config_set(config)
             }
             SENSOR_CONTINUOUS_UPDATE_NOTIFY => {
-                // Linux VIRTIO SCMI insists on this.
-                // We can accept it and ignore it, the sensor will be still working.
-                Ok(vec![])
+                // Linux VIRTIO SCMI insists on handling this.
+                match parameters[0].get_unsigned() {
+                    1 => {
+                        self.sensor_mut().notify_enabled = true;
+                        Ok(vec![MessageValue::Signed(1)])
+                    }
+                    0 => {
+                        self.sensor_mut().notify_enabled = false;
+                        Ok(vec![MessageValue::Signed(0)])
+                    }
+                    _ => Result::Err(ScmiDeviceError::InvalidParameters),
+                }
             }
             SENSOR_READING_GET => {
                 if !self.sensor().enabled {
                     return Result::Err(ScmiDeviceError::NotEnabled);
                 }
-                self.reading_get()
+                if self.sensor().notify_enabled {
+                    self.notify_status_set(false)
+                        .map_err(|_| ScmiDeviceError::GenericError)?;
+                }
+                let ret = self.reading_get();
+                if self.sensor().notify_enabled {
+                    self.notify_status_set(true)
+                        .map_err(|_| ScmiDeviceError::GenericError)?;
+                }
+                ret
             }
             _ => Result::Err(ScmiDeviceError::UnsupportedRequest),
+        }
+    }
+
+    /// Returns the notification messages from the device.
+    ///
+    /// Usually need to redefine this. Different sensors may have different ways to
+    /// get notifications.
+    fn reading_update(&mut self, _device_index: u32) -> DeviceResult {
+        Ok(vec![])
+    }
+
+    /// Enable/Disable Sensor notify function.
+    ///
+    /// Usually need to redefine this.
+    /// Different sensors require different configuration to enable/disable notifications.
+    fn notify_status_set(&self, _enabled: bool) -> Result<(), DeviceError> {
+        Ok(())
+    }
+
+    /// Get notify device fd
+    ///
+    /// This fd is used for getting notifications.
+    /// It should be registered in epoll handler.
+    fn get_notify_fd(&self) -> Option<RawFd> {
+        None
+    }
+
+    /// Set the device id.
+    ///
+    /// Usually no need to redefine this.
+    /// Sensor id is increasing during registration.
+    fn set_id(&mut self, id: usize) {
+        self.sensor_mut().sensor_id = id;
+    }
+
+    /// Get id of this device.
+    ///
+    /// Usually no need to redefine this.
+    fn get_id(&self) -> usize {
+        self.sensor().sensor_id
+    }
+
+    /// Get a nofication message value from this sensor.
+    ///
+    /// The default implementation supports only SENSOR_UPDATE notification.
+    fn notify(&mut self, device_index: u32, message_id: MessageId) -> DeviceResult {
+        match message_id {
+            SENSOR_UPDATE => {
+                // Read pending notifications, to prevent spamming the frontend with EVENT:IN interrupts.
+                let ret = self.reading_update(device_index);
+                if !self.sensor().enabled || !self.sensor().notify_enabled {
+                    return Result::Err(ScmiDeviceError::NotEnabled);
+                }
+                ret
+            }
+            _ => Result::Err(ScmiDeviceError::UnsupportedNotify),
         }
     }
 }
@@ -471,6 +568,22 @@ impl ScmiDevice for SensorDevice {
 
     fn handle(&mut self, message_id: MessageId, parameters: &[MessageValue]) -> DeviceResult {
         self.0.handle(message_id, parameters)
+    }
+
+    fn get_notify_fd(&self) -> Option<RawFd> {
+        self.0.get_notify_fd()
+    }
+
+    fn set_id(&mut self, id: usize) {
+        self.0.set_id(id)
+    }
+
+    fn get_id(&self) -> usize {
+        self.0.get_id()
+    }
+
+    fn notify(&mut self, device_index: u32, message_id: MessageId) -> DeviceResult {
+        self.0.notify(device_index, message_id)
     }
 }
 

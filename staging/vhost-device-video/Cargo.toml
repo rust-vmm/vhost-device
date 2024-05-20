@@ -23,7 +23,7 @@ env_logger = "0.11"
 epoll = "4.3"
 num_enum = "0.7"
 log = "0.4"
-libc = "0.2.154"
+libc = "0.2.155"
 thiserror = "1.0"
 futures-executor = { version = "0.3", features = ["thread-pool"] }
 vhost = { version = "0.11", features = ["vhost-user-backend"] }

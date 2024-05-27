@@ -29,7 +29,7 @@ virtio-queue = "0.12"
 vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
 evdev = "0.12"
-nix = { version = "0.28", features = ["ioctl"] }
+nix = { version = "0.29", features = ["ioctl"] }
 
 [dev-dependencies]
 assert_matches = "1.5"

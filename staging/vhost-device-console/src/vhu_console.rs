@@ -103,6 +103,8 @@ pub(crate) enum Error {
     DescriptorWriteFailed,
     #[error("Failed to create new EventFd")]
     EventFdFailed,
+    #[error("Failed to add control message in the internal queue")]
+    RxCtrlQueueAddFailed,
 }
 
 impl convert::From<Error> for io::Error {
@@ -371,28 +373,40 @@ impl VhostUserConsoleBackend {
         match ctrl_msg.event.to_native() {
             VIRTIO_CONSOLE_DEVICE_READY => {
                 trace!("VIRTIO_CONSOLE_DEVICE_READY");
+
+                if ctrl_msg.value != 1 {
+                    trace!("Guest failure in adding device\n");
+                    return Ok(());
+                }
+
                 self.ready = true;
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_PORT_ADD.into();
                 self.rx_ctrl_fifo
                     .add(ctrl_msg_reply)
-                    .expect("Control message could not be added into queue");
+                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
             }
             VIRTIO_CONSOLE_PORT_READY => {
                 trace!("VIRTIO_CONSOLE_PORT_READY");
+
+                if ctrl_msg.value != 1 {
+                    trace!("Guest failure in adding port for device\n");
+                    return Ok(());
+                }
+
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_CONSOLE_PORT.into();
                 self.rx_ctrl_fifo
                     .add(ctrl_msg_reply)
-                    .expect("Control message could not be added into queue");
+                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
 
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_PORT_NAME.into();
                 self.rx_ctrl_fifo
                     .add(ctrl_msg_reply)
-                    .expect("Control message could not be added into queue");
+                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
 
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_PORT_OPEN.into();
                 self.rx_ctrl_fifo
                     .add(ctrl_msg_reply)
-                    .expect("Control message could not be added into queue");
+                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
             }
             VIRTIO_CONSOLE_PORT_OPEN => {
                 trace!("VIRTIO_CONSOLE_PORT_OPEN");
@@ -447,8 +461,6 @@ impl VhostUserConsoleBackend {
             if self.handle_control_msg(request).is_ok() {
                 trace!("Trigger a kick");
                 self.rx_ctrl_event.write(1).unwrap();
-            } else {
-                trace!("EventFd is not available.");
             }
 
             if vring
@@ -619,11 +631,12 @@ impl VhostUserConsoleBackend {
                                             let input_buffer =
                                                 String::from_utf8_lossy(&buffer[..bytes_read])
                                                     .to_string();
-                                            let _ = vhu_console
+                                            vhu_console
                                                 .write()
                                                 .unwrap()
                                                 .rx_data_fifo
-                                                .add(input_buffer);
+                                                .add(input_buffer)
+                                                .unwrap();
                                             vhu_console.write().unwrap().rx_event.write(1).unwrap();
                                         }
                                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -701,21 +714,21 @@ impl VhostUserConsoleBackend {
                             }
 
                             if fdset_clone.contains(term.as_raw_fd()) {
-                                let character =
-                                    match term.read_key().expect("Error reading character!") {
-                                        Key::Char(character) => Some(character),
-                                        Key::Enter => Some('\n'),
-                                        Key::Tab => Some('\t'),
-                                        Key::Backspace => Some('\u{8}'),
-                                        _ => None,
-                                    };
-
-                                if character.is_some() {
+                                if let Some(character) = match term.read_key().unwrap() {
+                                    Key::Char(character) => Some(character),
+                                    Key::Enter => Some('\n'),
+                                    Key::Tab => Some('\t'),
+                                    Key::Backspace => Some('\u{8}'),
+                                    _ => None,
+                                } {
                                     // Pass the data to vhu_console and trigger an EventFd
-                                    let input_buffer =
-                                        character.expect("Unexpected character!").to_string();
-                                    let _ =
-                                        vhu_console.write().unwrap().rx_data_fifo.add(input_buffer);
+                                    let input_buffer = character.to_string();
+                                    vhu_console
+                                        .write()
+                                        .unwrap()
+                                        .rx_data_fifo
+                                        .add(input_buffer)
+                                        .unwrap();
                                     vhu_console.write().unwrap().rx_event.write(1).unwrap();
                                 }
                             }

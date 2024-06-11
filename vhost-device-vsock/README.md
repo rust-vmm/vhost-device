@@ -83,7 +83,7 @@ Run VMM (e.g. QEMU):
 ```
 qemu-system-x86_64 \
   <normal QEMU options> \
-  -object memory-backend-file,share=on,id=mem0,size=<Guest RAM size>,mem-path=<Guest RAM file path> \ # size == -m size
+  -object memory-backend-memfd,id=mem0,size=<Guest RAM size> \ # size == -m size
   -machine <machine options>,memory-backend=mem0 \
   -chardev socket,id=char0,reconnect=0,path=<vhost-user socket path> \
   -device vhost-user-vsock-pci,chardev=char0
@@ -101,8 +101,8 @@ shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/
 
 ```sh
 shell2$ qemu-system-x86_64 \
-          -drive file=vm.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
-          -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages" \
+          -drive file=vm.qcow2,format=qcow2,if=virtio -smp 2 \
+          -object memory-backend-memfd,id=mem0,size=512M \
           -machine q35,accel=kvm,memory-backend=mem0 \
           -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
           -device vhost-user-vsock-pci,chardev=char0
@@ -159,14 +159,14 @@ For example, if you have two VMs with CID 3 and 4, you can run the following com
 shell1$ vhost-device-vsock --vm guest-cid=3,uds-path=/tmp/vm3.vsock,socket=/tmp/vhost3.socket,groups=group1+group2 \
           --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,groups=group1
 shell2$ qemu-system-x86_64 \
-          -drive file=vm1.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
-          -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages" \
+          -drive file=vm1.qcow2,format=qcow2,if=virtio -smp 2 \
+          -object memory-backend-memfd,id=mem0,size=512M \
           -machine q35,accel=kvm,memory-backend=mem0 \
           -chardev socket,id=char0,reconnect=0,path=/tmp/vhost3.socket \
           -device vhost-user-vsock-pci,chardev=char0
 shell3$ qemu-system-x86_64 \
-          -drive file=vm2.qcow2,format=qcow2,if=virtio -smp 2 -m 512M -mem-prealloc \
-          -object memory-backend-file,share=on,id=mem0,size=512M,mem-path="/dev/hugepages2" \
+          -drive file=vm2.qcow2,format=qcow2,if=virtio -smp 2 \
+          -object memory-backend-memfd,id=mem0,size=512M \
           -machine q35,accel=kvm,memory-backend=mem0 \
           -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
           -device vhost-user-vsock-pci,chardev=char0

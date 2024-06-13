@@ -6,6 +6,7 @@ description = "vhost spi backend device"
 repository = "https://github.com/rust-vmm/vhost-device"
 readme = "README.md"
 keywords = ["spi", "vhost", "virt", "backend"]
+categories = ["virtualization"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 

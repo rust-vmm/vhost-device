@@ -45,6 +45,7 @@ pub mod virtio_sound;
 use std::{
     convert::TryFrom,
     io::{Error as IoError, ErrorKind},
+    mem::size_of,
     sync::Arc,
 };
 
@@ -53,9 +54,7 @@ pub use stream::Stream;
 use thiserror::Error as ThisError;
 use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
 use virtio_sound::*;
-use vm_memory::{
-    ByteValued, Bytes, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32,
-};
+use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32};
 
 use crate::device::VhostUserSoundBackend;
 
@@ -169,14 +168,8 @@ pub enum Error {
     NoMemoryConfigured,
     #[error("Invalid virtio_snd_hdr size, expected: {0}, found: {1}")]
     UnexpectedSoundHeaderSize(usize, u32),
-    #[error("Received unexpected write only descriptor at index {0}")]
-    UnexpectedWriteOnlyDescriptor(usize),
     #[error("Received unexpected readable descriptor at index {0}")]
-    UnexpectedReadableDescriptor(usize),
-    #[error("Invalid descriptor count {0}")]
     UnexpectedDescriptorCount(usize),
-    #[error("Invalid descriptor size, expected: {0}, found: {1}")]
-    UnexpectedDescriptorSize(usize, u32),
     #[error("Protocol or device error: {0}")]
     Stream(stream::Error),
     #[error("Stream with id {0} not found")]
@@ -296,7 +289,6 @@ pub struct IOMessage {
     pub used_len: std::sync::atomic::AtomicU32,
     pub latency_bytes: std::sync::atomic::AtomicU32,
     desc_chain: SoundDescriptorChain,
-    response_descriptor: virtio_queue::Descriptor,
     vring: VringRwLock,
 }
 
@@ -312,11 +304,27 @@ impl Drop for IOMessage {
         let used_len: u32 = self.used_len.load(std::sync::atomic::Ordering::SeqCst);
         log::trace!("dropping IOMessage {:?}", resp);
 
-        if let Err(err) = self
-            .desc_chain
-            .memory()
-            .write_obj(resp, self.response_descriptor.addr())
-        {
+        let mem = self.desc_chain.memory();
+
+        let mut writer = match self.desc_chain.clone().writer(mem) {
+            Ok(writer) => writer,
+            Err(err) => {
+                log::error!("Error::DescriptorReadFailed: {}", err);
+                return;
+            }
+        };
+
+        let offset = writer.available_bytes() - size_of::<VirtioSoundPcmStatus>();
+
+        let mut writer_status = match writer.split_at(offset) {
+            Ok(writer_status) => writer_status,
+            Err(err) => {
+                log::error!("Error::DescriptorReadFailed: {}", err);
+                return;
+            }
+        };
+
+        if let Err(err) = writer_status.write_obj(resp) {
             log::error!("Error::DescriptorWriteFailed: {}", err);
             return;
         }

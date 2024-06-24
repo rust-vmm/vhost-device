@@ -195,8 +195,6 @@ unsafe impl ByteValued for VirtioSoundEvent {}
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundQueryInfo {
-    /// item request type (VIRTIO_SND_R_*_INFO)
-    pub hdr: VirtioSoundHeader,
     /// starting identifier for the item
     pub start_id: Le32,
     /// number of items for which information is requested
@@ -223,8 +221,6 @@ unsafe impl ByteValued for VirtioSoundInfo {}
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundJackHeader {
-    /// jack request type (VIRTIO_SND_R_JACK_*)
-    pub hdr: VirtioSoundHeader,
     /// jack identifier
     pub jack_id: Le32,
 }
@@ -269,7 +265,6 @@ unsafe impl ByteValued for VirtioSoundJackRemap {}
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct VirtioSoundPcmHeader {
-    pub hdr: VirtioSoundHeader,
     pub stream_id: Le32,
 }
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -373,11 +368,8 @@ mod tests {
         let val = VirtioSoundQueryInfo::default();
 
         let debug_output = format!("{:?}", val);
-        let expected_debug = format!(
-            "VirtioSoundQueryInfo {{ hdr: {:?}, start_id: Le32(0), count: Le32(0), size: Le32(0) \
-             }}",
-            val.hdr
-        );
+        let expected_debug =
+            "VirtioSoundQueryInfo { start_id: Le32(0), count: Le32(0), size: Le32(0) }".to_string();
         assert_eq!(debug_output, expected_debug);
 
         let val = VirtioSoundInfo::default();
@@ -389,10 +381,7 @@ mod tests {
         let val = VirtioSoundJackHeader::default();
 
         let debug_output = format!("{:?}", val);
-        let expected_debug = format!(
-            "VirtioSoundJackHeader {{ hdr: {:?}, jack_id: Le32(0) }}",
-            val.hdr
-        );
+        let expected_debug = "VirtioSoundJackHeader { jack_id: Le32(0) }".to_string();
         assert_eq!(debug_output, expected_debug);
 
         let val = VirtioSoundJackInfo::default();
@@ -417,10 +406,7 @@ mod tests {
         let val = VirtioSoundPcmHeader::default();
 
         let debug_output = format!("{:?}", val);
-        let expected_debug = format!(
-            "VirtioSoundPcmHeader {{ hdr: {:?}, stream_id: Le32(0) }}",
-            val.hdr
-        );
+        let expected_debug = "VirtioSoundPcmHeader { stream_id: Le32(0) }".to_string();
         assert_eq!(debug_output, expected_debug);
 
         let val = VirtioSoundPcmInfo::default();

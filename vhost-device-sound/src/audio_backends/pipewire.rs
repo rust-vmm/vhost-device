@@ -367,10 +367,10 @@ impl AudioBackend for PwBackend {
                 })
                 .process(move |stream, _data| match stream.dequeue_buffer() {
                     None => debug!("No buffer recieved"),
-                    Some(mut buf) => {
+                    Some(mut req) => {
                         match direction {
                             Direction::Input => {
-                                let datas = buf.datas_mut();
+                                let datas = req.datas_mut();
                                 let data = &mut datas[0];
                                 let mut n_samples = data.chunk().size() as usize;
                                 let Some(slice) = data.data() else {
@@ -383,17 +383,15 @@ impl AudioBackend for PwBackend {
 
                                 let mut start = 0;
                                 while n_samples > 0 {
-                                    let Some(buffer) = stream.buffers.front_mut() else {
+                                    let Some(request) = stream.requests.front_mut() else {
                                         return;
                                     };
 
-                                    let avail = usize::try_from(buffer.desc_len())
-                                        .unwrap()
-                                        .saturating_sub(buffer.pos);
+                                    let avail = request.len().saturating_sub(request.pos);
                                     let n_bytes = n_samples.min(avail);
                                     let p = &slice[start..start + n_bytes];
 
-                                    if buffer
+                                    if request
                                         .write_input(p)
                                         .expect("Could not write data to guest memory")
                                         == 0
@@ -404,13 +402,13 @@ impl AudioBackend for PwBackend {
                                     n_samples -= n_bytes;
                                     start += n_bytes;
 
-                                    if buffer.pos >= buffer.desc_len() as usize {
-                                        stream.buffers.pop_front();
+                                    if request.pos >= request.len() {
+                                        stream.requests.pop_front();
                                     }
                                 }
                             }
                             Direction::Output => {
-                                let datas = buf.datas_mut();
+                                let datas = req.datas_mut();
                                 let frame_size = info.channels * size_of::<i16>() as u32;
                                 let data = &mut datas[0];
                                 let n_bytes = if let Some(slice) = data.data() {
@@ -419,15 +417,13 @@ impl AudioBackend for PwBackend {
                                     let streams = streams
                                         .get_mut(stream_id as usize)
                                         .expect("Stream does not exist");
-                                    let Some(buffer) = streams.buffers.front_mut() else {
+                                    let Some(request) = streams.requests.front_mut() else {
                                         return;
                                     };
 
-                                    let mut start = buffer.pos;
+                                    let mut start = request.pos;
 
-                                    let avail = usize::try_from(buffer.desc_len())
-                                        .unwrap()
-                                        .saturating_sub(start);
+                                    let avail = request.len().saturating_sub(start);
 
                                     if avail < n_bytes {
                                         n_bytes = avail;
@@ -444,16 +440,16 @@ impl AudioBackend for PwBackend {
                                     } else {
                                         // read_output() always reads (buffer.desc_len() -
                                         // buffer.pos) bytes
-                                        buffer
+                                        request
                                             .read_output(p)
                                             .expect("failed to read buffer from guest");
 
                                         start += n_bytes;
 
-                                        buffer.pos = start;
+                                        request.pos = start;
 
-                                        if start >= buffer.desc_len() as usize {
-                                            streams.buffers.pop_front();
+                                        if start >= request.len() {
+                                            streams.requests.pop_front();
                                         }
                                     }
                                     n_bytes
@@ -516,7 +512,7 @@ impl AudioBackend for PwBackend {
             .get(&stream_id)
             .expect("Could not find stream with this id in `stream_hash`.");
         stream.disconnect().expect("could not disconnect stream");
-        std::mem::take(&mut st_buffer[stream_id as usize].buffers);
+        std::mem::take(&mut st_buffer[stream_id as usize].requests);
         stream_hash.remove(&stream_id);
         stream_listener.remove(&stream_id);
         lock_guard.unlock();
@@ -613,7 +609,7 @@ mod tests {
         pw_backend.stop(0).unwrap();
         pw_backend.release(0).unwrap();
         let streams = streams.read().unwrap();
-        assert_eq!(streams[0].buffers.len(), 0);
+        assert_eq!(streams[0].requests.len(), 0);
     }
 
     #[test]

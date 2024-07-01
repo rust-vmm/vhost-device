@@ -1,0 +1,35 @@
+[package]
+name = "vhost-device-spi"
+version = "0.1.0"
+authors = ["Haixu Cui <quic_haixcui@quicinc.com>"]
+description = "vhost spi backend device"
+repository = "https://github.com/rust-vmm/vhost-device"
+readme = "README.md"
+keywords = ["spi", "vhost", "virt", "backend"]
+categories = ["virtualization"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+
+[dependencies]
+clap = { version = "4.5",  features = ["derive"] }
+env_logger = "0.11"
+libc = "0.2"
+log = "0.4"
+thiserror = "1.0"
+vhost = { version = "0.11", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.15"
+virtio-bindings = "0.2.2"
+virtio-queue = "0.12"
+vm-memory = "0.14.1"
+vmm-sys-util = "0.12"
+bitflags = "2.4.0"
+
+[dev-dependencies]
+assert_matches = "1.5"
+virtio-queue = { version = "0.12", features = ["test-utils"] }
+vm-memory = { version = "0.14.1", features = ["backend-mmap", "backend-atomic"] }

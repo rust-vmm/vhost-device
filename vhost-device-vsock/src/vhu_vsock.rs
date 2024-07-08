@@ -28,7 +28,6 @@ pub(crate) type CidMap =
     HashMap<u64, (Arc<RwLock<RawPktsQ>>, Arc<RwLock<HashSet<String>>>, EventFd)>;
 
 const NUM_QUEUES: usize = 3;
-const QUEUE_SIZE: usize = 256;
 
 // New descriptors pending on the rx queue
 const RX_QUEUE_EVENT: u16 = 0;
@@ -151,6 +150,7 @@ pub(crate) struct VsockConfig {
     socket: String,
     uds_path: String,
     tx_buffer_size: u32,
+    queue_size: usize,
     groups: Vec<String>,
 }
 
@@ -162,6 +162,7 @@ impl VsockConfig {
         socket: String,
         uds_path: String,
         tx_buffer_size: u32,
+        queue_size: usize,
         groups: Vec<String>,
     ) -> Self {
         Self {
@@ -169,6 +170,7 @@ impl VsockConfig {
             socket,
             uds_path,
             tx_buffer_size,
+            queue_size,
             groups,
         }
     }
@@ -192,6 +194,10 @@ impl VsockConfig {
 
     pub fn get_tx_buffer_size(&self) -> u32 {
         self.tx_buffer_size
+    }
+
+    pub fn get_queue_size(&self) -> usize {
+        self.queue_size
     }
 
     pub fn get_groups(&self) -> Vec<String> {
@@ -229,6 +235,7 @@ unsafe impl ByteValued for VirtioVsockConfig {}
 
 pub(crate) struct VhostUserVsockBackend {
     config: VirtioVsockConfig,
+    queue_size: usize,
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
     pub exit_event: EventFd,
@@ -249,6 +256,7 @@ impl VhostUserVsockBackend {
             config: VirtioVsockConfig {
                 guest_cid: From::from(config.get_guest_cid()),
             },
+            queue_size: config.get_queue_size(),
             threads: vec![thread],
             queues_per_thread,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
@@ -265,7 +273,7 @@ impl VhostUserBackend for VhostUserVsockBackend {
     }
 
     fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
+        self.queue_size
     }
 
     fn features(&self) -> u64 {
@@ -376,6 +384,7 @@ mod tests {
     use vm_memory::GuestAddress;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+    const QUEUE_SIZE: usize = 1024;
 
     #[test]
     fn test_vsock_backend() {
@@ -401,6 +410,7 @@ mod tests {
             vhost_socket_path.to_string(),
             vsock_socket_path.to_string(),
             CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
             groups_list,
         );
 
@@ -487,6 +497,7 @@ mod tests {
             "/sys/not_allowed.socket".to_string(),
             "/sys/not_allowed.vsock".to_string(),
             CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
             groups.clone(),
         );
 
@@ -500,6 +511,7 @@ mod tests {
             vhost_socket_path.to_string(),
             vsock_socket_path.to_string(),
             CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
             groups,
         );
 
@@ -542,9 +554,9 @@ mod tests {
 
     #[test]
     fn test_vhu_vsock_structs() {
-        let config = VsockConfig::new(0, String::new(), String::new(), 0, vec![String::new()]);
+        let config = VsockConfig::new(0, String::new(), String::new(), 0, 0, vec![String::new()]);
 
-        assert_eq!(format!("{config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, groups: [\"\"] }");
+        assert_eq!(format!("{config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, queue_size: 0, groups: [\"\"] }");
 
         let conn_map = ConnMapKey::new(0, 0);
         assert_eq!(

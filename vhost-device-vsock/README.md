@@ -44,18 +44,19 @@ vhost-device-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
   --uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device> \
   [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>] \
+  [--queue-size=<size of the vring queue>] \
   [--groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
 ```
 or
 ```
-vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
+vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,queue-size=<size of the vring queue>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
 ```
 
 Specify the `--vm` argument multiple times to specify multiple devices like this:
 ```
 vhost-device-vsock \
 --vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,groups=group1+groupA \
---vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768
+--vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768,queue-size=256
 ```
 
 Or use a configuration file:
@@ -70,11 +71,13 @@ vms:
       socket: /tmp/vhost3.socket
       uds_path: /tmp/vm3.sock
       tx_buffer_size: 65536
+      queue_size: 1024
       groups: group1+groupA
     - guest_cid: 4
       socket: /tmp/vhost4.socket
       uds_path: /tmp/vm4.sock
       tx_buffer_size: 32768
+      queue_size: 256
       groups: group2+groupB
 ```
 
@@ -94,9 +97,9 @@ qemu-system-x86_64 \
 ```sh
 shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
 ```
-or if you want to configure the TX buffer size
+or if you want to configure the TX buffer size and vring queue size
 ```sh
-shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536
+shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536,queue-size=1024
 ```
 
 ```sh

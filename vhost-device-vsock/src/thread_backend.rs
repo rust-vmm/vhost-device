@@ -356,6 +356,7 @@ mod tests {
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+    const QUEUE_SIZE: usize = 1024;
     const GROUP_NAME: &str = "default";
 
     #[test]
@@ -471,6 +472,7 @@ mod tests {
             sibling_vhost_socket_path,
             sibling_vsock_socket_path,
             CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
             vec!["group1", "group2", "group3"]
                 .into_iter()
                 .map(String::from)
@@ -482,6 +484,7 @@ mod tests {
             sibling2_vhost_socket_path,
             sibling2_vsock_socket_path,
             CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
             vec!["group1"].into_iter().map(String::from).collect(),
         );
 

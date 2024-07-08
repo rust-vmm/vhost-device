@@ -27,6 +27,7 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 const DEFAULT_GUEST_CID: u64 = 3;
 const DEFAULT_TX_BUFFER_SIZE: u32 = 64 * 1024;
+const DEFAULT_QUEUE_SIZE: usize = 256;
 const DEFAULT_GROUP_NAME: &str = "default";
 
 #[derive(Debug, ThisError)]
@@ -84,6 +85,10 @@ struct VsockParam {
     #[clap(long, default_value_t = DEFAULT_TX_BUFFER_SIZE, conflicts_with = "config", conflicts_with = "vm")]
     tx_buffer_size: u32,
 
+    /// The size of the vring queue
+    #[clap(long, default_value_t = DEFAULT_QUEUE_SIZE, conflicts_with = "config", conflicts_with = "vm")]
+    queue_size: usize,
+
     /// The list of group names to which the device belongs.
     /// A group is a set of devices that allow sibling communication between their guests.
     #[arg(
@@ -102,6 +107,7 @@ struct ConfigFileVsockParam {
     socket: String,
     uds_path: String,
     tx_buffer_size: Option<u32>,
+    queue_size: Option<usize>,
     groups: Option<String>,
 }
 
@@ -112,9 +118,9 @@ struct VsockArgs {
     param: Option<VsockParam>,
 
     /// Device parameters corresponding to a VM in the form of comma separated key=value pairs.
-    /// The allowed keys are: guest_cid, socket, uds_path, tx_buffer_size and group.
+    /// The allowed keys are: guest_cid, socket, uds_path, tx_buffer_size, queue_size and group.
     /// Example:
-    ///   --vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,tx-buffer-size=65536,groups=group1+group2
+    ///   --vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,tx-buffer-size=65536,queue-size=1024,groups=group1+group2
     /// Multiple instances of this argument can be provided to configure devices for multiple guests.
     #[arg(long, conflicts_with = "config", verbatim_doc_comment, value_parser = parse_vm_params)]
     vm: Option<Vec<VsockConfig>>,
@@ -129,6 +135,7 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
     let mut socket = None;
     let mut uds_path = None;
     let mut tx_buffer_size = None;
+    let mut queue_size = None;
     let mut groups = None;
 
     for arg in s.trim().split(',') {
@@ -145,6 +152,9 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
             "tx_buffer_size" | "tx-buffer-size" => {
                 tx_buffer_size = Some(val.parse().map_err(VmArgsParseError::ParseInteger)?)
             }
+            "queue_size" | "queue-size" => {
+                queue_size = Some(val.parse().map_err(VmArgsParseError::ParseInteger)?)
+            }
             "groups" => groups = Some(val.split('+').map(String::from).collect()),
             _ => return Err(VmArgsParseError::InvalidKey(key.to_string())),
         }
@@ -155,6 +165,7 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
         socket.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("socket".to_string()))?,
         uds_path.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("uds-path".to_string()))?,
         tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
+        queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
         groups.unwrap_or(vec![DEFAULT_GROUP_NAME.to_string()]),
     ))
 }
@@ -176,6 +187,7 @@ impl VsockArgs {
                                 p.socket.trim().to_string(),
                                 p.uds_path.trim().to_string(),
                                 p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
+                                p.queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
                                 p.groups.map_or(vec![DEFAULT_GROUP_NAME.to_string()], |g| {
                                     g.trim().split('+').map(String::from).collect()
                                 }),
@@ -209,6 +221,7 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
                         p.socket.trim().to_string(),
                         p.uds_path.trim().to_string(),
                         p.tx_buffer_size,
+                        p.queue_size,
                         p.groups.trim().split('+').map(String::from).collect(),
                     )])
                 }),
@@ -323,6 +336,7 @@ mod tests {
             socket: &str,
             uds_path: &str,
             tx_buffer_size: u32,
+            queue_size: usize,
             groups: &str,
         ) -> Self {
             VsockArgs {
@@ -331,6 +345,7 @@ mod tests {
                     socket: socket.to_string(),
                     uds_path: uds_path.to_string(),
                     tx_buffer_size,
+                    queue_size,
                     groups: groups.to_string(),
                 }),
                 vm: None,
@@ -352,7 +367,7 @@ mod tests {
 
         let socket_path = test_dir.path().join("vhost4.socket").display().to_string();
         let uds_path = test_dir.path().join("vm4.vsock").display().to_string();
-        let args = VsockArgs::from_args(3, &socket_path, &uds_path, 64 * 1024, "group1");
+        let args = VsockArgs::from_args(3, &socket_path, &uds_path, 64 * 1024, 1024, "group1");
 
         let configs = Vec::<VsockConfig>::try_from(args);
         assert!(configs.is_ok());
@@ -365,6 +380,7 @@ mod tests {
         assert_eq!(config.get_socket_path(), socket_path);
         assert_eq!(config.get_uds_path(), uds_path);
         assert_eq!(config.get_tx_buffer_size(), 64 * 1024);
+        assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec!["group1".to_string()]);
 
         test_dir.close().unwrap();
@@ -386,8 +402,8 @@ mod tests {
         ];
         let params = format!(
             "--vm socket={vhost3_socket},uds_path={vm3_vsock} \
-             --vm socket={vhost4_socket},uds-path={vm4_vsock},guest-cid=4,tx_buffer_size=65536,groups=group1 \
-             --vm groups=group2+group3,guest-cid=5,socket={vhost5_socket},uds_path={vm5_vsock},tx-buffer-size=32768",
+             --vm socket={vhost4_socket},uds-path={vm4_vsock},guest-cid=4,tx_buffer_size=65536,queue_size=1024,groups=group1 \
+             --vm groups=group2+group3,guest-cid=5,socket={vhost5_socket},uds_path={vm5_vsock},tx-buffer-size=32768,queue_size=256",
             vhost3_socket = socket_paths[0].display(),
             vhost4_socket = socket_paths[1].display(),
             vhost5_socket = socket_paths[2].display(),
@@ -415,6 +431,7 @@ mod tests {
         );
         assert_eq!(config.get_uds_path(), uds_paths[0].display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 65536);
+        assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
 
         let config = configs.get(1).unwrap();
@@ -425,6 +442,7 @@ mod tests {
         );
         assert_eq!(config.get_uds_path(), uds_paths[1].display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 65536);
+        assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec!["group1".to_string()]);
 
         let config = configs.get(2).unwrap();
@@ -435,6 +453,7 @@ mod tests {
         );
         assert_eq!(config.get_uds_path(), uds_paths[2].display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 32768);
+        assert_eq!(config.get_queue_size(), 256);
         assert_eq!(
             config.get_groups(),
             vec!["group2".to_string(), "group3".to_string()]
@@ -459,6 +478,7 @@ mod tests {
       socket: {}
       uds_path: {}
       tx_buffer_size: 32768
+      queue_size: 256
       groups: group1+group2",
                 socket_path.display(),
                 uds_path.display(),
@@ -476,6 +496,7 @@ mod tests {
         assert_eq!(config.get_socket_path(), socket_path.display().to_string());
         assert_eq!(config.get_uds_path(), uds_path.display().to_string());
         assert_eq!(config.get_tx_buffer_size(), 32768);
+        assert_eq!(config.get_queue_size(), 256);
         assert_eq!(
             config.get_groups(),
             vec!["group1".to_string(), "group2".to_string()]
@@ -504,6 +525,7 @@ mod tests {
         assert_eq!(config.get_socket_path(), socket_path.display().to_string());
         assert_eq!(config.get_uds_path(), uds_path.display().to_string());
         assert_eq!(config.get_tx_buffer_size(), DEFAULT_TX_BUFFER_SIZE);
+        assert_eq!(config.get_queue_size(), DEFAULT_QUEUE_SIZE);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
 
         std::fs::remove_file(&config_path).unwrap();
@@ -514,6 +536,7 @@ mod tests {
     fn test_vsock_server() {
         const CID: u64 = 3;
         const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+        const QUEUE_SIZE: usize = 1024;
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
@@ -533,6 +556,7 @@ mod tests {
             vhost_socket_path,
             vsock_socket_path,
             CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
             vec![DEFAULT_GROUP_NAME.to_string()],
         );
 
@@ -567,6 +591,7 @@ mod tests {
     #[test]
     fn test_start_backend_servers_failure() {
         const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+        const QUEUE_SIZE: usize = 1024;
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
@@ -584,6 +609,7 @@ mod tests {
                     .display()
                     .to_string(),
                 CONN_TX_BUF_SIZE,
+                QUEUE_SIZE,
                 vec![DEFAULT_GROUP_NAME.to_string()],
             ),
             VsockConfig::new(
@@ -599,6 +625,7 @@ mod tests {
                     .display()
                     .to_string(),
                 CONN_TX_BUF_SIZE,
+                QUEUE_SIZE,
                 vec![DEFAULT_GROUP_NAME.to_string()],
             ),
         ];
@@ -635,20 +662,21 @@ mod tests {
         assert_matches!(error, CliError::NoArgsProvided);
         assert_eq!(format!("{error:?}"), "NoArgsProvided");
 
-        let args = VsockArgs::from_args(0, "", "", 0, "");
-        assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, groups: \"\" }), vm: None, config: None }");
+        let args = VsockArgs::from_args(0, "", "", 0, 0, "");
+        assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, queue_size: 0, groups: \"\" }), vm: None, config: None }");
 
         let param = args.param.unwrap().clone();
-        assert_eq!(format!("{param:?}"), "VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, groups: \"\" }");
+        assert_eq!(format!("{param:?}"), "VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, queue_size: 0, groups: \"\" }");
 
         let config = ConfigFileVsockParam {
             guest_cid: None,
             socket: String::new(),
             uds_path: String::new(),
             tx_buffer_size: None,
+            queue_size: None,
             groups: None,
         }
         .clone();
-        assert_eq!(format!("{config:?}"), "ConfigFileVsockParam { guest_cid: None, socket: \"\", uds_path: \"\", tx_buffer_size: None, groups: None }");
+        assert_eq!(format!("{config:?}"), "ConfigFileVsockParam { guest_cid: None, socket: \"\", uds_path: \"\", tx_buffer_size: None, queue_size: None, groups: None }");
     }
 }

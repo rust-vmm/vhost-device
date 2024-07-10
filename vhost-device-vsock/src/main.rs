@@ -27,7 +27,7 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 const DEFAULT_GUEST_CID: u64 = 3;
 const DEFAULT_TX_BUFFER_SIZE: u32 = 64 * 1024;
-const DEFAULT_QUEUE_SIZE: usize = 256;
+const DEFAULT_QUEUE_SIZE: usize = 1024;
 const DEFAULT_GROUP_NAME: &str = "default";
 
 #[derive(Debug, ThisError)]

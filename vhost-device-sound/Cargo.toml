@@ -1,6 +1,6 @@
 [package]
 name = "vhost-device-sound"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Manos Pitsidianakis <manos.pitsidianakis@linaro.org>", "Dorinda Bassey <dbassey@redhat.com>", "Matias Ezequiel Vara Larsen <mvaralar@redhat.com>"]
 description = "A virtio-sound device using the vhost-user protocol."
 repository = "https://github.com/rust-vmm/vhost-device"

@@ -19,6 +19,10 @@ use std::{
 
 use crate::vhu_vsock::{CidMap, VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
+use figment::{
+    providers::{Format, Yaml},
+    Figment,
+};
 use log::error;
 use serde::Deserialize;
 use thiserror::Error as ThisError;
@@ -173,11 +177,12 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
 impl VsockArgs {
     pub fn parse_config(&self) -> Option<Result<Vec<VsockConfig>, CliError>> {
         if let Some(c) = &self.config {
-            let b = config::Config::builder()
-                .add_source(config::File::new(c.as_str(), config::FileFormat::Yaml))
-                .build();
-            if let Ok(s) = b {
-                let mut vms_param = s.get::<Vec<ConfigFileVsockParam>>("vms").unwrap();
+            let figment = Figment::new().merge(Yaml::file(c.as_str()));
+
+            if let Ok(mut config_map) =
+                figment.extract::<HashMap<String, Vec<ConfigFileVsockParam>>>()
+            {
+                let vms_param = config_map.get_mut("vms").unwrap();
                 if !vms_param.is_empty() {
                     let parsed: Vec<VsockConfig> = vms_param
                         .drain(..)

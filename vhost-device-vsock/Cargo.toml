@@ -1,6 +1,6 @@
 [package]
 name = "vhost-device-vsock"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Harshavardhan Unnibhavi <harshanavkis@gmail.com>", "Stefano Garzarella <sgarzare@redhat.com>"]
 description = "A virtio-vsock device using the vhost-user protocol."
 repository = "https://github.com/rust-vmm/vhost-device"

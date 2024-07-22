@@ -177,9 +177,9 @@ impl VsockArgs {
                 .add_source(config::File::new(c.as_str(), config::FileFormat::Yaml))
                 .build();
             if let Ok(s) = b {
-                let mut v = s.get::<Vec<ConfigFileVsockParam>>("vms").unwrap();
-                if !v.is_empty() {
-                    let parsed: Vec<VsockConfig> = v
+                let mut vms_param = s.get::<Vec<ConfigFileVsockParam>>("vms").unwrap();
+                if !vms_param.is_empty() {
+                    let parsed: Vec<VsockConfig> = vms_param
                         .drain(..)
                         .map(|p| {
                             VsockConfig::new(

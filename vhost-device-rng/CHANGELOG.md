@@ -1,5 +1,5 @@
 # Changelog
-## [Unreleased]
+## Unreleased
 
 ### Added
 
@@ -11,7 +11,7 @@
 
 ### Deprecated
 
-## [0.1.0]
+## v0.1.0
 
 First release
 

@@ -1,5 +1,5 @@
 # Changelog
-## [Unreleased]
+## Unreleased
 
 ### Added
 
@@ -9,7 +9,7 @@
 
 ### Deprecated
 
-## [0.2.0]
+## v0.2.0
 
 ### Added
 - [[#406]](https://github.com/rust-vmm/vhost-device/pull/406) Add VM groups in sibling communication
@@ -33,7 +33,7 @@
 - [[#663]](https://github.com/rust-vmm/vhost-device/pull/663) check if we get '\n' early while reading from socket
 - [[#691]](https://github.com/rust-vmm/vhost-device/pull/691) Replace the config Crate with figment
 
-## [0.1.0]
+## v0.1.0
 
 First release
 

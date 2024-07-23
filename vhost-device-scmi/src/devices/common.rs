@@ -295,20 +295,6 @@ pub trait SensorT: Send {
         SENSOR_PROTOCOL_ID
     }
 
-    /// Returns an error message about invalid property `name`.
-    ///
-    /// Usually no need to redefine this.
-    fn invalid_property(&self, name: &str) -> Result<(), DeviceError> {
-        Result::Err(DeviceError::InvalidProperty(name.to_owned()))
-    }
-
-    /// Processes a device property specified on the command line.
-    ///
-    /// The function is called on all the device properties from the command line.
-    fn process_property(&mut self, name: &str, _value: &str) -> Result<(), DeviceError> {
-        self.invalid_property(name)
-    }
-
     /// Returns the number of axes of the given sensor.
     ///
     /// If the sensor provides just a scalar value, 0 must be returned (the

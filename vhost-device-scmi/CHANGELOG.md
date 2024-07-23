@@ -7,6 +7,8 @@
 
 ### Fixed
 
+- [[#696]](https://github.com/rust-vmm/vhost-device/pull/696) scmi: Remove an unused piece of code
+
 ### Deprecated
 
 ## v0.2.0

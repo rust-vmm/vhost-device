@@ -2,6 +2,7 @@
 ## Unreleased
 
 ### Added
+- [#698](https://github.com/rust-vmm/vhost-device/pull/698) vsock: add mdoc page
 
 ### Changed
 

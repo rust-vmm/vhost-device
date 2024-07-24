@@ -1,0 +1,197 @@
+.Dd July 24, 2024
+.Dt VHOST-DEVICE-VSOCK 1
+.Os
+.Sh NAME
+.Nm vhost-device-vsock
+.Nd A virtio-vsock device using the vhost-user protocol
+.Sh SYNOPSIS
+.Nm
+.Fl \-socket Ar SOCKET
+.Fl \-uds-path Ar UDS_PATH
+.Sh DESCRIPTION
+The
+.Nm
+utility launches a daemon listening to
+.Ar SOCKET
+for incoming connections from
+.Em vhost-user
+front-ends.
+Upon successful connection and protocol negotiation,
+it starts a vhost-user backend instance.
+The functionality of a VIRTIO vsock device is provided
+using the specified unix socket,
+.Ar UDS_PATH Ns
+, to which a host-side application connects to.
+.Bl -tag -width Ds
+.It Fl -help | h
+Print help information.
+.It Fl -version | V
+Print version information.
+.It Fl \-guest-cid Pa GUEST_CID
+Context identifier of the guest which uniquely identifies the
+device for its lifetime
+.Bq default: 3
+.It Fl \-socket Pa SOCKET
+Unix socket to which a hypervisor connects to and sets up the
+control path with the device
+.It Fl \-uds-path Pa UDS_PATH
+Unix socket to which a host-side application connects to
+.It Fl \-tx-buffer-size Pa TX_BUFFER_SIZE
+The size of the buffer used for the TX virtqueue
+.Bq default: 65536
+.It Fl \-queue-size Pa QUEUE_SIZE
+The size of the vring queue
+.Bq default: 1024
+.It Fl \-groups Pa GROUPS
+The list of group names to which the device belongs.
+A group is a set of devices that allow sibling communication between their
+guests.
+.Bq default: Qq default
+.It Fl \-config Pa CONFIG
+Load from a given configuration file
+.sp
+.Sy NOTE :
+conflicts with
+.Li --vm
+.It Fl \-vm Pa VM
+Device parameters corresponding to a VM in the form of comma
+separated
+.Li key=value
+pairs.
+Multiple instances of this option
+can be provided to configure devices for multiple guests.
+The allowed keys are:
+.Bl -enum -compact -width 0 -offset 1n
+.It
+.Li guest_cid
+.It
+.Li socket
+.It
+.Li uds_path
+.It
+.Li tx_buffer_size
+.It
+.Li queue_size
+.It
+.Li group
+.El
+.Sy NOTE :
+conflicts with
+.Li --config
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+.Ss Run the vhost-device-vsock device
+.Bd -literal
+vhost-device-vsock \\
+ --vm \\
+guest_cid=<GUEST_CID>,\\
+socket=<SOCKET_PATH>,\\
+uds-path=<UDS_PATH>\\
+[,tx-buffer-size=<TX_SIZE>][,queue-size=<QUEUE_SIZE>][,groups=<GROUPS_LIST>]
+.Ed
+.sp
+Specify the
+.Fa `--vm`
+argument multiple times to specify multiple devices like this:
+.Bd -literal
+vhost-device-vsock \\
+--vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,groups=group1+groupA \\
+--vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768,queue-size=256
+.Ed
+Or use a configuration file:
+.Bd -literal
+vhost-device-vsock --config=<path to the local yaml configuration file>
+.Ed
+Configuration file example in yaml format:
+.Bd -literal
+vms:
+    - guest_cid: 3
+      socket: /tmp/vhost3.socket
+      uds_path: /tmp/vm3.sock
+      tx_buffer_size: 65536
+      queue_size: 1024
+      groups: group1+groupA
+    - guest_cid: 4
+      socket: /tmp/vhost4.socket
+      uds_path: /tmp/vm4.sock
+      tx_buffer_size: 32768
+      queue_size: 256
+      groups: group2+groupB
+.Ed
+.sp
+.Ss Run VMM (e.g. QEMU)
+.Bd -literal
+qemu-system-x86_64 \\
+  <normal QEMU options> \\
+  -object memory-backend-memfd,id=mem0,size=<Guest RAM size> \\ # size == -m size
+  -machine <machine options>,memory-backend=mem0 \\
+  -chardev socket,id=char0,reconnect=0,path=<vhost-user socket path> \\
+  -device vhost-user-vsock-pci,chardev=char0
+.Ed
+.sp
+.Sy NOTE :
+With QEMU you have to use a shareable memory-backend such as
+.Li memory-backend-memfd
+.sp
+.Ss Working example
+.Bd -literal
+shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
+.Ed
+.sp
+or if you want to configure the TX buffer size and vring queue size
+.Bd -literal
+shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536,queue-size=1024
+.Ed
+.Bd -literal
+shell2$ qemu-system-x86_64 \\
+          -drive file=vm.qcow2,format=qcow2,if=virtio -smp 2 \\
+          -object memory-backend-memfd,id=mem0,size=512M \\
+          -machine q35,accel=kvm,memory-backend=mem0 \\
+          -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \\
+          -device vhost-user-vsock-pci,chardev=char0
+.Ed
+.Sh STANDARDS
+.Bl -dash -compact
+.It
+.Rs
+.%B Virtual I/O Device (VIRTIO)
+.%O Version 1.2
+.%A OASIS
+.%U https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html
+.%D July 01, 2022
+.Re
+.It
+.Rs
+.%B Vhost-user Protocol
+.%O Unversioned
+.%A QEMU Project
+.%U https://qemu.readthedocs.io/en/v9.0.0/interop/vhost-user.html
+.%D Undated
+.Re
+.El
+.Sh AUTHORS
+Copyright 2023\(en2024
+.Bl -item -compact
+.It
+.An Harshavardhan Unnibhavi Aq Mt harshanavkis@gmail.com>
+.It
+.An Stefano Garzarella Aq Mt sgarzare@redhat.com>
+.El
+.Pp
+Released under Apache-2.0 OR BSD-3-Clause.
+.Po
+See files
+.Pa LICENSE-APACHE Ns
+,
+.Pa LICENSE-BSD-3-Clause
+for full copyright and warranty notices.
+.Pc
+.Ss Links
+.Bl -item -compact
+.It
+.Lk https://github.com/rust-vmm/vhost-device "Main\ repository"
+.It
+.Lk https://crates.io/crates/vhost-device-vsock "on\ crates.io"
+.El

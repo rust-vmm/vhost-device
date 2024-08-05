@@ -19,7 +19,7 @@ epoll = "4.3"
 libc = "0.2"
 log = "0.4"
 rand = "0.8.5"
-tempfile = "3.10"
+tempfile = "3.11"
 thiserror = "1.0"
 vhost = { version = "0.11", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.15"

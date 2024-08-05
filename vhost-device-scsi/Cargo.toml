@@ -30,5 +30,5 @@ vmm-sys-util = "0.12"
 
 [dev-dependencies]
 assert_matches = "1.5"
-tempfile = "3.10.1"
+tempfile = "3.11.0"
 

@@ -18,6 +18,8 @@ use std::{
     thread,
 };
 
+#[cfg(feature = "backend_vsock")]
+use log::error;
 use log::warn;
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
@@ -27,6 +29,8 @@ use vmm_sys_util::{
     epoll::EventSet,
     eventfd::{EventFd, EFD_NONBLOCK},
 };
+#[cfg(feature = "backend_vsock")]
+use vsock::{VsockListener, VMADDR_CID_ANY};
 
 use crate::{
     rxops::*,
@@ -55,6 +59,8 @@ struct EventData {
 
 enum ListenerType {
     Unix(UnixListener),
+    #[cfg(feature = "backend_vsock")]
+    Vsock(VsockListener),
 }
 
 pub(crate) struct VhostUserVsockThread {
@@ -105,6 +111,16 @@ impl VhostUserVsockThread {
                 let host_sock = host_listener.as_raw_fd();
                 host_listeners_map.insert(host_sock, ListenerType::Unix(host_listener));
             }
+            #[cfg(feature = "backend_vsock")]
+            BackendType::Vsock(vsock_info) => {
+                for p in &vsock_info.listen_ports {
+                    let host_listener = VsockListener::bind_with_cid_port(VMADDR_CID_ANY, *p)
+                        .and_then(|sock| sock.set_nonblocking(true).map(|_| sock))
+                        .map_err(Error::VsockBind)?;
+                    let host_sock = host_listener.as_raw_fd();
+                    host_listeners_map.insert(host_sock, ListenerType::Vsock(host_listener));
+                }
+            }
         }
 
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
@@ -150,6 +166,7 @@ impl VhostUserVsockThread {
             };
             Self::vring_handle_event(event_data);
         });
+
         let thread = VhostUserVsockThread {
             mem: None,
             event_idx: false,
@@ -312,6 +329,51 @@ impl VhostUserVsockThread {
                         });
                     }
                 }
+                #[cfg(feature = "backend_vsock")]
+                ListenerType::Vsock(vsock_listener) => {
+                    let conn = vsock_listener.accept().map_err(Error::VsockAccept);
+                    if self.mem.is_some() {
+                        match conn {
+                            Ok((stream, addr)) => {
+                                if let Err(err) = stream.set_nonblocking(true) {
+                                    warn!("Failed to set stream to non-blocking: {:?}", err);
+                                    return;
+                                }
+
+                                let peer_port = match vsock_listener.local_addr() {
+                                    Ok(listener_addr) => listener_addr.port(),
+                                    Err(err) => {
+                                        warn!("Failed to get peer address: {:?}", err);
+                                        return;
+                                    }
+                                };
+
+                                let local_port = addr.port();
+                                let stream_raw_fd = stream.as_raw_fd();
+                                self.add_new_connection_from_host(
+                                    stream_raw_fd,
+                                    StreamType::Vsock(stream),
+                                    local_port,
+                                    peer_port,
+                                );
+                                if let Err(err) = Self::epoll_register(
+                                    self.get_epoll_fd(),
+                                    stream_raw_fd,
+                                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                                ) {
+                                    warn!("Failed to register with epoll: {:?}", err);
+                                }
+                            }
+                            Err(err) => {
+                                warn!("Unable to accept new local connection: {:?}", err);
+                            }
+                        }
+                    } else {
+                        conn.map(drop).unwrap_or_else(|err| {
+                            warn!("Error closing an incoming connection: {:?}", err);
+                        });
+                    }
+                }
             }
         } else {
             // Check if the stream represented by fd has already established a
@@ -333,6 +395,10 @@ impl VhostUserVsockThread {
                 };
 
                 match stream {
+                    #[cfg(feature = "backend_vsock")]
+                    StreamType::Vsock(_) => {
+                        error!("Stream type should not be of type vsock");
+                    }
                     StreamType::Unix(ref mut unix_stream) => {
                         // Local peer is sending a "connect PORT\n" command
                         let peer_port = match Self::read_local_stream_port(unix_stream) {
@@ -726,6 +792,10 @@ impl Drop for VhostUserVsockThread {
             BackendType::UnixDomainSocket(uds_path) => {
                 let _ = std::fs::remove_file(uds_path);
             }
+            #[cfg(feature = "backend_vsock")]
+            BackendType::Vsock(_) => {
+                // Nothing to do
+            }
         }
         self.thread_backend
             .cid_map
@@ -737,12 +807,16 @@ impl Drop for VhostUserVsockThread {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "backend_vsock")]
+    use crate::vhu_vsock::VsockProxyInfo;
     use std::collections::HashMap;
     use std::io::Read;
     use std::io::Write;
     use tempfile::tempdir;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
+    #[cfg(feature = "backend_vsock")]
+    use vsock::VsockStream;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
@@ -752,28 +826,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_vsock_thread() {
+    fn test_vsock_thread(backend_info: BackendType) {
         let groups: Vec<String> = vec![String::from("default")];
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
-        let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let backend_info = BackendType::UnixDomainSocket(
-            test_dir
-                .path()
-                .join("test_vsock_thread.vsock")
-                .display()
-                .to_string(),
-        );
-
-        let t = VhostUserVsockThread::new(
-            backend_info,
-            3,
-            CONN_TX_BUF_SIZE,
-            groups,
-            cid_map,
-        );
+        let t = VhostUserVsockThread::new(backend_info, 3, CONN_TX_BUF_SIZE, groups, cid_map);
         assert!(t.is_ok());
 
         let mut t = t.unwrap();
@@ -838,8 +896,30 @@ mod tests {
         dummy_fd.write(1).unwrap();
 
         t.process_backend_evt(EventSet::empty());
+    }
 
+    #[test]
+    fn test_vsock_thread_unix() {
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+        let backend_info = BackendType::UnixDomainSocket(
+            test_dir
+                .path()
+                .join("test_vsock_thread.vsock")
+                .display()
+                .to_string(),
+        );
+        test_vsock_thread(backend_info);
         test_dir.close().unwrap();
+    }
+
+    #[cfg(feature = "backend_vsock")]
+    #[test]
+    fn test_vsock_thread_vsock() {
+        let backend_info = BackendType::Vsock(VsockProxyInfo {
+            forward_cid: 1,
+            listen_ports: vec![],
+        });
+        test_vsock_thread(backend_info);
     }
 
     #[test]
@@ -910,8 +990,9 @@ mod tests {
 
         test_dir.close().unwrap();
     }
+
     #[test]
-    fn test_vsock_thread_unix() {
+    fn test_vsock_thread_unix_backend() {
         let groups: Vec<String> = vec![String::from("default")];
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
@@ -955,5 +1036,48 @@ mod tests {
         t.process_backend_evt(EventSet::empty());
 
         test_dir.close().unwrap();
+    }
+
+    #[cfg(feature = "backend_vsock")]
+    #[test]
+    fn test_vsock_thread_vsock_backend() {
+        let groups: Vec<String> = vec![String::from("default")];
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let t = VhostUserVsockThread::new(
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![9003, 9004],
+            }),
+            3,
+            CONN_TX_BUF_SIZE,
+            groups,
+            cid_map,
+        );
+
+        let mut t = t.unwrap();
+
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+
+        t.mem = Some(mem.clone());
+
+        let mut vs1 = VsockStream::connect_with_cid_port(1, 9003).unwrap();
+        let mut vs2 = VsockStream::connect_with_cid_port(1, 9004).unwrap();
+        t.process_backend_evt(EventSet::empty());
+
+        vs1.write_all(b"some data").unwrap();
+        vs2.write_all(b"some data").unwrap();
+        t.process_backend_evt(EventSet::empty());
+
+        let mut buf = vec![0u8; 16];
+        vs1.set_nonblocking(true).unwrap();
+        vs2.set_nonblocking(true).unwrap();
+        // There isn't any peer responding, so we don't expect data
+        vs1.read(&mut buf).unwrap_err();
+        vs2.read(&mut buf).unwrap_err();
+
+        t.process_backend_evt(EventSet::empty());
     }
 }

@@ -301,7 +301,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
     ///
     /// Returns:
     /// - Ok(cnt) where cnt is the number of bytes written to the stream
-    /// - Err(Error::UnixWrite) if there was an error writing to the stream
+    /// - Err(Error::StreamWrite) if there was an error writing to the stream
     fn send_bytes<B: BitmapSlice>(&mut self, buf: &VolatileSlice<B>) -> Result<()> {
         if !self.tx_buf.is_empty() {
             // Data is already present in the buffer and the backend
@@ -318,12 +318,12 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                     0
                 } else {
                     dbg!("send_bytes error: {:?}", e);
-                    return Err(Error::UnixWrite);
+                    return Err(Error::StreamWrite);
                 }
             }
             Err(e) => {
                 dbg!("send_bytes error: {:?}", e);
-                return Err(Error::UnixWrite);
+                return Err(Error::StreamWrite);
             }
         };
 

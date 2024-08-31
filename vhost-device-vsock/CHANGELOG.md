@@ -3,6 +3,7 @@
 
 ### Added
 - [#698](https://github.com/rust-vmm/vhost-device/pull/698) vsock: add mdoc page
+- [#706](https://github.com/rust-vmm/vhost-device/pull/706) Support proxying using vsock
 
 ### Changed
 

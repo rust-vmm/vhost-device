@@ -17,6 +17,8 @@ use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{
     bitmap::BitmapSlice, ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile,
 };
+#[cfg(feature = "backend_vsock")]
+use vsock::VsockStream;
 
 use crate::{
     rxops::*,
@@ -55,6 +57,8 @@ impl RawVsockPacket {
 
 pub(crate) enum StreamType {
     Unix(UnixStream),
+    #[cfg(feature = "backend_vsock")]
+    Vsock(VsockStream),
 }
 
 impl StreamType {
@@ -64,6 +68,11 @@ impl StreamType {
                 let cloned_stream = stream.try_clone()?;
                 Ok(StreamType::Unix(cloned_stream))
             }
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => {
+                let cloned_stream = stream.try_clone()?;
+                Ok(StreamType::Vsock(cloned_stream))
+            }
         }
     }
 }
@@ -72,6 +81,8 @@ impl Read for StreamType {
     fn read(&mut self, buf: &mut [u8]) -> StdIOResult<usize> {
         match self {
             StreamType::Unix(stream) => stream.read(buf),
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => stream.read(buf),
         }
     }
 }
@@ -80,12 +91,16 @@ impl Write for StreamType {
     fn write(&mut self, buf: &[u8]) -> StdIOResult<usize> {
         match self {
             StreamType::Unix(stream) => stream.write(buf),
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => stream.write(buf),
         }
     }
 
     fn flush(&mut self) -> StdIOResult<()> {
         match self {
             StreamType::Unix(stream) => stream.flush(),
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => stream.flush(),
         }
     }
 }
@@ -94,6 +109,8 @@ impl AsRawFd for StreamType {
     fn as_raw_fd(&self) -> RawFd {
         match self {
             StreamType::Unix(stream) => stream.as_raw_fd(),
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => stream.as_raw_fd(),
         }
     }
 }
@@ -105,6 +122,30 @@ impl ReadVolatile for StreamType {
     ) -> StdResult<usize, VolatileMemoryError> {
         match self {
             StreamType::Unix(stream) => stream.read_volatile(buf),
+            // Copied from vm_memory crate's ReadVolatile implementation for UnixStream
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => {
+                let fd = stream.as_raw_fd();
+                let guard = buf.ptr_guard_mut();
+
+                let dst = guard.as_ptr().cast::<libc::c_void>();
+
+                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to by `dst` is
+                // valid for writes of length `buf.len() by the invariants upheld by the constructor
+                // of `VolatileSlice`.
+                let bytes_read = unsafe { libc::read(fd, dst, buf.len()) };
+
+                if bytes_read < 0 {
+                    // We don't know if a partial read might have happened, so mark everything as dirty
+                    buf.bitmap().mark_dirty(0, buf.len());
+
+                    Err(VolatileMemoryError::IOError(std::io::Error::last_os_error()))
+                } else {
+                    let bytes_read = bytes_read.try_into().unwrap();
+                    buf.bitmap().mark_dirty(0, bytes_read);
+                    Ok(bytes_read)
+                }
+            }
         }
     }
 }
@@ -116,6 +157,25 @@ impl WriteVolatile for StreamType {
     ) -> StdResult<usize, VolatileMemoryError> {
         match self {
             StreamType::Unix(stream) => stream.write_volatile(buf),
+            // Copied from vm_memory crate's WriteVolatile implementation for UnixStream
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => {
+                let fd = stream.as_raw_fd();
+                let guard = buf.ptr_guard();
+
+                let src = guard.as_ptr().cast::<libc::c_void>();
+
+                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to by `src` is
+                // valid for reads of length `buf.len() by the invariants upheld by the constructor
+                // of `VolatileSlice`.
+                let bytes_written = unsafe { libc::write(fd, src, buf.len()) };
+
+                if bytes_written < 0 {
+                    Err(VolatileMemoryError::IOError(std::io::Error::last_os_error()))
+                } else {
+                    Ok(bytes_written.try_into().unwrap())
+                }
+            }
         }
     }
 }
@@ -137,7 +197,7 @@ pub(crate) struct VsockThreadBackend {
     pub conn_map: HashMap<ConnMapKey, VsockConnection<StreamType>>,
     /// Queue of ConnMapKey objects indicating pending rx operations.
     pub backend_rxq: VecDeque<ConnMapKey>,
-    /// Map of host-side unix streams indexed by raw file descriptors.
+    /// Map of host-side unix or vsock streams indexed by raw file descriptors.
     pub stream_map: HashMap<i32, StreamType>,
     /// Host side socket info for listening to new connections from the host.
     backend_info: BackendType,
@@ -262,36 +322,39 @@ impl VsockThreadBackend {
             return Ok(());
         }
 
-        let dst_cid = pkt.dst_cid();
-        if dst_cid != VSOCK_HOST_CID {
-            let cid_map = self.cid_map.read().unwrap();
-            if cid_map.contains_key(&dst_cid) {
-                let (sibling_raw_pkts_queue, sibling_groups_set, sibling_event_fd) =
-                    cid_map.get(&dst_cid).unwrap();
+        #[allow(irrefutable_let_patterns)]
+        if let BackendType::UnixDomainSocket(_) = &self.backend_info {
+            let dst_cid = pkt.dst_cid();
+            if dst_cid != VSOCK_HOST_CID {
+                let cid_map = self.cid_map.read().unwrap();
+                if cid_map.contains_key(&dst_cid) {
+                    let (sibling_raw_pkts_queue, sibling_groups_set, sibling_event_fd) =
+                        cid_map.get(&dst_cid).unwrap();
 
-                if self
-                    .groups_set
-                    .read()
-                    .unwrap()
-                    .is_disjoint(sibling_groups_set.read().unwrap().deref())
-                {
-                    info!(
-                        "vsock: dropping packet for cid: {:?} due to group mismatch",
-                        dst_cid
-                    );
-                    return Ok(());
+                    if self
+                        .groups_set
+                        .read()
+                        .unwrap()
+                        .is_disjoint(sibling_groups_set.read().unwrap().deref())
+                    {
+                        info!(
+                            "vsock: dropping packet for cid: {:?} due to group mismatch",
+                            dst_cid
+                        );
+                        return Ok(());
+                    }
+
+                    sibling_raw_pkts_queue
+                        .write()
+                        .unwrap()
+                        .push_back(RawVsockPacket::from_vsock_packet(pkt)?);
+                    let _ = sibling_event_fd.write(1);
+                } else {
+                    warn!("vsock: dropping packet for unknown cid: {:?}", dst_cid);
                 }
 
-                sibling_raw_pkts_queue
-                    .write()
-                    .unwrap()
-                    .push_back(RawVsockPacket::from_vsock_packet(pkt)?);
-                let _ = sibling_event_fd.write(1);
-            } else {
-                warn!("vsock: dropping packet for unknown cid: {:?}", dst_cid);
+                return Ok(());
             }
-
-            return Ok(());
         }
 
         // TODO: Rst if packet has unsupported type
@@ -371,9 +434,11 @@ impl VsockThreadBackend {
 
     /// Handle a new guest initiated connection, i.e from the peer, the guest driver.
     ///
-    /// Attempts to connect to a host side unix socket listening on a path
-    /// corresponding to the destination port as follows:
+    /// In case of proxying using unix domain socket, attempts to connect to a host side unix socket
+    /// listening on a path corresponding to the destination port as follows:
     /// - "{self.host_sock_path}_{local_port}""
+    ///
+    /// In case of proxying using vosck, attempts to connect to the {forward_cid, local_port}
     fn handle_new_guest_conn<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) {
         match &self.backend_info {
             BackendType::UnixDomainSocket(uds_path) => {
@@ -383,6 +448,14 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::UnixConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Unix(stream), pkt))
+                    .unwrap_or_else(|_| self.enq_rst());
+            }
+            #[cfg(feature = "backend_vsock")]
+            BackendType::Vsock(vsock_info) => {
+                VsockStream::connect_with_cid_port(vsock_info.forward_cid, pkt.dst_port())
+                    .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
+                    .map_err(Error::VsockConnect)
+                    .and_then(|stream| self.add_new_guest_conn(StreamType::Vsock(stream), pkt))
                     .unwrap_or_else(|_| self.enq_rst());
             }
         }
@@ -397,6 +470,8 @@ impl VsockThreadBackend {
         let conn = VsockConnection::new_peer_init(
             stream.try_clone().map_err(match stream {
                 StreamType::Unix(_) => Error::UnixConnect,
+                #[cfg(feature = "backend_vsock")]
+                StreamType::Vsock(_) => Error::VsockConnect,
             })?,
             pkt.dst_cid(),
             pkt.dst_port(),
@@ -436,28 +511,23 @@ impl VsockThreadBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "backend_vsock")]
+    use crate::vhu_vsock::VsockProxyInfo;
     use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
     use std::os::unix::net::UnixListener;
     use tempfile::tempdir;
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
+    #[cfg(feature = "backend_vsock")]
+    use vsock::{VsockListener, VMADDR_CID_ANY};
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
     const QUEUE_SIZE: usize = 1024;
     const GROUP_NAME: &str = "default";
+    const VSOCK_PEER_PORT: u32 = 1234;
 
-    #[test]
-    fn test_vsock_thread_backend() {
+    fn test_vsock_thread_backend(backend_info: BackendType) {
         const CID: u64 = 3;
-        const VSOCK_PEER_PORT: u32 = 1234;
-
-        let test_dir = tempdir().expect("Could not create a temp test directory.");
-
-        let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
-        let vsock_peer_path = test_dir.path().join("test_vsock_thread_backend.vsock_1234");
-
-        let _listener = UnixListener::bind(&vsock_peer_path).unwrap();
-        let backend_info = BackendType::UnixDomainSocket(vsock_socket_path.display().to_string());
 
         let epoll_fd = epoll::create(false).unwrap();
 
@@ -510,12 +580,37 @@ mod tests {
 
         // TODO: it is a nop for now
         vtp.enq_rst();
+    }
+
+    #[test]
+    fn test_vsock_thread_backend_unix() {
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
+        let vsock_peer_path = test_dir.path().join("test_vsock_thread_backend.vsock_1234");
+
+        let _listener = UnixListener::bind(&vsock_peer_path).unwrap();
+        let backend_info = BackendType::UnixDomainSocket(vsock_socket_path.display().to_string());
+
+        test_vsock_thread_backend(backend_info);
 
         // cleanup
         let _ = std::fs::remove_file(&vsock_peer_path);
         let _ = std::fs::remove_file(&vsock_socket_path);
 
         test_dir.close().unwrap();
+    }
+
+    #[cfg(feature = "backend_vsock")]
+    #[test]
+    fn test_vsock_thread_backend_vsock() {
+        let _listener = VsockListener::bind_with_cid_port(VMADDR_CID_ANY, VSOCK_PEER_PORT).unwrap();
+        let backend_info = BackendType::Vsock(VsockProxyInfo {
+            forward_cid: 1,
+            listen_ports: vec![],
+        });
+
+        test_vsock_thread_backend(backend_info);
     }
 
     #[test]

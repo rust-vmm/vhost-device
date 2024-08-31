@@ -2,23 +2,27 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    io::{Read, Result as StdIOResult, Write},
     ops::Deref,
     os::unix::{
         net::UnixStream,
         prelude::{AsRawFd, RawFd},
     },
+    result::Result as StdResult,
     sync::{Arc, RwLock},
 };
 
 use log::{info, warn};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
-use vm_memory::bitmap::BitmapSlice;
+use vm_memory::{
+    bitmap::BitmapSlice, ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile,
+};
 
 use crate::{
     rxops::*,
     vhu_vsock::{
-        CidMap, ConnMapKey, Error, Result, VSOCK_HOST_CID, VSOCK_OP_REQUEST, VSOCK_OP_RST,
-        VSOCK_TYPE_STREAM,
+        BackendType, CidMap, ConnMapKey, Error, Result, VSOCK_HOST_CID, VSOCK_OP_REQUEST,
+        VSOCK_OP_RST, VSOCK_TYPE_STREAM,
     },
     vhu_vsock_thread::VhostUserVsockThread,
     vsock_conn::*,
@@ -49,17 +53,94 @@ impl RawVsockPacket {
     }
 }
 
+pub(crate) enum StreamType {
+    Unix(UnixStream),
+}
+
+impl StreamType {
+    fn try_clone(&self) -> StdIOResult<StreamType> {
+        match self {
+            StreamType::Unix(stream) => {
+                let cloned_stream = stream.try_clone()?;
+                Ok(StreamType::Unix(cloned_stream))
+            }
+        }
+    }
+}
+
+impl Read for StreamType {
+    fn read(&mut self, buf: &mut [u8]) -> StdIOResult<usize> {
+        match self {
+            StreamType::Unix(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for StreamType {
+    fn write(&mut self, buf: &[u8]) -> StdIOResult<usize> {
+        match self {
+            StreamType::Unix(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> StdIOResult<()> {
+        match self {
+            StreamType::Unix(stream) => stream.flush(),
+        }
+    }
+}
+
+impl AsRawFd for StreamType {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            StreamType::Unix(stream) => stream.as_raw_fd(),
+        }
+    }
+}
+
+impl ReadVolatile for StreamType {
+    fn read_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &mut VolatileSlice<'_, B>,
+    ) -> StdResult<usize, VolatileMemoryError> {
+        match self {
+            StreamType::Unix(stream) => stream.read_volatile(buf),
+        }
+    }
+}
+
+impl WriteVolatile for StreamType {
+    fn write_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &VolatileSlice<'_, B>,
+    ) -> StdResult<usize, VolatileMemoryError> {
+        match self {
+            StreamType::Unix(stream) => stream.write_volatile(buf),
+        }
+    }
+}
+
+pub(crate) trait IsHybridVsock {
+    fn is_hybrid_vsock(&self) -> bool;
+}
+
+impl IsHybridVsock for StreamType {
+    fn is_hybrid_vsock(&self) -> bool {
+        matches!(self, StreamType::Unix(_))
+    }
+}
+
 pub(crate) struct VsockThreadBackend {
     /// Map of ConnMapKey objects indexed by raw file descriptors.
     pub listener_map: HashMap<RawFd, ConnMapKey>,
     /// Map of vsock connection objects indexed by ConnMapKey objects.
-    pub conn_map: HashMap<ConnMapKey, VsockConnection<UnixStream>>,
+    pub conn_map: HashMap<ConnMapKey, VsockConnection<StreamType>>,
     /// Queue of ConnMapKey objects indicating pending rx operations.
     pub backend_rxq: VecDeque<ConnMapKey>,
     /// Map of host-side unix streams indexed by raw file descriptors.
-    pub stream_map: HashMap<i32, UnixStream>,
-    /// Host side socket for listening to new connections from the host.
-    host_socket_path: String,
+    pub stream_map: HashMap<i32, StreamType>,
+    /// Host side socket info for listening to new connections from the host.
+    backend_info: BackendType,
     /// epoll for registering new host-side connections.
     epoll_fd: i32,
     /// CID of the guest.
@@ -78,7 +159,7 @@ pub(crate) struct VsockThreadBackend {
 impl VsockThreadBackend {
     /// New instance of VsockThreadBackend.
     pub fn new(
-        host_socket_path: String,
+        backend_info: BackendType,
         epoll_fd: i32,
         guest_cid: u64,
         tx_buffer_size: u32,
@@ -92,7 +173,7 @@ impl VsockThreadBackend {
             // Need this map to prevent connected stream from closing
             // TODO: think of a better solution
             stream_map: HashMap::new(),
-            host_socket_path,
+            backend_info,
             epoll_fd,
             guest_cid,
             local_port_set: HashSet::new(),
@@ -294,23 +375,29 @@ impl VsockThreadBackend {
     /// corresponding to the destination port as follows:
     /// - "{self.host_sock_path}_{local_port}""
     fn handle_new_guest_conn<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) {
-        let port_path = format!("{}_{}", self.host_socket_path, pkt.dst_port());
+        match &self.backend_info {
+            BackendType::UnixDomainSocket(uds_path) => {
+                let port_path = format!("{}_{}", uds_path, pkt.dst_port());
 
-        UnixStream::connect(port_path)
-            .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
-            .map_err(Error::UnixConnect)
-            .and_then(|stream| self.add_new_guest_conn(stream, pkt))
-            .unwrap_or_else(|_| self.enq_rst());
+                UnixStream::connect(port_path)
+                    .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
+                    .map_err(Error::UnixConnect)
+                    .and_then(|stream| self.add_new_guest_conn(StreamType::Unix(stream), pkt))
+                    .unwrap_or_else(|_| self.enq_rst());
+            }
+        }
     }
 
     /// Wrapper to add new connection to relevant HashMaps.
     fn add_new_guest_conn<B: BitmapSlice>(
         &mut self,
-        stream: UnixStream,
+        stream: StreamType,
         pkt: &VsockPacket<B>,
     ) -> Result<()> {
         let conn = VsockConnection::new_peer_init(
-            stream.try_clone().map_err(Error::UnixConnect)?,
+            stream.try_clone().map_err(match stream {
+                StreamType::Unix(_) => Error::UnixConnect,
+            })?,
             pkt.dst_cid(),
             pkt.dst_port(),
             pkt.src_cid(),
@@ -349,7 +436,7 @@ impl VsockThreadBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vhu_vsock::{VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
+    use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
     use std::os::unix::net::UnixListener;
     use tempfile::tempdir;
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
@@ -370,6 +457,7 @@ mod tests {
         let vsock_peer_path = test_dir.path().join("test_vsock_thread_backend.vsock_1234");
 
         let _listener = UnixListener::bind(&vsock_peer_path).unwrap();
+        let backend_info = BackendType::UnixDomainSocket(vsock_socket_path.display().to_string());
 
         let epoll_fd = epoll::create(false).unwrap();
 
@@ -378,7 +466,7 @@ mod tests {
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let mut vtp = VsockThreadBackend::new(
-            vsock_socket_path.display().to_string(),
+            backend_info,
             epoll_fd,
             CID,
             CONN_TX_BUF_SIZE,
@@ -470,7 +558,7 @@ mod tests {
         let sibling_config = VsockConfig::new(
             SIBLING_CID,
             sibling_vhost_socket_path,
-            sibling_vsock_socket_path,
+            BackendType::UnixDomainSocket(sibling_vsock_socket_path),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             vec!["group1", "group2", "group3"]
@@ -482,7 +570,7 @@ mod tests {
         let sibling2_config = VsockConfig::new(
             SIBLING2_CID,
             sibling2_vhost_socket_path,
-            sibling2_vsock_socket_path,
+            BackendType::UnixDomainSocket(sibling2_vsock_socket_path),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             vec!["group1"].into_iter().map(String::from).collect(),
@@ -501,7 +589,7 @@ mod tests {
             .collect();
 
         let mut vtp = VsockThreadBackend::new(
-            vsock_socket_path,
+            BackendType::UnixDomainSocket(vsock_socket_path),
             epoll_fd,
             CID,
             CONN_TX_BUF_SIZE,

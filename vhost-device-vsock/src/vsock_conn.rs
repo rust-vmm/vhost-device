@@ -13,6 +13,7 @@ use vm_memory::{bitmap::BitmapSlice, ReadVolatile, VolatileSlice, WriteVolatile}
 use crate::{
     rxops::*,
     rxqueue::*,
+    thread_backend::IsHybridVsock,
     txbuf::*,
     vhu_vsock::{
         Error, Result, VSOCK_FLAGS_SHUTDOWN_RCV, VSOCK_FLAGS_SHUTDOWN_SEND,
@@ -55,7 +56,7 @@ pub(crate) struct VsockConnection<S> {
     tx_buffer_size: u32,
 }
 
-impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile> VsockConnection<S> {
+impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockConnection<S> {
     /// Create a new vsock connection object for locally i.e host-side
     /// inititated connections.
     pub fn new_local_init(
@@ -229,10 +230,12 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile> VsockConnection<S> {
 
         match pkt.op() {
             VSOCK_OP_RESPONSE => {
-                // Confirmation for a host initiated connection
-                // TODO: Handle stream write error in a better manner
-                let response = format!("OK {}\n", self.peer_port);
-                self.stream.write_all(response.as_bytes()).unwrap();
+                if self.stream.is_hybrid_vsock() {
+                    // Confirmation for a host initiated connection
+                    // TODO: Handle stream write error in a better manner
+                    let response = format!("OK {}\n", self.peer_port);
+                    self.stream.write_all(response.as_bytes()).unwrap();
+                }
                 self.connect = true;
             }
             VSOCK_OP_RW => {
@@ -579,6 +582,12 @@ mod tests {
     impl AsRawFd for VsockDummySocket {
         fn as_raw_fd(&self) -> RawFd {
             -1
+        }
+    }
+
+    impl IsHybridVsock for VsockDummySocket {
+        fn is_hybrid_vsock(&self) -> bool {
+            true
         }
     }
 

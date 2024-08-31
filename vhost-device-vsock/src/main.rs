@@ -17,7 +17,7 @@ use std::{
     thread,
 };
 
-use crate::vhu_vsock::{CidMap, VhostUserVsockBackend, VsockConfig};
+use crate::vhu_vsock::{BackendType, CidMap, VhostUserVsockBackend, VsockConfig};
 use clap::{Args, Parser};
 use figment::{
     providers::{Format, Yaml},
@@ -167,7 +167,7 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
     Ok(VsockConfig::new(
         guest_cid.unwrap_or(DEFAULT_GUEST_CID),
         socket.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("socket".to_string()))?,
-        uds_path.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("uds-path".to_string()))?,
+        BackendType::UnixDomainSocket(uds_path.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("uds-path".to_string()))?),
         tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
         queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
         groups.unwrap_or(vec![DEFAULT_GROUP_NAME.to_string()]),
@@ -190,7 +190,7 @@ impl VsockArgs {
                             VsockConfig::new(
                                 p.guest_cid.unwrap_or(DEFAULT_GUEST_CID),
                                 p.socket.trim().to_string(),
-                                p.uds_path.trim().to_string(),
+                                BackendType::UnixDomainSocket(p.uds_path.trim().to_string()),
                                 p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
                                 p.queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
                                 p.groups.map_or(vec![DEFAULT_GROUP_NAME.to_string()], |g| {
@@ -224,7 +224,7 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
                     Ok(vec![VsockConfig::new(
                         p.guest_cid,
                         p.socket.trim().to_string(),
-                        p.uds_path.trim().to_string(),
+                        BackendType::UnixDomainSocket(p.uds_path.trim().to_string()),
                         p.tx_buffer_size,
                         p.queue_size,
                         p.groups.trim().split('+').map(String::from).collect(),
@@ -383,7 +383,10 @@ mod tests {
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), 3);
         assert_eq!(config.get_socket_path(), socket_path);
-        assert_eq!(config.get_uds_path(), uds_path);
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::UnixDomainSocket(uds_path)
+        );
         assert_eq!(config.get_tx_buffer_size(), 64 * 1024);
         assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec!["group1".to_string()]);
@@ -434,7 +437,10 @@ mod tests {
             config.get_socket_path(),
             socket_paths[0].display().to_string()
         );
-        assert_eq!(config.get_uds_path(), uds_paths[0].display().to_string());
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::UnixDomainSocket(uds_paths[0].display().to_string())
+        );
         assert_eq!(config.get_tx_buffer_size(), 65536);
         assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
@@ -445,7 +451,10 @@ mod tests {
             config.get_socket_path(),
             socket_paths[1].display().to_string()
         );
-        assert_eq!(config.get_uds_path(), uds_paths[1].display().to_string());
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::UnixDomainSocket(uds_paths[1].display().to_string())
+        );
         assert_eq!(config.get_tx_buffer_size(), 65536);
         assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec!["group1".to_string()]);
@@ -456,7 +465,10 @@ mod tests {
             config.get_socket_path(),
             socket_paths[2].display().to_string()
         );
-        assert_eq!(config.get_uds_path(), uds_paths[2].display().to_string());
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::UnixDomainSocket(uds_paths[2].display().to_string())
+        );
         assert_eq!(config.get_tx_buffer_size(), 32768);
         assert_eq!(config.get_queue_size(), 256);
         assert_eq!(
@@ -499,7 +511,10 @@ mod tests {
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), 4);
         assert_eq!(config.get_socket_path(), socket_path.display().to_string());
-        assert_eq!(config.get_uds_path(), uds_path.display().to_string());
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::UnixDomainSocket(uds_path.display().to_string())
+        );
         assert_eq!(config.get_tx_buffer_size(), 32768);
         assert_eq!(config.get_queue_size(), 256);
         assert_eq!(
@@ -528,7 +543,10 @@ mod tests {
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), DEFAULT_GUEST_CID);
         assert_eq!(config.get_socket_path(), socket_path.display().to_string());
-        assert_eq!(config.get_uds_path(), uds_path.display().to_string());
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::UnixDomainSocket(uds_path.display().to_string())
+        );
         assert_eq!(config.get_tx_buffer_size(), DEFAULT_TX_BUFFER_SIZE);
         assert_eq!(config.get_queue_size(), DEFAULT_QUEUE_SIZE);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
@@ -559,7 +577,7 @@ mod tests {
         let config = VsockConfig::new(
             CID,
             vhost_socket_path,
-            vsock_socket_path,
+            BackendType::UnixDomainSocket(vsock_socket_path),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             vec![DEFAULT_GROUP_NAME.to_string()],
@@ -608,11 +626,13 @@ mod tests {
                     .join("test_vsock_server1.socket")
                     .display()
                     .to_string(),
-                test_dir
-                    .path()
-                    .join("test_vsock_server1.vsock")
-                    .display()
-                    .to_string(),
+                BackendType::UnixDomainSocket(
+                    test_dir
+                        .path()
+                        .join("test_vsock_server1.vsock")
+                        .display()
+                        .to_string(),
+                ),
                 CONN_TX_BUF_SIZE,
                 QUEUE_SIZE,
                 vec![DEFAULT_GROUP_NAME.to_string()],
@@ -624,11 +644,13 @@ mod tests {
                     .join("test_vsock_server2.socket")
                     .display()
                     .to_string(),
-                test_dir
-                    .path()
-                    .join("test_vsock_server2.vsock")
-                    .display()
-                    .to_string(),
+                BackendType::UnixDomainSocket(
+                    test_dir
+                        .path()
+                        .join("test_vsock_server2.vsock")
+                        .display()
+                        .to_string(),
+                ),
                 CONN_TX_BUF_SIZE,
                 QUEUE_SIZE,
                 vec![DEFAULT_GROUP_NAME.to_string()],

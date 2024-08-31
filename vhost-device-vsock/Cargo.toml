@@ -10,6 +10,8 @@ license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 
 [features]
+default = ["backend_vsock"]
+backend_vsock = ["vsock", "libc"]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 
 [dependencies]
@@ -27,6 +29,8 @@ virtio-vsock = "0.6"
 vm-memory = "0.14.1"
 vmm-sys-util = "0.12"
 figment = { version = "0.10.19", features = ["yaml"] }
+vsock = { version = "0.5.0", optional = true }
+libc = { version = "0.2.39", optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

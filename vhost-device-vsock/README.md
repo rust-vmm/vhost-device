@@ -6,7 +6,10 @@ The crate introduces a vhost-device-vsock device that enables communication betw
 application running in the guest i.e inside a VM and an application running on the
 host i.e outside the VM. The application running in the guest communicates over VM
 sockets i.e over AF_VSOCK sockets. The application running on the host connects to a
-unix socket on the host i.e communicates over AF_UNIX sockets. The main components of
+unix socket on the host i.e communicates over AF_UNIX sockets when using the unix domain
+socket backend through the uds-path option or the application in the host listens or
+connects to a vsock on the host i.e communicates over AF_VSOCK sockets when using the
+vsock backend through the forward-cid, forward-listen options. The main components of
 the crate are split into various files as described below:
 
 - [packet.rs](src/packet.rs)
@@ -38,7 +41,7 @@ the crate are split into various files as described below:
 
 ## Usage
 
-Run the vhost-device-vsock device:
+Run the vhost-device-vsock device with unix domain socket backend:
 ```
 vhost-device-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
@@ -52,11 +55,26 @@ or
 vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,uds-path=<path to the Unix socket to communicate with the guest via the virtio-vsock device>[,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,queue-size=<size of the vring queue>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
 ```
 
+Run the vhost-device-vsock device with vsock backend:
+```
+vhost-device-vsock --guest-cid=<CID assigned to the guest> \
+  --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
+  --forward-cid=<the vsock CID to which the connections from guest should be forwarded> \
+  [--forward-listen=<port numbers separated by '+' for forwarding connections from host to guest> \
+  [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>] \
+  [--queue-size=<size of the vring queue>] \
+```
+or
+```
+vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,forward-cid=<the vsock CID to which the connections from guest should be forwarded>[,forward-listen=<port numbers separated by '+' for forwarding connections from host to guest>][,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,queue-size=<size of the vring queue>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
+```
+
 Specify the `--vm` argument multiple times to specify multiple devices like this:
 ```
 vhost-device-vsock \
 --vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,groups=group1+groupA \
---vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768,queue-size=256
+--vm guest-cid=4,socket=/tmp/vhost4.socket,uds-path=/tmp/vm4.vsock,tx-buffer-size=32768,queue-size=256 \
+--vm guest-cid=5,socket=/tmp/vhost5.socket,forward-cid=1,forward-listen=9001+9002,tx-buffer-size=32768,queue-size=1024
 ```
 
 Or use a configuration file:
@@ -79,6 +97,12 @@ vms:
       tx_buffer_size: 32768
       queue_size: 256
       groups: group2+groupB
+    - guest_cid: 5
+      socket: /tmp/vhost5.socket
+      forward-cid: 1
+      forward-listen: 9001+9002
+      tx_buffer_size: 32768
+      queue_size: 1024
 ```
 
 Run VMM (e.g. QEMU):
@@ -184,6 +208,37 @@ when you want fine-grained control over which devices can communicate with each 
 guest_cid3$ nc-vsock -l 1234
 guest_cid4$ nc-vsock 3 1234
 ```
+
+### Using the vsock backend
+
+If you want to test a guest VM that has built-in applications which communicate with another VM over AF_VSOCK, you can forward
+the connections from the guest to the host machine instead of running a separate VM for easier testing using the forward-cid
+option. In such a case, you would run the corresponding applications that listen for or connect with applications in the guest VM
+using AF_VSOCK in the host instead of running the separate VM. For forwarding AF_VSOCK connections from the host, you can use the
+forward-listen option.
+
+For example, if the guest VM that you want to test has an application that connects to (CID 3, port 9000) upon boot and applications
+that listen on port 9001 and 9002 for connections, first run vhost-device-vsock:
+
+```sh
+shell1$ vhost-device-vsock --vm guest-cid=4,forward-cid=1,socket=/tmp/vhost4.socket,vsock-listen=9001+9002
+```
+
+Now run the application listening for connections to port 9000 on the host machine and then run the guest VM:
+
+```sh
+shell2$ qemu-system-x86_64 \
+          -drive file=vm1.qcow2,format=qcow2,if=virtio -smp 2 \
+          -object memory-backend-memfd,id=mem0,size=512M \
+          -machine q35,accel=kvm,memory-backend=mem0 \
+          -chardev socket,id=char0,reconnect=0,path=/tmp/vhost4.socket \
+          -device vhost-user-vsock-pci,chardev=char0
+```
+
+After the guest VM boots, the application inside the guest connecting to (CID 3, port 9000) should successfully connect to the
+application running on the host. Assuming the applications listening on port 9001 and 9002 are running in the guest VM, you can
+now run the applications that connect to port 9001 and 9002 (you need to modify the CID they connect to be the host CID i.e. 1)
+on the host machine.
 
 ## License
 

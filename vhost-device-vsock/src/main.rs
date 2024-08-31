@@ -17,7 +17,7 @@ use std::{
     thread,
 };
 
-use crate::vhu_vsock::{BackendType, CidMap, VhostUserVsockBackend, VsockConfig};
+use crate::vhu_vsock::{BackendType, CidMap, VhostUserVsockBackend, VsockConfig, VsockProxyInfo};
 use clap::{Args, Parser};
 use figment::{
     providers::{Format, Yaml},
@@ -82,8 +82,31 @@ struct VsockParam {
     socket: String,
 
     /// Unix socket to which a host-side application connects to.
-    #[arg(long, conflicts_with = "config", conflicts_with = "vm")]
-    uds_path: String,
+    #[arg(
+        long,
+        conflicts_with = "forward_cid",
+        conflicts_with = "config",
+        conflicts_with = "vm"
+    )]
+    uds_path: Option<String>,
+
+    /// The vsock CID to forward connections from guest
+    #[clap(
+        long,
+        conflicts_with = "uds_path",
+        conflicts_with = "config",
+        conflicts_with = "vm"
+    )]
+    forward_cid: Option<u32>,
+
+    /// The vsock ports to forward connections from host
+    #[clap(
+        long,
+        conflicts_with = "uds_path",
+        conflicts_with = "config",
+        conflicts_with = "vm"
+    )]
+    forward_listen: Option<String>,
 
     /// The size of the buffer used for the TX virtqueue
     #[clap(long, default_value_t = DEFAULT_TX_BUFFER_SIZE, conflicts_with = "config", conflicts_with = "vm")]
@@ -109,7 +132,9 @@ struct VsockParam {
 struct ConfigFileVsockParam {
     guest_cid: Option<u64>,
     socket: String,
-    uds_path: String,
+    uds_path: Option<String>,
+    forward_cid: Option<u32>,
+    forward_listen: Option<String>,
     tx_buffer_size: Option<u32>,
     queue_size: Option<usize>,
     groups: Option<String>,
@@ -122,9 +147,12 @@ struct VsockArgs {
     param: Option<VsockParam>,
 
     /// Device parameters corresponding to a VM in the form of comma separated key=value pairs.
-    /// The allowed keys are: guest_cid, socket, uds_path, tx_buffer_size, queue_size and group.
+    /// The allowed keys are: guest_cid, socket, uds_path, forward_cid, forward_listen, tx_buffer_size, queue_size and group.
+    /// uds_path and (forward_cid, forward_listen) are mutually exclusive. Use uds_path when you want unix domain socket
+    /// backend, otherwise forward_cid, forward_listen for vsock backend.
     /// Example:
     ///   --vm guest-cid=3,socket=/tmp/vhost3.socket,uds-path=/tmp/vm3.vsock,tx-buffer-size=65536,queue-size=1024,groups=group1+group2
+    ///   --vm guest-cid=3,socket=/tmp/vhost3.socket,forward-cid=1,forward-listen=9001,queue-size=1024
     /// Multiple instances of this argument can be provided to configure devices for multiple guests.
     #[arg(long, conflicts_with = "config", verbatim_doc_comment, value_parser = parse_vm_params)]
     vm: Option<Vec<VsockConfig>>,
@@ -138,6 +166,8 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
     let mut guest_cid = None;
     let mut socket = None;
     let mut uds_path = None;
+    let mut forward_cid = None;
+    let mut forward_listen: Option<Vec<u32>> = None;
     let mut tx_buffer_size = None;
     let mut queue_size = None;
     let mut groups = None;
@@ -153,6 +183,12 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
             }
             "socket" => socket = Some(val.to_string()),
             "uds_path" | "uds-path" => uds_path = Some(val.to_string()),
+            "forward_cid" | "forward-cid" => {
+                forward_cid = Some(val.parse().map_err(VmArgsParseError::ParseInteger)?)
+            }
+            "forward_listen" | "forward-listen" => {
+                forward_listen = Some(val.split('+').map(|s| s.parse().unwrap()).collect())
+            }
             "tx_buffer_size" | "tx-buffer-size" => {
                 tx_buffer_size = Some(val.parse().map_err(VmArgsParseError::ParseInteger)?)
             }
@@ -164,10 +200,33 @@ fn parse_vm_params(s: &str) -> Result<VsockConfig, VmArgsParseError> {
         }
     }
 
+    let listen_ports: Vec<u32> = match forward_listen {
+        None => Vec::new(),
+        Some(ports) => ports,
+    };
+
+    let backend_info = match (uds_path, forward_cid) {
+        (Some(path), None) => BackendType::UnixDomainSocket(path),
+        (None, Some(cid)) => BackendType::Vsock(VsockProxyInfo {
+            forward_cid: cid,
+            listen_ports,
+        }),
+        (None, None) => {
+            return Err(VmArgsParseError::RequiredKeyNotFound(
+                "uds-path or forward-cid".to_string(),
+            ))
+        }
+        _ => {
+            return Err(VmArgsParseError::RequiredKeyNotFound(
+                "Only one of uds-path or forward-cid can be provided".to_string(),
+            ))
+        }
+    };
+
     Ok(VsockConfig::new(
         guest_cid.unwrap_or(DEFAULT_GUEST_CID),
         socket.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("socket".to_string()))?,
-        BackendType::UnixDomainSocket(uds_path.ok_or_else(|| VmArgsParseError::RequiredKeyNotFound("uds-path".to_string()))?),
+        backend_info.clone(),
         tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
         queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
         groups.unwrap_or(vec![DEFAULT_GROUP_NAME.to_string()]),
@@ -184,21 +243,34 @@ impl VsockArgs {
             {
                 let vms_param = config_map.get_mut("vms").unwrap();
                 if !vms_param.is_empty() {
-                    let parsed: Vec<VsockConfig> = vms_param
-                        .drain(..)
-                        .map(|p| {
-                            VsockConfig::new(
-                                p.guest_cid.unwrap_or(DEFAULT_GUEST_CID),
-                                p.socket.trim().to_string(),
-                                BackendType::UnixDomainSocket(p.uds_path.trim().to_string()),
-                                p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
-                                p.queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
-                                p.groups.map_or(vec![DEFAULT_GROUP_NAME.to_string()], |g| {
-                                    g.trim().split('+').map(String::from).collect()
-                                }),
-                            )
-                        })
-                        .collect();
+                    let mut parsed = Vec::new();
+                    for p in vms_param.drain(..) {
+                        let listen_ports: Vec<u32> = match p.forward_listen {
+                            None => Vec::new(),
+                            Some(ports) => ports.split('+').map(|s| s.parse().unwrap()).collect(),
+                        };
+                        let backend_info = match (p.uds_path, p.forward_cid) {
+                            (Some(path), None) => {
+                                BackendType::UnixDomainSocket(path.trim().to_string())
+                            }
+                            (None, Some(cid)) => BackendType::Vsock(VsockProxyInfo {
+                                forward_cid: cid,
+                                listen_ports,
+                            }),
+                            _ => return Some(Err(CliError::ConfigParse)),
+                        };
+                        let config = VsockConfig::new(
+                            p.guest_cid.unwrap_or(DEFAULT_GUEST_CID),
+                            p.socket.trim().to_string(),
+                            backend_info,
+                            p.tx_buffer_size.unwrap_or(DEFAULT_TX_BUFFER_SIZE),
+                            p.queue_size.unwrap_or(DEFAULT_QUEUE_SIZE),
+                            p.groups.map_or(vec![DEFAULT_GROUP_NAME.to_string()], |g| {
+                                g.trim().split('+').map(String::from).collect()
+                            }),
+                        );
+                        parsed.push(config);
+                    }
                     return Some(Ok(parsed));
                 } else {
                     return Some(Err(CliError::ConfigParse));
@@ -221,10 +293,24 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
             _ => match cmd_args.vm {
                 Some(v) => Ok(v),
                 _ => cmd_args.param.map_or(Err(CliError::NoArgsProvided), |p| {
+                    let listen_ports: Vec<u32> = match p.forward_listen {
+                        None => Vec::new(),
+                        Some(ports) => ports.split('+').map(|s| s.parse().unwrap()).collect(),
+                    };
+                    let backend_info = match (p.uds_path, p.forward_cid) {
+                        (Some(path), None) => {
+                            BackendType::UnixDomainSocket(path.trim().to_string())
+                        }
+                        (None, Some(cid)) => BackendType::Vsock(VsockProxyInfo {
+                            forward_cid: cid,
+                            listen_ports,
+                        }),
+                        _ => return Err(CliError::ConfigParse),
+                    };
                     Ok(vec![VsockConfig::new(
                         p.guest_cid,
                         p.socket.trim().to_string(),
-                        BackendType::UnixDomainSocket(p.uds_path.trim().to_string()),
+                        backend_info,
                         p.tx_buffer_size,
                         p.queue_size,
                         p.groups.trim().split('+').map(String::from).collect(),
@@ -336,7 +422,7 @@ mod tests {
     use tempfile::tempdir;
 
     impl VsockArgs {
-        fn from_args(
+        fn from_args_unix(
             guest_cid: u64,
             socket: &str,
             uds_path: &str,
@@ -348,7 +434,33 @@ mod tests {
                 param: Some(VsockParam {
                     guest_cid,
                     socket: socket.to_string(),
-                    uds_path: uds_path.to_string(),
+                    uds_path: Some(uds_path.to_string()),
+                    forward_cid: None,
+                    forward_listen: None,
+                    tx_buffer_size,
+                    queue_size,
+                    groups: groups.to_string(),
+                }),
+                vm: None,
+                config: None,
+            }
+        }
+        fn from_args_vsock(
+            guest_cid: u64,
+            socket: &str,
+            forward_cid: u32,
+            forward_listen: &str,
+            tx_buffer_size: u32,
+            queue_size: usize,
+            groups: &str,
+        ) -> Self {
+            VsockArgs {
+                param: Some(VsockParam {
+                    guest_cid,
+                    socket: socket.to_string(),
+                    uds_path: None,
+                    forward_cid: Some(forward_cid),
+                    forward_listen: Some(forward_listen.to_string()),
                     tx_buffer_size,
                     queue_size,
                     groups: groups.to_string(),
@@ -367,12 +479,12 @@ mod tests {
     }
 
     #[test]
-    fn test_vsock_config_setup() {
+    fn test_vsock_config_setup_unix() {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let socket_path = test_dir.path().join("vhost4.socket").display().to_string();
         let uds_path = test_dir.path().join("vm4.vsock").display().to_string();
-        let args = VsockArgs::from_args(3, &socket_path, &uds_path, 64 * 1024, 1024, "group1");
+        let args = VsockArgs::from_args_unix(3, &socket_path, &uds_path, 64 * 1024, 1024, "group1");
 
         let configs = Vec::<VsockConfig>::try_from(args);
         assert!(configs.is_ok());
@@ -395,6 +507,37 @@ mod tests {
     }
 
     #[test]
+    fn test_vsock_config_setup_vsock() {
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let socket_path = test_dir.path().join("vhost4.socket").display().to_string();
+        let args =
+            VsockArgs::from_args_vsock(3, &socket_path, 1, "1234+4321", 64 * 1024, 1024, "group1");
+
+        let configs = Vec::<VsockConfig>::try_from(args);
+        assert!(configs.is_ok());
+
+        let configs = configs.unwrap();
+        assert_eq!(configs.len(), 1);
+
+        let config = &configs[0];
+        assert_eq!(config.get_guest_cid(), 3);
+        assert_eq!(config.get_socket_path(), socket_path);
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![1234, 4321]
+            })
+        );
+        assert_eq!(config.get_tx_buffer_size(), 64 * 1024);
+        assert_eq!(config.get_queue_size(), 1024);
+        assert_eq!(config.get_groups(), vec!["group1".to_string()]);
+
+        test_dir.close().unwrap();
+    }
+
+    #[test]
     fn test_vsock_config_setup_from_vm_args() {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
@@ -402,6 +545,7 @@ mod tests {
             test_dir.path().join("vhost3.socket"),
             test_dir.path().join("vhost4.socket"),
             test_dir.path().join("vhost5.socket"),
+            test_dir.path().join("vhost6.socket"),
         ];
         let uds_paths = [
             test_dir.path().join("vm3.vsock"),
@@ -411,10 +555,12 @@ mod tests {
         let params = format!(
             "--vm socket={vhost3_socket},uds_path={vm3_vsock} \
              --vm socket={vhost4_socket},uds-path={vm4_vsock},guest-cid=4,tx_buffer_size=65536,queue_size=1024,groups=group1 \
-             --vm groups=group2+group3,guest-cid=5,socket={vhost5_socket},uds_path={vm5_vsock},tx-buffer-size=32768,queue_size=256",
+             --vm groups=group2+group3,guest-cid=5,socket={vhost5_socket},uds_path={vm5_vsock},tx-buffer-size=32768,queue_size=256 \
+             --vm guest-cid=6,socket={vhost6_socket},forward-cid=1,forward-listen=1234+4321,queue-size=2048",
             vhost3_socket = socket_paths[0].display(),
             vhost4_socket = socket_paths[1].display(),
             vhost5_socket = socket_paths[2].display(),
+            vhost6_socket = socket_paths[3].display(),
             vm3_vsock = uds_paths[0].display(),
             vm4_vsock = uds_paths[1].display(),
             vm5_vsock = uds_paths[2].display(),
@@ -429,7 +575,7 @@ mod tests {
         assert!(configs.is_ok());
 
         let configs = configs.unwrap();
-        assert_eq!(configs.len(), 3);
+        assert_eq!(configs.len(), 4);
 
         let config = configs.first().unwrap();
         assert_eq!(config.get_guest_cid(), 3);
@@ -476,6 +622,23 @@ mod tests {
             vec!["group2".to_string(), "group3".to_string()]
         );
 
+        let config = configs.get(3).unwrap();
+        assert_eq!(config.get_guest_cid(), 6);
+        assert_eq!(
+            config.get_socket_path(),
+            socket_paths[3].display().to_string()
+        );
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![1234, 4321]
+            })
+        );
+        assert_eq!(config.get_tx_buffer_size(), 65536);
+        assert_eq!(config.get_queue_size(), 2048);
+        assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
+
         test_dir.close().unwrap();
     }
 
@@ -484,7 +647,8 @@ mod tests {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let config_path = test_dir.path().join("config.yaml");
-        let socket_path = test_dir.path().join("vhost4.socket");
+        let socket_path_unix = test_dir.path().join("vhost4.socket");
+        let socket_path_vsock = test_dir.path().join("vhost5.socket");
         let uds_path = test_dir.path().join("vm4.vsock");
 
         let mut yaml = File::create(&config_path).unwrap();
@@ -496,9 +660,15 @@ mod tests {
       uds_path: {}
       tx_buffer_size: 32768
       queue_size: 256
-      groups: group1+group2",
-                socket_path.display(),
+      groups: group1+group2
+    - guest_cid: 5
+      socket: {}
+      forward_cid: 1
+      forward_listen: 1234+4321
+      tx_buffer_size: 32768",
+                socket_path_unix.display(),
                 uds_path.display(),
+                socket_path_vsock.display(),
             )
             .as_bytes(),
         )
@@ -506,11 +676,14 @@ mod tests {
         let args = VsockArgs::from_file(&config_path.display().to_string());
 
         let configs = Vec::<VsockConfig>::try_from(args).unwrap();
-        assert_eq!(configs.len(), 1);
+        assert_eq!(configs.len(), 2);
 
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), 4);
-        assert_eq!(config.get_socket_path(), socket_path.display().to_string());
+        assert_eq!(
+            config.get_socket_path(),
+            socket_path_unix.display().to_string()
+        );
         assert_eq!(
             config.get_backend_info(),
             BackendType::UnixDomainSocket(uds_path.display().to_string())
@@ -522,6 +695,23 @@ mod tests {
             vec!["group1".to_string(), "group2".to_string()]
         );
 
+        let config = &configs[1];
+        assert_eq!(config.get_guest_cid(), 5);
+        assert_eq!(
+            config.get_socket_path(),
+            socket_path_vsock.display().to_string()
+        );
+        assert_eq!(
+            config.get_backend_info(),
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![1234, 4321]
+            })
+        );
+        assert_eq!(config.get_tx_buffer_size(), 32768);
+        assert_eq!(config.get_queue_size(), 1024);
+        assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
+
         // Now test that optional parameters are correctly set to their default values.
         let mut yaml = File::create(&config_path).unwrap();
         yaml.write_all(
@@ -529,7 +719,7 @@ mod tests {
                 "vms:
     - socket: {}
       uds_path: {}",
-                socket_path.display(),
+                socket_path_unix.display(),
                 uds_path.display(),
             )
             .as_bytes(),
@@ -542,7 +732,10 @@ mod tests {
 
         let config = &configs[0];
         assert_eq!(config.get_guest_cid(), DEFAULT_GUEST_CID);
-        assert_eq!(config.get_socket_path(), socket_path.display().to_string());
+        assert_eq!(
+            config.get_socket_path(),
+            socket_path_unix.display().to_string()
+        );
         assert_eq!(
             config.get_backend_info(),
             BackendType::UnixDomainSocket(uds_path.display().to_string())
@@ -555,8 +748,35 @@ mod tests {
         test_dir.close().unwrap();
     }
 
+    fn test_vsock_server(config: VsockConfig) {
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let backend = Arc::new(VhostUserVsockBackend::new(config, cid_map).unwrap());
+
+        let daemon = VhostUserDaemon::new(
+            String::from("vhost-device-vsock"),
+            backend.clone(),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .unwrap();
+
+        let mut epoll_handlers = daemon.get_epoll_handlers();
+
+        // VhostUserVsockBackend support a single thread that handles the TX and RX queues
+        assert_eq!(backend.threads.len(), 1);
+
+        assert_eq!(epoll_handlers.len(), backend.threads.len());
+
+        for thread in backend.threads.iter() {
+            thread
+                .lock()
+                .unwrap()
+                .register_listeners(epoll_handlers.remove(0));
+        }
+    }
+
     #[test]
-    fn test_vsock_server() {
+    fn test_vsock_server_unix() {
         const CID: u64 = 3;
         const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
         const QUEUE_SIZE: usize = 1024;
@@ -583,30 +803,38 @@ mod tests {
             vec![DEFAULT_GROUP_NAME.to_string()],
         );
 
-        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+        test_vsock_server(config);
 
-        let backend = Arc::new(VhostUserVsockBackend::new(config, cid_map).unwrap());
+        test_dir.close().unwrap();
+    }
 
-        let daemon = VhostUserDaemon::new(
-            String::from("vhost-device-vsock"),
-            backend.clone(),
-            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-        )
-        .unwrap();
+    #[test]
+    fn test_vsock_server_vsock() {
+        const CID: u64 = 3;
+        const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+        const QUEUE_SIZE: usize = 1024;
 
-        let mut epoll_handlers = daemon.get_epoll_handlers();
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        // VhostUserVsockBackend support a single thread that handles the TX and RX queues
-        assert_eq!(backend.threads.len(), 1);
+        let vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_server.socket")
+            .display()
+            .to_string();
 
-        assert_eq!(epoll_handlers.len(), backend.threads.len());
+        let config = VsockConfig::new(
+            CID,
+            vhost_socket_path,
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![9000],
+            }),
+            CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
+            vec![DEFAULT_GROUP_NAME.to_string()],
+        );
 
-        for thread in backend.threads.iter() {
-            thread
-                .lock()
-                .unwrap()
-                .register_listeners(epoll_handlers.remove(0));
-        }
+        test_vsock_server(config);
 
         test_dir.close().unwrap();
     }
@@ -689,21 +917,42 @@ mod tests {
         assert_matches!(error, CliError::NoArgsProvided);
         assert_eq!(format!("{error:?}"), "NoArgsProvided");
 
-        let args = VsockArgs::from_args(0, "", "", 0, 0, "");
-        assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, queue_size: 0, groups: \"\" }), vm: None, config: None }");
+        let args = VsockArgs::from_args_unix(0, "", "", 0, 0, "");
+        assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: Some(\"\"), forward_cid: None, forward_listen: None, tx_buffer_size: 0, queue_size: 0, groups: \"\" }), vm: None, config: None }");
 
         let param = args.param.unwrap().clone();
-        assert_eq!(format!("{param:?}"), "VsockParam { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, queue_size: 0, groups: \"\" }");
+        assert_eq!(format!("{param:?}"), "VsockParam { guest_cid: 0, socket: \"\", uds_path: Some(\"\"), forward_cid: None, forward_listen: None, tx_buffer_size: 0, queue_size: 0, groups: \"\" }");
+
+        let args = VsockArgs::from_args_vsock(0, "", 1, "", 0, 0, "");
+        assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: None, forward_cid: Some(1), forward_listen: Some(\"\"), tx_buffer_size: 0, queue_size: 0, groups: \"\" }), vm: None, config: None }");
+
+        let param = args.param.unwrap().clone();
+        assert_eq!(format!("{param:?}"), "VsockParam { guest_cid: 0, socket: \"\", uds_path: None, forward_cid: Some(1), forward_listen: Some(\"\"), tx_buffer_size: 0, queue_size: 0, groups: \"\" }");
 
         let config = ConfigFileVsockParam {
             guest_cid: None,
             socket: String::new(),
-            uds_path: String::new(),
+            uds_path: Some(String::new()),
+            forward_cid: None,
+            forward_listen: None,
             tx_buffer_size: None,
             queue_size: None,
             groups: None,
         }
         .clone();
-        assert_eq!(format!("{config:?}"), "ConfigFileVsockParam { guest_cid: None, socket: \"\", uds_path: \"\", tx_buffer_size: None, queue_size: None, groups: None }");
+        assert_eq!(format!("{config:?}"), "ConfigFileVsockParam { guest_cid: None, socket: \"\", uds_path: Some(\"\"), forward_cid: None, forward_listen: None, tx_buffer_size: None, queue_size: None, groups: None }");
+
+        let config = ConfigFileVsockParam {
+            guest_cid: None,
+            socket: String::new(),
+            uds_path: None,
+            forward_cid: Some(1),
+            forward_listen: Some(String::new()),
+            tx_buffer_size: None,
+            queue_size: None,
+            groups: None,
+        }
+        .clone();
+        assert_eq!(format!("{config:?}"), "ConfigFileVsockParam { guest_cid: None, socket: \"\", uds_path: None, forward_cid: Some(1), forward_listen: Some(\"\"), tx_buffer_size: None, queue_size: None, groups: None }");
     }
 }

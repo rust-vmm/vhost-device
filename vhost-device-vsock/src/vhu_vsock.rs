@@ -88,8 +88,12 @@ pub(crate) enum Error {
     HandleUnknownEvent,
     #[error("Failed to accept new local unix domain socket connection")]
     UnixAccept(std::io::Error),
+    #[error("Failed to accept new local vsock socket connection")]
+    VsockAccept(std::io::Error),
     #[error("Failed to bind a unix stream")]
     UnixBind(std::io::Error),
+    #[error("Failed to bind a vsock stream")]
+    VsockBind(std::io::Error),
     #[error("Failed to create an epoll fd")]
     EpollFdCreate(std::io::Error),
     #[error("Failed to add to epoll")]
@@ -118,8 +122,10 @@ pub(crate) enum Error {
     PktBufMissing,
     #[error("Failed to connect to unix socket")]
     UnixConnect(std::io::Error),
-    #[error("Unable to write to unix stream")]
-    UnixWrite,
+    #[error("Failed to connect to vsock socket")]
+    VsockConnect(std::io::Error),
+    #[error("Unable to write to stream")]
+    StreamWrite,
     #[error("Unable to push data to local tx buffer")]
     LocalTxBufFull,
     #[error("Unable to flush data from local tx buffer")]
@@ -143,9 +149,17 @@ impl std::convert::From<Error> for std::io::Error {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub(crate) struct VsockProxyInfo {
+    pub forward_cid: u32,
+    pub listen_ports: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum BackendType {
     /// unix domain socket path
     UnixDomainSocket(String),
+    /// the vsock CID and ports
+    Vsock(VsockProxyInfo),
 }
 
 #[derive(Debug, Clone)]
@@ -390,34 +404,7 @@ mod tests {
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
     const QUEUE_SIZE: usize = 1024;
 
-    #[test]
-    fn test_vsock_backend() {
-        const CID: u64 = 3;
-
-        let groups_list: Vec<String> = vec![String::from("default")];
-
-        let test_dir = tempdir().expect("Could not create a temp test directory.");
-
-        let vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend.socket")
-            .display()
-            .to_string();
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend.vsock")
-            .display()
-            .to_string();
-
-        let config = VsockConfig::new(
-            CID,
-            vhost_socket_path.to_string(),
-            BackendType::UnixDomainSocket(vsock_socket_path.to_string()),
-            CONN_TX_BUF_SIZE,
-            QUEUE_SIZE,
-            groups_list,
-        );
-
+    fn test_vsock_backend(config: VsockConfig, expected_cid: u64) {
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let backend = VhostUserVsockBackend::new(config, cid_map);
@@ -452,7 +439,7 @@ mod tests {
         let config = backend.get_config(0, 8);
         assert_eq!(config.len(), 8);
         let cid = u64::from_le_bytes(config.try_into().unwrap());
-        assert_eq!(cid, CID);
+        assert_eq!(cid, expected_cid);
 
         let exit = backend.exit_event(0);
         assert!(exit.is_some());
@@ -469,11 +456,73 @@ mod tests {
 
         let ret = backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
         assert!(ret.is_ok());
+    }
+
+    #[test]
+    fn test_vsock_backend_unix() {
+        const CID: u64 = 3;
+
+        let groups_list: Vec<String> = vec![String::from("default")];
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend_unix.socket")
+            .display()
+            .to_string();
+        let vsock_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend.vsock")
+            .display()
+            .to_string();
+
+        let config = VsockConfig::new(
+            CID,
+            vhost_socket_path.to_string(),
+            BackendType::UnixDomainSocket(vsock_socket_path.to_string()),
+            CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
+            groups_list,
+        );
+
+        test_vsock_backend(config, CID);
 
         // cleanup
         let _ = std::fs::remove_file(vhost_socket_path);
         let _ = std::fs::remove_file(vsock_socket_path);
+        test_dir.close().unwrap();
+    }
 
+    #[test]
+    fn test_vsock_backend_vsock() {
+        const CID: u64 = 3;
+
+        let groups_list: Vec<String> = vec![String::from("default")];
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+
+        let vhost_socket_path = test_dir
+            .path()
+            .join("test_vsock_backend.socket")
+            .display()
+            .to_string();
+        let config = VsockConfig::new(
+            CID,
+            vhost_socket_path.to_string(),
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![9001, 9002],
+            }),
+            CONN_TX_BUF_SIZE,
+            QUEUE_SIZE,
+            groups_list,
+        );
+
+        test_vsock_backend(config, CID);
+
+        // cleanup
+        let _ = std::fs::remove_file(vhost_socket_path);
         test_dir.close().unwrap();
     }
 
@@ -558,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_vhu_vsock_structs() {
-        let config = VsockConfig::new(
+        let unix_config = VsockConfig::new(
             0,
             String::new(),
             BackendType::UnixDomainSocket(String::new()),
@@ -566,8 +615,20 @@ mod tests {
             0,
             vec![String::new()],
         );
+        assert_eq!(format!("{unix_config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", backend_info: UnixDomainSocket(\"\"), tx_buffer_size: 0, queue_size: 0, groups: [\"\"] }");
 
-        assert_eq!(format!("{config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", backend_info: UnixDomainSocket(\"\"), tx_buffer_size: 0, queue_size: 0, groups: [\"\"] }");
+        let vsock_config = VsockConfig::new(
+            0,
+            String::new(),
+            BackendType::Vsock(VsockProxyInfo {
+                forward_cid: 1,
+                listen_ports: vec![9001, 9002],
+            }),
+            0,
+            0,
+            vec![String::new()],
+        );
+        assert_eq!(format!("{vsock_config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", backend_info: Vsock(VsockProxyInfo { forward_cid: 1, listen_ports: [9001, 9002] }), tx_buffer_size: 0, queue_size: 0, groups: [\"\"] }");
 
         let conn_map = ConnMapKey::new(0, 0);
         assert_eq!(

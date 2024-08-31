@@ -86,7 +86,7 @@ pub(crate) enum Error {
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
     HandleUnknownEvent,
-    #[error("Failed to accept new local socket connection")]
+    #[error("Failed to accept new local unix domain socket connection")]
     UnixAccept(std::io::Error),
     #[error("Failed to bind a unix stream")]
     UnixBind(std::io::Error),
@@ -142,13 +142,19 @@ impl std::convert::From<Error> for std::io::Error {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) enum BackendType {
+    /// unix domain socket path
+    UnixDomainSocket(String),
+}
+
 #[derive(Debug, Clone)]
 /// This structure is the public API through which an external program
 /// is allowed to configure the backend.
 pub(crate) struct VsockConfig {
     guest_cid: u64,
     socket: String,
-    uds_path: String,
+    backend_info: BackendType,
     tx_buffer_size: u32,
     queue_size: usize,
     groups: Vec<String>,
@@ -160,7 +166,7 @@ impl VsockConfig {
     pub fn new(
         guest_cid: u64,
         socket: String,
-        uds_path: String,
+        backend_info: BackendType,
         tx_buffer_size: u32,
         queue_size: usize,
         groups: Vec<String>,
@@ -168,7 +174,7 @@ impl VsockConfig {
         Self {
             guest_cid,
             socket,
-            uds_path,
+            backend_info,
             tx_buffer_size,
             queue_size,
             groups,
@@ -180,10 +186,8 @@ impl VsockConfig {
         self.guest_cid
     }
 
-    /// Return the path of the unix domain socket which is listening to
-    /// requests from the host side application.
-    pub fn get_uds_path(&self) -> String {
-        String::from(&self.uds_path)
+    pub fn get_backend_info(&self) -> BackendType {
+        self.backend_info.clone()
     }
 
     /// Return the path of the unix domain socket which is listening to
@@ -244,7 +248,7 @@ pub(crate) struct VhostUserVsockBackend {
 impl VhostUserVsockBackend {
     pub fn new(config: VsockConfig, cid_map: Arc<RwLock<CidMap>>) -> Result<Self> {
         let thread = Mutex::new(VhostUserVsockThread::new(
-            config.get_uds_path(),
+            config.get_backend_info(),
             config.get_guest_cid(),
             config.get_tx_buffer_size(),
             config.get_groups(),
@@ -408,7 +412,7 @@ mod tests {
         let config = VsockConfig::new(
             CID,
             vhost_socket_path.to_string(),
-            vsock_socket_path.to_string(),
+            BackendType::UnixDomainSocket(vsock_socket_path.to_string()),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             groups_list,
@@ -495,7 +499,7 @@ mod tests {
         let config = VsockConfig::new(
             CID,
             "/sys/not_allowed.socket".to_string(),
-            "/sys/not_allowed.vsock".to_string(),
+            BackendType::UnixDomainSocket("/sys/not_allowed.vsock".to_string()),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             groups.clone(),
@@ -509,7 +513,7 @@ mod tests {
         let config = VsockConfig::new(
             CID,
             vhost_socket_path.to_string(),
-            vsock_socket_path.to_string(),
+            BackendType::UnixDomainSocket(vsock_socket_path.to_string()),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             groups,
@@ -554,9 +558,16 @@ mod tests {
 
     #[test]
     fn test_vhu_vsock_structs() {
-        let config = VsockConfig::new(0, String::new(), String::new(), 0, 0, vec![String::new()]);
+        let config = VsockConfig::new(
+            0,
+            String::new(),
+            BackendType::UnixDomainSocket(String::new()),
+            0,
+            0,
+            vec![String::new()],
+        );
 
-        assert_eq!(format!("{config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", uds_path: \"\", tx_buffer_size: 0, queue_size: 0, groups: [\"\"] }");
+        assert_eq!(format!("{config:?}"), "VsockConfig { guest_cid: 0, socket: \"\", backend_info: UnixDomainSocket(\"\"), tx_buffer_size: 0, queue_size: 0, groups: [\"\"] }");
 
         let conn_map = ConnMapKey::new(0, 0);
         assert_eq!(

@@ -1,7 +1,7 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // Stefano Garzarella <sgarzare@redhat.com>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-use std::convert::TryFrom;
+use std::{convert::TryFrom, path::PathBuf};
 
 use clap::Parser;
 use vhost_device_sound::{start_backend_server, BackendType, Error, Result, SoundConfig};
@@ -11,7 +11,7 @@ use vhost_device_sound::{start_backend_server, BackendType, Error, Result, Sound
 struct SoundArgs {
     /// vhost-user Unix domain socket path.
     #[clap(long)]
-    socket: String,
+    socket: PathBuf,
     /// audio backend to be used
     #[clap(long)]
     #[clap(value_enum)]
@@ -22,9 +22,7 @@ impl TryFrom<SoundArgs> for SoundConfig {
     type Error = Error;
 
     fn try_from(cmd_args: SoundArgs) -> Result<Self> {
-        let socket = cmd_args.socket.trim().to_string();
-
-        Ok(SoundConfig::new(socket, false, cmd_args.backend))
+        Ok(SoundConfig::new(cmd_args.socket, false, cmd_args.backend))
     }
 }
 
@@ -45,9 +43,9 @@ mod tests {
     use super::*;
 
     impl SoundArgs {
-        fn from_args(socket: &str) -> Self {
+        fn from_args(socket: PathBuf) -> Self {
             SoundArgs {
-                socket: socket.to_string(),
+                socket,
                 backend: BackendType::default(),
             }
         }
@@ -61,13 +59,16 @@ mod tests {
     #[test]
     fn test_sound_config_setup() {
         init_logger();
-        let args = SoundArgs::from_args("/tmp/vhost-sound.socket");
+        let args = SoundArgs::from_args(PathBuf::from("/tmp/vhost-sound.socket"));
 
         let config = SoundConfig::try_from(args);
         assert!(config.is_ok());
 
         let config = config.unwrap();
-        assert_eq!(config.get_socket_path(), "/tmp/vhost-sound.socket");
+        assert_eq!(
+            config.get_socket_path(),
+            PathBuf::from("/tmp/vhost-sound.socket")
+        );
     }
 
     #[rstest]

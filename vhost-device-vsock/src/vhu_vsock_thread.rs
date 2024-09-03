@@ -1041,6 +1041,12 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_thread_vsock_backend() {
+        if VsockListener::bind_with_cid_port(libc::VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).is_err()
+        {
+            println!("  SKIPPED: AF_VSOCK is not available.");
+            return;
+        }
+
         let groups: Vec<String> = vec![String::from("default")];
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 

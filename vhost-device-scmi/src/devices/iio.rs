@@ -280,8 +280,8 @@ impl SensorT for IIOSensor {
         let mut result = vec![];
         for axis in &self.axes {
             let value = self.read_axis(axis)?;
-            result.push(MessageValue::Unsigned((value & 0xFFFFFFFF) as u32));
-            result.push(MessageValue::Unsigned((value >> 32) as u32));
+            result.push(MessageValue::Signed((value & 0xFFFFFFFF) as i32));
+            result.push(MessageValue::Signed((value >> 32) as i32));
             result.push(MessageValue::Unsigned(0));
             result.push(MessageValue::Unsigned(0));
         }
@@ -784,8 +784,8 @@ mod tests {
         // custom exponent = 2
         // applied and rounded: 45037037598 = 0xA7C6AA81E
         assert_eq!(result.len(), 4);
-        assert_eq!(result.first().unwrap(), &MessageValue::Unsigned(0x7C6AA81E));
-        assert_eq!(result.get(1).unwrap(), &MessageValue::Unsigned(0xA));
+        assert_eq!(result.first().unwrap(), &MessageValue::Signed(0x7C6AA81E));
+        assert_eq!(result.get(1).unwrap(), &MessageValue::Signed(0xA));
         assert_eq!(result.get(2).unwrap(), &MessageValue::Unsigned(0));
         assert_eq!(result.get(3).unwrap(), &MessageValue::Unsigned(0));
     }
@@ -801,8 +801,8 @@ mod tests {
         sensor.initialize().unwrap();
         let result = sensor.reading_get().unwrap();
         assert_eq!(result.len(), 4);
-        assert_eq!(result.first().unwrap(), &MessageValue::Unsigned(0x5A));
-        assert_eq!(result.get(1).unwrap(), &MessageValue::Unsigned(0));
+        assert_eq!(result.first().unwrap(), &MessageValue::Signed(0x5A));
+        assert_eq!(result.get(1).unwrap(), &MessageValue::Signed(0));
         assert_eq!(result.get(2).unwrap(), &MessageValue::Unsigned(0));
         assert_eq!(result.get(3).unwrap(), &MessageValue::Unsigned(0));
     }
@@ -823,12 +823,15 @@ mod tests {
         sensor.initialize().unwrap();
         let result = sensor.reading_get().unwrap();
         assert_eq!(result.len(), 12);
-        assert_eq!(result.first().unwrap(), &MessageValue::Unsigned(22));
-        assert_eq!(result.get(4).unwrap(), &MessageValue::Unsigned(60));
-        assert_eq!(result.get(8).unwrap(), &MessageValue::Unsigned(150));
+        assert_eq!(result.first().unwrap(), &MessageValue::Signed(22));
+        assert_eq!(result.get(4).unwrap(), &MessageValue::Signed(60));
+        assert_eq!(result.get(8).unwrap(), &MessageValue::Signed(150));
         for i in 0..12 {
-            if i % 4 != 0 {
+            if i % 4 == 2 || i % 4 == 3 {
                 assert_eq!(result.get(i).unwrap(), &MessageValue::Unsigned(0));
+            }
+            if i % 4 == 1 {
+                assert_eq!(result.get(i).unwrap(), &MessageValue::Signed(0));
             }
         }
     }

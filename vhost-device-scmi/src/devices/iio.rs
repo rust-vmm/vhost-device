@@ -453,8 +453,12 @@ impl IIOSensor {
 
     fn read_axis(&self, axis: &Axis) -> Result<i64, ScmiDeviceError> {
         let path_result = axis.path.clone().into_string();
-        let mut value: i64 =
+        let value: i64 =
             read_number_from_file(Path::new(&(path_result.unwrap() + "_raw")))?.unwrap();
+        self.deal_axis_raw_data(value, axis)
+    }
+
+    fn deal_axis_raw_data(&self, mut value: i64, axis: &Axis) -> Result<i64, ScmiDeviceError> {
         let offset: Option<i64> = self.read_axis_offset(&axis.path)?;
         if let Some(offset_value) = offset {
             match value.checked_add(offset_value) {

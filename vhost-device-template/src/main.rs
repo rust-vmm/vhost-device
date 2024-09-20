@@ -53,7 +53,7 @@ impl TryFrom<FooArgs> for FooConfiguration {
         // Even though this try_from() conversion always succeeds, in cases where the device's
         // configuration type needs to validate arguments and/or make operations that can fail a
         // TryFrom<_> implementation will be necessary.
-        Ok(FooConfiguration {
+        Ok(Self {
             socket_path: args.socket_path,
         })
     }
@@ -65,7 +65,7 @@ pub(crate) struct FooInfo {
 }
 
 impl FooInfo {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { counter: 0 }
     }
 
@@ -78,7 +78,7 @@ impl FooInfo {
 fn start_backend(args: FooArgs) -> Result<()> {
     let config = FooConfiguration::try_from(args).unwrap();
 
-    let socket_path = config.socket_path.clone();
+    let socket_path = config.socket_path;
     let info = FooInfo::new();
 
     let handle: JoinHandle<Result<()>> = spawn(move || loop {
@@ -119,8 +119,8 @@ mod tests {
     use super::*;
 
     impl FooArgs {
-        pub(crate) fn from_args(path: &Path) -> FooArgs {
-            FooArgs {
+        pub(crate) fn from_args(path: &Path) -> Self {
+            Self {
                 socket_path: path.to_path_buf(),
             }
         }

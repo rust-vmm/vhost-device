@@ -98,7 +98,7 @@ pub struct VuScmiBackend {
 
 impl VuScmiBackend {
     pub fn new(config: &VuScmiConfig) -> Result<Self> {
-        let mut handler = ScmiHandler::new();
+        let handler = ScmiHandler::new();
         let device_mapping = available_devices();
         for (name, properties) in config.devices.iter() {
             match device_mapping.get(name.as_str()) {
@@ -133,7 +133,7 @@ impl VuScmiBackend {
     }
 
     pub fn process_requests(
-        &mut self,
+        &self,
         requests: Vec<ScmiDescriptorChain>,
         vring: &VringRwLock,
     ) -> Result<()> {
@@ -233,7 +233,7 @@ impl VuScmiBackend {
         Ok(())
     }
 
-    fn process_command_queue(&mut self, vring: &VringRwLock) -> Result<()> {
+    fn process_command_queue(&self, vring: &VringRwLock) -> Result<()> {
         debug!("Processing command queue");
         let requests: Vec<_> = vring
             .get_mut()
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn test_process_requests() {
-        let mut backend = make_backend();
+        let backend = make_backend();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn test_process_requests_failure() {
-        let mut backend = make_backend();
+        let backend = make_backend();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );

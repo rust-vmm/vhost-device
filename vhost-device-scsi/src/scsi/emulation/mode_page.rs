@@ -3,7 +3,7 @@
 use std::io::{self, Write};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum ModePage {
+pub enum ModePage {
     Caching,
 }
 

@@ -591,7 +591,7 @@ impl DeviceMap {
     // SENSOR_DESCRIPTION_GET supports -- the upper 16 bits of the response.
     const MAX_NUMBER_OF_PROTOCOL_DEVICES: usize = 0xFFFF;
 
-    fn insert(&mut self, device: Box<dyn ScmiDevice>) {
+    fn insert(&self, device: Box<dyn ScmiDevice>) {
         let mut device_map = self.0.lock().unwrap();
         let devices = device_map.entry(device.protocol()).or_default();
         if devices.len() >= Self::MAX_NUMBER_OF_PROTOCOL_DEVICES {
@@ -653,7 +653,7 @@ impl ScmiHandler {
         self.handlers.get(request.protocol_id, request.message_id)
     }
 
-    pub fn handle(&mut self, request: ScmiRequest) -> ScmiResponse {
+    pub fn handle(&self, request: ScmiRequest) -> ScmiResponse {
         let response = match request.message_type {
             MessageType::Command => match self.request_handler(&request) {
                 Some(info) => {
@@ -720,7 +720,7 @@ impl ScmiHandler {
             .expect("Impossibly large number of SCMI protocols")
     }
 
-    pub fn register_device(&mut self, device: Box<dyn ScmiDevice>) {
+    pub fn register_device(&self, device: Box<dyn ScmiDevice>) {
         self.devices.insert(device);
     }
 
@@ -961,7 +961,7 @@ mod tests {
     }
 
     fn make_handler() -> ScmiHandler {
-        let mut handler = ScmiHandler::new();
+        let handler = ScmiHandler::new();
         for i in 0..2 {
             let properties = DeviceProperties::new(vec![("name".to_owned(), format!("fake{i}"))]);
             let fake_sensor = FakeSensor::new_device(&properties).unwrap();
@@ -977,14 +977,13 @@ mod tests {
         result_code: ReturnStatus,
         result_values: Vec<MessageValue>,
     ) {
-        let mut handler = make_handler();
         test_message_with_handler(
             protocol_id,
             message_id,
             parameters,
             result_code,
             result_values,
-            &mut handler,
+            &make_handler(),
         );
     }
 
@@ -994,7 +993,7 @@ mod tests {
         parameters: Vec<MessageValue>,
         result_code: ReturnStatus,
         result_values: Vec<MessageValue>,
-        handler: &mut ScmiHandler,
+        handler: &ScmiHandler,
     ) {
         let mut request = make_request(protocol_id, message_id);
         let header = request.header;
@@ -1280,7 +1279,7 @@ mod tests {
         );
     }
 
-    fn check_enabled(sensor: u32, enabled: bool, handler: &mut ScmiHandler) {
+    fn check_enabled(sensor: u32, enabled: bool, handler: &ScmiHandler) {
         let enabled_flag = u32::from(enabled);
         let parameters = vec![MessageValue::Unsigned(sensor)];
         let result = vec![MessageValue::Unsigned(enabled_flag)];
@@ -1296,11 +1295,11 @@ mod tests {
 
     #[test]
     fn test_sensor_config_get() {
-        let mut handler = make_handler();
-        check_enabled(0, false, &mut handler);
+        let handler = make_handler();
+        check_enabled(0, false, &handler);
     }
 
-    fn enable_sensor(sensor: u32, enable: bool, handler: &mut ScmiHandler) {
+    fn enable_sensor(sensor: u32, enable: bool, handler: &ScmiHandler) {
         let enable_flag = u32::from(enable);
         let parameters = vec![
             MessageValue::Unsigned(sensor),
@@ -1319,16 +1318,16 @@ mod tests {
 
     #[test]
     fn test_sensor_config_set() {
-        let mut handler = make_handler();
-        enable_sensor(0, true, &mut handler);
-        check_enabled(0, true, &mut handler);
-        check_enabled(1, false, &mut handler);
-        enable_sensor(1, true, &mut handler);
-        check_enabled(1, true, &mut handler);
-        enable_sensor(0, true, &mut handler);
-        check_enabled(0, true, &mut handler);
-        enable_sensor(0, false, &mut handler);
-        check_enabled(0, false, &mut handler);
+        let handler = make_handler();
+        enable_sensor(0, true, &handler);
+        check_enabled(0, true, &handler);
+        check_enabled(1, false, &handler);
+        enable_sensor(1, true, &handler);
+        check_enabled(1, true, &handler);
+        enable_sensor(0, true, &handler);
+        check_enabled(0, true, &handler);
+        enable_sensor(0, false, &handler);
+        check_enabled(0, false, &handler);
     }
 
     #[test]
@@ -1345,9 +1344,9 @@ mod tests {
 
     #[test]
     fn test_sensor_reading_get() {
-        let mut handler = make_handler();
+        let handler = make_handler();
         for sensor in 0..2 {
-            enable_sensor(sensor, true, &mut handler);
+            enable_sensor(sensor, true, &handler);
         }
         for iteration in 0..2 {
             for sensor in 0..2 {
@@ -1372,7 +1371,7 @@ mod tests {
                     parameters,
                     ReturnStatus::Success,
                     result,
-                    &mut handler,
+                    &handler,
                 );
             }
         }

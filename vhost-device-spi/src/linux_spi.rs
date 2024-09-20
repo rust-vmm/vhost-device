@@ -53,11 +53,12 @@ ioctl_iow_nr!(SPI_IOC_WR_MODE32, 107, 5, u32);
 
 // Corresponds to the SPI_IOC_MESSAGE macro in Linux
 pub fn spi_ioc_message(n: u32) -> u64 {
-    let mut size: u32 = 0;
-    if n * 32 < (1 << _IOC_SIZEBITS) {
-        size = n * 32;
-    }
-    (SPI_IOC_MESSAGE_BASE | (size << _IOC_SIZESHIFT)) as u64
+    let size = if n * 32 < (1 << _IOC_SIZEBITS) {
+        n * 32
+    } else {
+        0
+    };
+    u64::from(SPI_IOC_MESSAGE_BASE | (size << _IOC_SIZESHIFT))
 }
 
 bitflags! {

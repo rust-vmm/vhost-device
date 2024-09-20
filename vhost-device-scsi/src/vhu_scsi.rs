@@ -33,7 +33,7 @@ const REQUEST_QUEUE: u16 = 2;
 type DescriptorChainWriter = virtio::DescriptorChainWriter<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 type DescriptorChainReader = virtio::DescriptorChainReader<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 
-pub(crate) struct VhostUserScsiBackend {
+pub struct VhostUserScsiBackend {
     event_idx: bool,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     targets: Vec<Box<dyn Target>>,
@@ -295,7 +295,7 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
         // access up to the size of the struct.
         let config_slice = unsafe {
             slice::from_raw_parts(
-                &config as *const virtio_scsi_config as *const u8,
+                (&config as *const virtio_scsi_config).cast::<u8>(),
                 mem::size_of::<virtio_scsi_config>(),
             )
         };
@@ -336,8 +336,7 @@ mod tests {
     };
     use virtio_queue::{mock::MockSplitQueue, Descriptor};
     use vm_memory::{
-        Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-        GuestMemoryMmap,
+        ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     };
 
     use super::VhostUserScsiBackend;

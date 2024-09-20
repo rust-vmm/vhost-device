@@ -33,19 +33,19 @@ pub trait InputDevice {
 
 impl InputDevice for Device {
     fn open(path: PathBuf) -> io::Result<Self> {
-        Device::open(path)
+        Self::open(path)
     }
 
     fn fetch_events(&mut self) -> io::Result<FetchEventsSynced<'_>> {
-        Device::fetch_events(self)
+        Self::fetch_events(self)
     }
 
     fn get_raw_fd(&self) -> RawFd {
-        Device::as_raw_fd(self)
+        Self::as_raw_fd(self)
     }
 
     fn input_id(&self) -> InputId {
-        Device::input_id(self)
+        Self::input_id(self)
     }
 }
 
@@ -61,6 +61,9 @@ macro_rules! ioctl_read_buf {
             for item in data.iter_mut() {
                 *item = $nr as u8;
             }
+            debug_assert!(!cfg!(target_pointer_width = "32"));
+            // We don't support 32bit platforms, so no wrap possible.
+            #[allow(clippy::cast_possible_wrap)]
             Ok(data.len() as i32)
         }
     )

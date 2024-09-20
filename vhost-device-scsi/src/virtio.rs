@@ -20,12 +20,12 @@ use vm_memory::{Bytes, GuestAddress, GuestMemory};
 /// virtio-scsi has its own format for LUNs, documented in 5.6.6.1 of virtio
 /// v1.1. This represents a LUN parsed from that format.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub(crate) enum VirtioScsiLun {
+pub enum VirtioScsiLun {
     ReportLuns,
     TargetLun(u8, u16),
 }
 
-pub(crate) const REPORT_LUNS: [u8; 8] = [0xc1, 0x01, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0];
+pub const REPORT_LUNS: [u8; 8] = [0xc1, 0x01, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0];
 
 impl VirtioScsiLun {
     pub(crate) const FLAT_SPACE_ADDRESSING_METHOD: u8 = 0b0100_0000;
@@ -56,7 +56,7 @@ impl VirtioScsiLun {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResponseCode {
+pub enum ResponseCode {
     Ok = 0,
     Overrun = 1,
     BadTarget = 3,
@@ -65,10 +65,10 @@ pub(crate) enum ResponseCode {
 
 // These are the defaults given in the virtio spec; QEMU doesn't let the driver
 // write to config space, so these will always be the correct values.
-pub(crate) const SENSE_SIZE: usize = 96;
-pub(crate) const CDB_SIZE: usize = 32;
+pub const SENSE_SIZE: usize = 96;
+pub const CDB_SIZE: usize = 32;
 
-pub(crate) struct Request {
+pub struct Request {
     pub id: u64,
     pub lun: VirtioScsiLun,
     pub prio: u8,
@@ -78,7 +78,7 @@ pub(crate) struct Request {
 }
 
 #[derive(Debug)]
-pub(crate) enum RequestParseError {
+pub enum RequestParseError {
     CouldNotReadGuestMemory(io::Error),
     FailedParsingLun([u8; 8]),
 }
@@ -108,7 +108,7 @@ impl Request {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Response {
+pub struct Response {
     pub response: ResponseCode,
     pub status: u8,
     pub status_qualifier: u16,

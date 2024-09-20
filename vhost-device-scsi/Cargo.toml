@@ -9,7 +9,8 @@ keywords = ["scsi", "vhost", "virt", "backend"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lints]
+workspace = true
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
@@ -31,4 +32,3 @@ vmm-sys-util = "0.12"
 [dev-dependencies]
 assert_matches = "1.5"
 tempfile = "3.12.0"
-

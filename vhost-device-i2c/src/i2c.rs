@@ -27,9 +27,9 @@ type IoctlRequest = c_ulong;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ThisError)]
 /// Errors related to low level i2c helpers
-pub(crate) enum Error {
+pub enum Error {
     #[error("Incorrect message length for {0} operation: {1}")]
     MessageLengthInvalid(&'static str, usize),
     #[error("Invalid SMBUS command: {0}")]
@@ -56,8 +56,8 @@ pub(crate) enum Error {
     ParseFailure,
 }
 
-/// Linux I2C/SMBUS definitions
-/// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further details.
+// Linux I2C/SMBUS definitions
+// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further details.
 
 /// NOTE: Slave address is 7 or 10 bits, but 10-bit addresses are NOT supported!
 /// (due to code brokenness)
@@ -66,7 +66,8 @@ const I2C_FUNCS: IoctlRequest = 0x0705; // Get the adapter functionality mask
 const I2C_RDWR: IoctlRequest = 0x0707; // Combined R/W transfer (one STOP only)
 const I2C_SMBUS: IoctlRequest = 0x0720; // SMBus transfer
 
-/// Functions
+// Functions
+
 const I2C_FUNC_I2C: u64 = 0x00000001;
 const I2C_FUNC_SMBUS_READ_BYTE: u64 = 0x00020000;
 const I2C_FUNC_SMBUS_WRITE_BYTE: u64 = 0x00040000;
@@ -83,13 +84,16 @@ const I2C_FUNC_SMBUS_WORD_DATA: u64 =
 const I2C_FUNC_SMBUS_ALL: u64 =
     I2C_FUNC_SMBUS_BYTE | I2C_FUNC_SMBUS_BYTE_DATA | I2C_FUNC_SMBUS_WORD_DATA;
 
-/// I2C protocol definitions
-pub(crate) const I2C_M_RD: u16 = 0x0001; // read data, from slave to master
+// I2C protocol definitions
 
+/// read data, from slave to master
+pub const I2C_M_RD: u16 = 0x0001;
+
+/// `I2cMsg` - an I2C transaction segment beginning with `START`
+///
 /// Copied (partially) from Linux's include/uapi/linux/i2c.h
 ///
-/// I2cMsg - an I2C transaction segment beginning with START
-///
+/// ```text
 /// @addr: Slave address, only 7 bit supported by virtio specification.
 ///
 /// @flags:
@@ -107,14 +111,14 @@ pub(crate) const I2C_M_RD: u16 = 0x0001; // read data, from slave to master
 /// An I2cMsg is the low level representation of one segment of an I2C
 /// transaction.
 ///
-/// Each transaction begins with a START.  That is followed by the slave
-/// address, and a bit encoding read versus write.  Then follow all the
-/// data bytes, possibly including a byte with SMBus PEC.  The transfer
+/// Each transaction begins with a START. That is followed by the slave
+/// address, and a bit encoding read versus write. Then follow all the
+/// data bytes, possibly including a byte with SMBus PEC. The transfer
 /// terminates with a NAK, or when all those bytes have been transferred
-/// and ACKed.  If this is the last message in a group, it is followed by
-/// a STOP.  Otherwise it is followed by the next @I2cMsg transaction
+/// and ACKed. If this is the last message in a group, it is followed by
+/// a STOP. Otherwise it is followed by the next @I2cMsg transaction
 /// segment, beginning with a (repeated) START.
-
+/// ```
 #[repr(C)]
 struct I2cMsg {
     addr: u16,
@@ -125,17 +129,19 @@ struct I2cMsg {
 
 /// This is the structure as used in the I2C_RDWR ioctl call
 #[repr(C)]
-pub(crate) struct I2cRdwrIoctlData {
+pub struct I2cRdwrIoctlData {
     msgs: *mut I2cMsg,
     nmsgs: u32,
 }
 
-/// SMBUS protocol definitions
-/// SMBUS read or write markers
+// SMBUS protocol definitions
+// SMBUS read or write markers
+
 const I2C_SMBUS_WRITE: u8 = 0;
 const I2C_SMBUS_READ: u8 = 1;
 
-/// SMBus transaction types (size parameter in the above functions)
+// SMBus transaction types (size parameter in the above functions)
+
 const I2C_SMBUS_QUICK: u32 = 0;
 const I2C_SMBUS_BYTE: u32 = 1;
 const I2C_SMBUS_BYTE_DATA: u32 = 2;
@@ -154,27 +160,27 @@ union I2cSmbusData {
 }
 
 impl I2cSmbusData {
-    fn read_byte(&self) -> u8 {
+    const fn read_byte(&self) -> u8 {
         // SAFETY: Safe as we will only read the relevant bytes.
         unsafe { self.byte }
     }
 
-    fn read_word(&self) -> u16 {
+    const fn read_word(&self) -> u16 {
         // SAFETY: Safe as we will only read the relevant bytes.
         unsafe { self.word }
     }
 }
 
-/// This is the structure as used in the I2C_SMBUS ioctl call
+/// This is the structure as used in the `I2C_SMBUS` ioctl call
 #[repr(C)]
-pub(crate) struct I2cSmbusIoctlData {
+pub struct I2cSmbusIoctlData {
     read_write: u8,
     command: u8,
     size: u32,
     data: *mut I2cSmbusData,
 }
 
-pub(crate) struct SmbusMsg {
+pub struct SmbusMsg {
     read_write: u8,
     command: u8,
     size: u32,
@@ -186,7 +192,7 @@ impl SmbusMsg {
     ///
     /// These smbus related functions try to reverse what Linux does, only
     /// support basic modes (up to word transfer).
-    fn new(reqs: &[I2cReq]) -> Result<SmbusMsg> {
+    fn new(reqs: &[I2cReq]) -> Result<Self> {
         let mut data = I2cSmbusData {
             block: [0; I2C_SMBUS_BLOCK_MAX + 2],
         };
@@ -204,14 +210,14 @@ impl SmbusMsg {
 
                 match reqs[0].len {
                     // Special Read requests
-                    0 => Ok(SmbusMsg {
+                    0 => Ok(Self {
                         read_write,
                         command: 0,
                         size: I2C_SMBUS_QUICK,
                         data: None,
                     }),
 
-                    1 => Ok(SmbusMsg {
+                    1 => Ok(Self {
                         read_write,
                         command: reqs[0].buf[0],
                         size: I2C_SMBUS_BYTE,
@@ -225,7 +231,7 @@ impl SmbusMsg {
                             Err(Error::MessageLengthInvalid("read", 2))
                         } else {
                             data.byte = reqs[0].buf[1];
-                            Ok(SmbusMsg {
+                            Ok(Self {
                                 read_write,
                                 command: reqs[0].buf[0],
                                 size: I2C_SMBUS_BYTE_DATA,
@@ -239,8 +245,9 @@ impl SmbusMsg {
                             // Special Read requests, reqs[0].len can be 0 or 1 only.
                             Err(Error::MessageLengthInvalid("read", 3))
                         } else {
-                            data.word = reqs[0].buf[1] as u16 | ((reqs[0].buf[2] as u16) << 8);
-                            Ok(SmbusMsg {
+                            data.word =
+                                u16::from(reqs[0].buf[1]) | (u16::from(reqs[0].buf[2]) << 8);
+                            Ok(Self {
                                 read_write,
                                 command: reqs[0].buf[0],
                                 size: I2C_SMBUS_WORD_DATA,
@@ -271,7 +278,7 @@ impl SmbusMsg {
                         reqs[1].len,
                     ))
                 } else {
-                    Ok(SmbusMsg {
+                    Ok(Self {
                         read_write: I2C_SMBUS_READ,
                         command: reqs[0].buf[0],
                         size: if reqs[1].len == 1 {
@@ -294,7 +301,7 @@ impl SmbusMsg {
 }
 
 /// I2C definitions
-pub(crate) struct I2cReq {
+pub struct I2cReq {
     pub addr: u16,
     pub flags: u16,
     pub len: u16,
@@ -307,7 +314,7 @@ pub(crate) struct I2cReq {
 /// be used outside of this crate. The purpose of this trait is to provide a
 /// mock implementation for the I2C driver so that we can test the I2C
 /// functionality without the need of a physical device.
-pub(crate) trait I2cDevice {
+pub trait I2cDevice {
     // Open the device specified by the adapter identifier, number or name.
     fn open(adapter_identifier: &AdapterIdentifier) -> Result<Self>
     where
@@ -332,14 +339,14 @@ pub(crate) trait I2cDevice {
 /// A physical I2C device. This structure can only be initialized on hosts
 /// where `/dev/i2c-XX` is available.
 #[derive(Debug)]
-pub(crate) struct PhysDevice {
+pub struct PhysDevice {
     file: File,
     adapter_no: u32,
 }
 
 impl PhysDevice {
     fn open_with(device_path: &str, adapter_no: u32) -> Result<Self> {
-        Ok(PhysDevice {
+        Ok(Self {
             file: OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -376,7 +383,7 @@ impl PhysDevice {
 impl I2cDevice for PhysDevice {
     fn open(adapter_identifier: &AdapterIdentifier) -> Result<Self> {
         let adapter_no = match adapter_identifier {
-            AdapterIdentifier::Name(adapter_name) => PhysDevice::find_adapter(adapter_name)?,
+            AdapterIdentifier::Name(adapter_name) => Self::find_adapter(adapter_name)?,
             AdapterIdentifier::Number(no) => *no,
         };
         let device_path = format!("/dev/i2c-{}", adapter_no);
@@ -436,10 +443,7 @@ impl I2cDevice for PhysDevice {
             read_write: msg.read_write,
             command: msg.command,
             size: msg.size,
-            data: match &mut msg.data {
-                Some(data) => data,
-                _ => std::ptr::null_mut(),
-            },
+            data: msg.data.as_mut().map_or(std::ptr::null_mut(), |data| data),
         };
 
         // SAFETY: Safe as the file is a valid I2C adapter, the kernel will only
@@ -470,7 +474,7 @@ impl I2cDevice for PhysDevice {
 }
 
 #[derive(Debug)]
-pub(crate) struct I2cAdapter<D: I2cDevice> {
+pub struct I2cAdapter<D: I2cDevice> {
     device: D,
     adapter_no: u32,
     smbus: bool,
@@ -478,7 +482,7 @@ pub(crate) struct I2cAdapter<D: I2cDevice> {
 
 impl<D: I2cDevice> I2cAdapter<D> {
     // Creates a new adapter corresponding to `device`.
-    fn new(mut device: D) -> Result<I2cAdapter<D>> {
+    fn new(mut device: D) -> Result<Self> {
         let smbus;
 
         let func = device.funcs()?;
@@ -490,7 +494,7 @@ impl<D: I2cDevice> I2cAdapter<D> {
             return Err(Error::AdapterFunctionInvalid(func));
         }
 
-        Ok(I2cAdapter {
+        Ok(Self {
             adapter_no: device.adapter_no(),
             device,
             smbus,
@@ -527,11 +531,11 @@ impl<D: I2cDevice> I2cAdapter<D> {
         Ok(())
     }
 
-    fn adapter_no(&self) -> u32 {
+    const fn adapter_no(&self) -> u32 {
         self.adapter_no
     }
 
-    fn is_smbus(&self) -> bool {
+    const fn is_smbus(&self) -> bool {
         self.smbus
     }
 
@@ -550,9 +554,9 @@ impl<D: I2cDevice> I2cAdapter<D> {
 }
 
 /// I2C map and helpers
-pub(crate) const MAX_I2C_VDEV: usize = 1 << 7;
+pub const MAX_I2C_VDEV: usize = 1 << 7;
 
-pub(crate) struct I2cMap<D: I2cDevice> {
+pub struct I2cMap<D: I2cDevice> {
     adapters: Vec<I2cAdapter<D>>,
     device_map: HashMap<u16, usize>,
 }
@@ -583,7 +587,7 @@ impl<D: I2cDevice> I2cMap<D> {
             adapters.push(adapter);
         }
 
-        Ok(I2cMap {
+        Ok(Self {
             adapters,
             device_map,
         })
@@ -610,7 +614,7 @@ impl<D: I2cDevice> I2cMap<D> {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub mod tests {
     use super::*;
     use crate::DeviceConfig;
     use vmm_sys_util::tempfile::TempFile;
@@ -639,7 +643,7 @@ pub(crate) mod tests {
     }
 
     impl DummyDevice {
-        fn find_adapter(_name: &str) -> Result<u32> {
+        const fn find_adapter(_name: &str) -> Result<u32> {
             Ok(11)
         }
     }
@@ -662,11 +666,11 @@ pub(crate) mod tests {
             Self: Sized,
         {
             match adapter_identifier {
-                AdapterIdentifier::Name(adapter_name) => Ok(DummyDevice {
-                    adapter_no: DummyDevice::find_adapter(adapter_name)?,
+                AdapterIdentifier::Name(adapter_name) => Ok(Self {
+                    adapter_no: Self::find_adapter(adapter_name)?,
                     ..Default::default()
                 }),
-                AdapterIdentifier::Number(adapter_no) => Ok(DummyDevice {
+                AdapterIdentifier::Number(adapter_no) => Ok(Self {
                     adapter_no: *adapter_no,
                     ..Default::default()
                 }),

@@ -42,7 +42,7 @@ type Result<T> = std::result::Result<T, Error>;
 /// - `SET PARAMETERS`
 ///
 ///   The driver negotiates the stream parameters (format, transport, etc) with
-/// the device.
+///   the device.
 ///
 ///   Possible valid transitions: `SET PARAMETERS`, `PREPARE`.
 ///
@@ -51,7 +51,7 @@ type Result<T> = std::result::Result<T, Error>;
 ///   The device prepares the stream (allocates resources, etc).
 ///
 ///   Possible valid transitions: `SET PARAMETERS`, `PREPARE`, `START`,
-/// `RELEASE`.   Output only: the driver transfers data for pre-buffing.
+///   `RELEASE`. Output only: the driver transfers data for pre-buffing.
 ///
 /// - `START`
 ///
@@ -156,21 +156,20 @@ impl PCMState {
 
 impl std::fmt::Display for PCMState {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use PCMState::*;
         match *self {
-            SetParameters => {
+            Self::SetParameters => {
                 write!(fmt, "VIRTIO_SND_R_PCM_SET_PARAMS")
             }
-            Prepare => {
+            Self::Prepare => {
                 write!(fmt, "VIRTIO_SND_R_PCM_PREPARE")
             }
-            Release => {
+            Self::Release => {
                 write!(fmt, "VIRTIO_SND_R_PCM_RELEASE")
             }
-            Start => {
+            Self::Start => {
                 write!(fmt, "VIRTIO_SND_R_PCM_START")
             }
-            Stop => {
+            Self::Stop => {
                 write!(fmt, "VIRTIO_SND_R_PCM_STOP")
             }
         }

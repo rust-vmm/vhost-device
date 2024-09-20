@@ -34,7 +34,7 @@ type RngDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 #[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-rng daemon.
-pub(crate) enum VuRngError {
+pub enum VuRngError {
     #[error("Descriptor not found")]
     DescriptorNotFound,
     #[error("Notification send failed")]
@@ -59,12 +59,12 @@ pub(crate) enum VuRngError {
 
 impl convert::From<VuRngError> for io::Error {
     fn from(e: VuRngError) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        Self::new(io::ErrorKind::Other, e)
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct VuRngTimerConfig {
+pub struct VuRngTimerConfig {
     period_ms: u128,
     period_start: Instant,
     max_bytes: usize,
@@ -73,7 +73,7 @@ pub(crate) struct VuRngTimerConfig {
 
 impl VuRngTimerConfig {
     pub fn new(period_ms: u128, max_bytes: usize) -> Self {
-        VuRngTimerConfig {
+        Self {
             period_ms,
             period_start: Instant::now(),
             max_bytes,
@@ -82,7 +82,7 @@ impl VuRngTimerConfig {
     }
 }
 
-pub(crate) struct VuRngBackend<T: ReadVolatile> {
+pub struct VuRngBackend<T: ReadVolatile> {
     event_idx: bool,
     timer: VuRngTimerConfig,
     rng_source: Arc<Mutex<T>>,
@@ -97,7 +97,7 @@ impl<T: ReadVolatile> VuRngBackend<T> {
         period_ms: u128,
         max_bytes: usize,
     ) -> std::result::Result<Self, std::io::Error> {
-        Ok(VuRngBackend {
+        Ok(Self {
             event_idx: false,
             rng_source,
             timer: VuRngTimerConfig::new(period_ms, max_bytes),
@@ -228,7 +228,7 @@ impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBacke
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(
@@ -325,8 +325,8 @@ mod tests {
     }
 
     impl MockRng {
-        fn new(permission_denied: bool) -> Self {
-            MockRng { permission_denied }
+        const fn new(permission_denied: bool) -> Self {
+            Self { permission_denied }
         }
     }
 
@@ -359,7 +359,7 @@ mod tests {
                 flags & !VRING_DESC_F_NEXT as u16
             };
 
-            let desc = Descriptor::new((0x100 * (i + 1)) as u64, 0x200, desc_flags, i + 1);
+            let desc = Descriptor::new(u64::from(0x100 * (i + 1)), 0x200, desc_flags, i + 1);
             vq.desc_table().store(i, desc).unwrap();
         }
 
@@ -561,7 +561,7 @@ mod tests {
 
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
         assert_eq!(backend.get_config(0, 0), vec![]);
-        assert!(backend.update_memory(mem).is_ok());
+        backend.update_memory(mem).unwrap();
 
         backend.set_event_idx(true);
         assert!(backend.event_idx);

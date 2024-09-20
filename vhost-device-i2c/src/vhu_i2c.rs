@@ -40,7 +40,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-i2c daemon.
-pub(crate) enum Error {
+pub enum Error {
     #[error("Failed to handle event, didn't match EPOLLIN")]
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
@@ -67,11 +67,11 @@ pub(crate) enum Error {
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        Self::new(io::ErrorKind::Other, e)
     }
 }
 
-/// I2C definitions from Virtio Spec
+// I2C definitions from Virtio Spec
 
 /// The final status written by the device
 const VIRTIO_I2C_MSG_OK: u8 = 0;
@@ -100,7 +100,7 @@ struct VirtioI2cInHdr {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioI2cInHdr {}
 
-pub(crate) struct VhostUserI2cBackend<D: I2cDevice> {
+pub struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
     pub exit_event: EventFd,
@@ -111,7 +111,7 @@ type I2cDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl<D: I2cDevice> VhostUserI2cBackend<D> {
     pub fn new(i2c_map: Arc<I2cMap<D>>) -> Result<Self> {
-        Ok(VhostUserI2cBackend {
+        Ok(Self {
             i2c_map,
             event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
@@ -304,7 +304,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cB
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
@@ -372,7 +372,7 @@ mod tests {
     // Prepares a single chain of descriptors
     fn prepare_desc_chain(
         start_addr: GuestAddress,
-        buf: &mut Vec<u8>,
+        buf: &mut [u8],
         flag: u32,
         client_addr: u16,
     ) -> I2cDescriptorChain {
@@ -398,7 +398,7 @@ mod tests {
         mem.write_obj::<VirtioI2cOutHdr>(out_hdr, desc_out.addr())
             .unwrap();
         vq.desc_table().store(index, desc_out).unwrap();
-        next_addr += desc_out.len() as u64;
+        next_addr += u64::from(desc_out.len());
         index += 1;
 
         // Buf descriptor: optional
@@ -419,7 +419,7 @@ mod tests {
             );
             mem.write(buf, desc_buf.addr()).unwrap();
             vq.desc_table().store(index, desc_buf).unwrap();
-            next_addr += desc_buf.len() as u64;
+            next_addr += u64::from(desc_buf.len());
             index += 1;
         }
 
@@ -498,11 +498,7 @@ mod tests {
             };
             f |= flag;
 
-            let offset = match addr {
-                Some(ref addr) => addr[i],
-                _ => 0x100,
-            };
-
+            let offset = addr.as_ref().map_or(0x100_u64, |addr| addr[i]);
             let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
             vq.desc_table().store(i as u16, desc).unwrap();
         }

@@ -24,7 +24,7 @@ impl TryFrom<SoundArgs> for SoundConfig {
     fn try_from(cmd_args: SoundArgs) -> Result<Self> {
         let socket = cmd_args.socket.trim().to_string();
 
-        Ok(SoundConfig::new(socket, false, cmd_args.backend))
+        Ok(Self::new(socket, false, cmd_args.backend))
     }
 }
 
@@ -46,7 +46,7 @@ mod tests {
 
     impl SoundArgs {
         fn from_args(socket: &str) -> Self {
-            SoundArgs {
+            Self {
                 socket: socket.to_string(),
                 backend: BackendType::default(),
             }

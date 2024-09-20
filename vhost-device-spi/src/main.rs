@@ -71,7 +71,7 @@ struct SpiConfiguration {
 
 impl SpiConfiguration {
     fn from(args: SpiArgs) -> Result<Self> {
-        Ok(SpiConfiguration {
+        Ok(Self {
             socket_path: args.socket_path,
             socket_count: args.socket_count.get(),
             device: args.device,

@@ -53,8 +53,10 @@ impl Drop for DbusSession {
 /// `PipewireTestHarness::new()`.
 #[non_exhaustive]
 pub struct PipewireTestHarness {
+    #[allow(dead_code)]
     pub dbus: DbusSession,
     pub pipewire_child: Child,
+    #[allow(dead_code)]
     pub tempdir: TempDir,
 }
 

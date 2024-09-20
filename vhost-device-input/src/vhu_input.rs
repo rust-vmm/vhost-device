@@ -45,7 +45,7 @@ const SYN_REPORT: u8 = 0x00;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct VuInputConfig {
+pub struct VuInputConfig {
     select: u8,
     subsel: u8,
     size: u8,
@@ -57,8 +57,8 @@ pub(crate) struct VuInputConfig {
 // thus it cannot meet the length VIRTIO_INPUT_CFG_SIZE (128) for the 'val' array.
 // Implement Default trait to accommodate array 'val'.
 impl Default for VuInputConfig {
-    fn default() -> VuInputConfig {
-        VuInputConfig {
+    fn default() -> Self {
+        Self {
             select: 0,
             subsel: 0,
             size: 0,
@@ -74,7 +74,7 @@ unsafe impl ByteValued for VuInputConfig {}
 
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct VuInputEvent {
+pub struct VuInputEvent {
     ev_type: u16,
     code: u16,
     value: u32,
@@ -86,7 +86,7 @@ unsafe impl ByteValued for VuInputEvent {}
 
 #[derive(Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-input daemon.
-pub(crate) enum VuInputError {
+pub enum VuInputError {
     #[error("Notification send failed")]
     SendNotificationFailed,
     #[error("Can't create eventFd")]
@@ -117,7 +117,7 @@ impl From<VuInputError> for io::Error {
     }
 }
 
-pub(crate) struct VuInputBackend<T: InputDevice> {
+pub struct VuInputBackend<T: InputDevice> {
     event_idx: bool,
     ev_dev: T,
     pub exit_event: EventFd,
@@ -129,7 +129,7 @@ pub(crate) struct VuInputBackend<T: InputDevice> {
 
 impl<T: InputDevice> VuInputBackend<T> {
     pub fn new(ev_dev: T) -> std::result::Result<Self, std::io::Error> {
-        Ok(VuInputBackend {
+        Ok(Self {
             event_idx: false,
             ev_dev,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuInputError::EventFdError)?,
@@ -144,7 +144,9 @@ impl<T: InputDevice> VuInputBackend<T> {
         let last_sync_index = self
             .ev_list
             .iter()
-            .rposition(|event| event.ev_type == EV_SYN as u16 && event.code == SYN_REPORT as u16)
+            .rposition(|event| {
+                event.ev_type == u16::from(EV_SYN) && event.code == u16::from(SYN_REPORT)
+            })
             .unwrap_or(0);
 
         if last_sync_index == 0 {
@@ -438,8 +440,8 @@ mod tests {
     struct MockDevice;
 
     impl InputDevice for MockDevice {
-        fn open(_path: PathBuf) -> io::Result<MockDevice> {
-            Ok(MockDevice {})
+        fn open(_path: PathBuf) -> io::Result<Self> {
+            Ok(Self {})
         }
 
         fn fetch_events(&mut self) -> io::Result<FetchEventsSynced<'_>> {
@@ -510,12 +512,7 @@ mod tests {
         // an error is generated.
         assert_eq!(
             backend
-                .handle_event(
-                    EVENT_ID_IN_VRING_EPOLL as u16,
-                    EventSet::OUT,
-                    &[vring.clone()],
-                    0
-                )
+                .handle_event(EVENT_ID_IN_VRING_EPOLL as u16, EventSet::OUT, &[vring], 0)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::Other
@@ -605,15 +602,15 @@ mod tests {
             .unwrap();
 
         let ev_raw_data = VuInputEvent {
-            ev_type: EV_KEY as u16,
-            code: SYN_REPORT as u16,
+            ev_type: u16::from(EV_KEY),
+            code: u16::from(SYN_REPORT),
             value: 0,
         };
         backend.ev_list.push_back(ev_raw_data);
 
         let ev_raw_data = VuInputEvent {
-            ev_type: EV_SYN as u16,
-            code: SYN_REPORT as u16,
+            ev_type: u16::from(EV_SYN),
+            code: u16::from(SYN_REPORT),
             value: 0,
         };
         backend.ev_list.push_back(ev_raw_data);
@@ -626,15 +623,15 @@ mod tests {
         assert_eq!(backend.ev_list.len(), 0);
 
         let ev_raw_data = VuInputEvent {
-            ev_type: EV_KEY as u16,
-            code: SYN_REPORT as u16,
+            ev_type: u16::from(EV_KEY),
+            code: u16::from(SYN_REPORT),
             value: 0,
         };
         backend.ev_list.push_back(ev_raw_data);
 
         let ev_raw_data = VuInputEvent {
-            ev_type: EV_SYN as u16,
-            code: SYN_REPORT as u16,
+            ev_type: u16::from(EV_SYN),
+            code: u16::from(SYN_REPORT),
             value: 0,
         };
         backend.ev_list.push_back(ev_raw_data);
@@ -850,7 +847,7 @@ mod tests {
 
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
         assert_eq!(backend.get_config(0, 0), vec![]);
-        assert!(backend.update_memory(mem.clone()).is_ok());
+        backend.update_memory(mem).unwrap();
 
         backend.set_event_idx(true);
         assert!(backend.event_idx);

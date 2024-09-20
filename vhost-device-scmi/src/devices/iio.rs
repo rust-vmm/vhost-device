@@ -376,7 +376,7 @@ impl IIOSensor {
         custom_exponent
     }
 
-    fn add_axis(&mut self, axes: &mut Vec<Axis>, path: &OsStr) {
+    fn add_axis(&self, axes: &mut Vec<Axis>, path: &OsStr) {
         let unit_exponent = UNIT_MAPPING
             .iter()
             .find(|mapping| mapping.channel == self.channel)
@@ -496,11 +496,11 @@ mod tests {
     }
 
     impl IIODirectory {
-        fn new(files: &[(&str, &str)]) -> IIODirectory {
+        fn new(files: &[(&str, &str)]) -> Self {
             let path = make_directory("_test");
-            let directory = IIODirectory { path };
+            let directory = Self { path };
             for (file, content) in files.iter() {
-                fs::write(&directory.path.join(file), content).unwrap();
+                fs::write(directory.path.join(file), content).unwrap();
             }
             directory
         }

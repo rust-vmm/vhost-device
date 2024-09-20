@@ -22,16 +22,16 @@ use super::{
 };
 use crate::scsi::{sense, CmdError, CmdOutput, TaskAttr};
 
-pub(crate) enum MediumRotationRate {
+pub enum MediumRotationRate {
     Unreported,
     NonRotating,
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(crate) struct ByteOffset(u64);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd)]
+pub struct ByteOffset(u64);
 impl From<u64> for ByteOffset {
     fn from(value: u64) -> Self {
-        ByteOffset(value)
+        Self(value)
     }
 }
 impl From<ByteOffset> for u64 {
@@ -47,23 +47,23 @@ impl Div<BlockSize> for ByteOffset {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(crate) struct BlockSize(NonZeroU32);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd)]
+pub struct BlockSize(NonZeroU32);
 impl From<BlockSize> for u32 {
     fn from(value: BlockSize) -> Self {
-        u32::from(value.0)
+        Self::from(value.0)
     }
 }
 impl TryFrom<u32> for BlockSize {
     type Error = TryFromIntError;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
-        Ok(BlockSize(NonZeroU32::try_from(value)?))
+        Ok(Self(NonZeroU32::try_from(value)?))
     }
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(crate) struct BlockOffset(u64);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd)]
+pub struct BlockOffset(u64);
 impl From<BlockOffset> for u64 {
     fn from(value: BlockOffset) -> Self {
         value.0
@@ -71,21 +71,21 @@ impl From<BlockOffset> for u64 {
 }
 impl From<u64> for BlockOffset {
     fn from(value: u64) -> Self {
-        BlockOffset(value)
+        Self(value)
     }
 }
-impl Add<BlockOffset> for BlockOffset {
-    type Output = BlockOffset;
-
-    fn add(self, rhs: BlockOffset) -> Self::Output {
-        BlockOffset(self.0 + rhs.0)
-    }
-}
-impl Sub<BlockOffset> for BlockOffset {
+impl Add<Self> for BlockOffset {
     type Output = Self;
 
-    fn sub(self, rhs: BlockOffset) -> Self::Output {
-        BlockOffset(self.0 - rhs.0)
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+impl Sub<Self> for BlockOffset {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
     }
 }
 impl Mul<BlockSize> for BlockOffset {
@@ -96,7 +96,7 @@ impl Mul<BlockSize> for BlockOffset {
     }
 }
 
-pub(crate) trait BlockDeviceBackend: Send + Sync {
+pub trait BlockDeviceBackend: Send + Sync {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: ByteOffset) -> io::Result<()>;
     fn write_exact_at(&mut self, buf: &[u8], offset: ByteOffset) -> io::Result<()>;
     fn size_in_blocks(&mut self) -> io::Result<BlockOffset>;
@@ -104,7 +104,7 @@ pub(crate) trait BlockDeviceBackend: Send + Sync {
     fn sync(&mut self) -> io::Result<()>;
 }
 
-pub(crate) struct FileBackend {
+pub struct FileBackend {
     file: File,
     block_size: BlockSize,
 }
@@ -142,7 +142,7 @@ impl BlockDeviceBackend for FileBackend {
     }
 }
 
-pub(crate) struct BlockDevice<T: BlockDeviceBackend> {
+pub struct BlockDevice<T: BlockDeviceBackend> {
     backend: T,
     write_protected: bool,
     rotation_rate: MediumRotationRate,
@@ -216,6 +216,7 @@ impl<T: BlockDeviceBackend> BlockDevice<T> {
 }
 
 impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
+    #[allow(clippy::cognitive_complexity)]
     fn execute_command(
         &mut self,
         data_in: &mut SilentlyTruncate<&mut dyn Write>,

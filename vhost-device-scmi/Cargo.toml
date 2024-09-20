@@ -9,6 +9,9 @@ keywords = ["scmi", "vhost", "virt", "backend"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [dependencies]
 clap = { version = "4.5",  features = ["derive"] }
 env_logger = "0.11"

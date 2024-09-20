@@ -20,9 +20,9 @@ use crate::{linux_spi::*, vhu_spi::VirtioSpiConfig, virtio_spi::*};
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ThisError)]
 /// Errors related to low level spi helpers
-pub(crate) enum Error {
+pub enum Error {
     #[error("Ioctl command failed for {0} operation: {1}")]
     IoctlFailure(&'static str, IoError),
     #[error("Failed to open spi controller")]
@@ -30,7 +30,7 @@ pub(crate) enum Error {
 }
 
 /// SPI definitions
-pub(crate) struct SpiTransReq {
+pub struct SpiTransReq {
     pub tx_buf: Vec<u8>,
     pub rx_buf: Vec<u8>,
     pub trans_len: u32,
@@ -51,7 +51,7 @@ pub(crate) struct SpiTransReq {
 /// be used outside of this crate. The purpose of this trait is to provide a
 /// mock implementation for the SPI driver so that we can test the SPI
 /// functionality without the need of a physical device.
-pub(crate) trait SpiDevice {
+pub trait SpiDevice {
     /// Open the device specified by the controller path.
     fn open(path: &Path) -> Result<Self>
     where
@@ -85,13 +85,13 @@ pub(crate) trait SpiDevice {
 /// A physical SPI device. This structure can only be initialized on hosts
 /// where `/dev/spidevX.Y` is available.
 #[derive(Debug)]
-pub(crate) struct PhysDevice {
+pub struct PhysDevice {
     file: File,
 }
 
 impl SpiDevice for PhysDevice {
     fn open(path: &Path) -> Result<Self> {
-        Ok(PhysDevice {
+        Ok(Self {
             file: OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -206,6 +206,7 @@ impl SpiDevice for PhysDevice {
         }
     }
 
+    #[allow(clippy::cognitive_complexity)]
     fn detect_supported_features(&self) -> Result<VirtioSpiConfig> {
         // supported cs_max_number 1
         // can't set cs timing from userland in Linux, reserve cs timing as 0
@@ -468,20 +469,20 @@ impl SpiDevice for PhysDevice {
 }
 
 #[derive(Debug)]
-pub(crate) struct SpiController<D: SpiDevice> {
+pub struct SpiController<D: SpiDevice> {
     device: D,
     config: VirtioSpiConfig,
 }
 
 impl<D: SpiDevice> SpiController<D> {
     // Creates a new controller corresponding to `device`.
-    pub(crate) fn new(device: D) -> Result<SpiController<D>> {
+    pub(crate) fn new(device: D) -> Result<Self> {
         let config: VirtioSpiConfig = device.detect_supported_features()?;
 
-        Ok(SpiController { device, config })
+        Ok(Self { device, config })
     }
 
-    pub(crate) fn config(&self) -> &VirtioSpiConfig {
+    pub(crate) const fn config(&self) -> &VirtioSpiConfig {
         &self.config
     }
 

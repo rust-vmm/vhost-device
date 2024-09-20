@@ -38,7 +38,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-spi daemon.
-pub(crate) enum Error {
+pub enum Error {
     #[error("TX length  {0} and RX length {1} don't match")]
     TxRxTrnasLenNotEqual(u32, u32),
     #[error("TX length and RX length are both zero")]
@@ -65,7 +65,7 @@ pub(crate) enum Error {
 
 impl From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        Self::new(io::ErrorKind::Other, e)
     }
 }
 
@@ -113,9 +113,9 @@ struct VirtioSpiTransferResult {
 unsafe impl ByteValued for VirtioSpiTransferResult {}
 
 /// Virtio SPI Configuration
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct VirtioSpiConfig {
+pub struct VirtioSpiConfig {
     pub(crate) cs_max_number: u8,
     pub(crate) cs_change_supported: u8,
     pub(crate) tx_nbits_supported: u8,
@@ -133,7 +133,7 @@ pub(crate) struct VirtioSpiConfig {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioSpiConfig {}
 
-pub(crate) struct VhostUserSpiBackend<D: SpiDevice> {
+pub struct VhostUserSpiBackend<D: SpiDevice> {
     spi_ctrl: Arc<SpiController<D>>,
     event_idx: bool,
     pub exit_event: EventFd,
@@ -144,7 +144,7 @@ type SpiDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl<D: SpiDevice> VhostUserSpiBackend<D> {
     pub fn new(spi_ctrl: Arc<SpiController<D>>) -> Result<Self> {
-        Ok(VhostUserSpiBackend {
+        Ok(Self {
             spi_ctrl,
             event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
@@ -352,7 +352,7 @@ impl<D: SpiDevice> VhostUserSpiBackend<D> {
                         status: ResponseStatus::TransErr as u8,
                     };
 
-                    for desc_chain in requests.clone() {
+                    for desc_chain in requests {
                         let len = size_of::<VirtioSpiTransferResult>() as u32;
                         let mem = atomic_mem.memory();
 

@@ -182,8 +182,8 @@ mod tests {
     struct MockDevice;
 
     impl InputDevice for MockDevice {
-        fn open(_path: PathBuf) -> io::Result<MockDevice> {
-            Ok(MockDevice {})
+        fn open(_path: PathBuf) -> io::Result<Self> {
+            Ok(Self {})
         }
 
         fn fetch_events(&mut self) -> io::Result<FetchEventsSynced<'_>> {
@@ -241,7 +241,7 @@ mod tests {
 
         // An invalid socket path should trigger daemon failure.
         assert_matches!(
-            start_backend::<MockDevice>(config.clone()).unwrap_err(),
+            start_backend::<MockDevice>(config).unwrap_err(),
             Error::ServeFailed(_)
         );
     }

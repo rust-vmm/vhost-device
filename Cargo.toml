@@ -13,3 +13,39 @@ members = [
     "vhost-device-template",
     "vhost-device-vsock",
 ]
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+redundant_explicit_links = "deny"
+
+[workspace.lints.clippy]
+enum_glob_use = "deny"
+# groups
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# restriction
+dbg_macro = "deny"
+rc_buffer = "deny"
+as_underscore = "deny"
+assertions_on_result_states = "deny"
+# pedantic
+cast_lossless = "deny"
+cast_possible_wrap = "deny"
+cast_ptr_alignment = "deny"
+naive_bytecount = "deny"
+ptr_as_ptr = "deny"
+bool_to_int_with_if = "deny"
+borrow_as_ptr = "deny"
+case_sensitive_file_extension_comparisons = "deny"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"
+missing_safety_doc = "deny"
+undocumented_unsafe_blocks = "deny"
+option_if_let_else = "allow"

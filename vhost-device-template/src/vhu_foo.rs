@@ -32,7 +32,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-foo daemon.
-pub(crate) enum Error {
+pub enum Error {
     #[error("Failed to handle event, didn't match EPOLLIN")]
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
@@ -47,11 +47,11 @@ pub(crate) enum Error {
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        Self::new(io::ErrorKind::Other, e)
     }
 }
 
-pub(crate) struct VhostUserFooBackend {
+pub struct VhostUserFooBackend {
     info: FooInfo,
     event_idx: bool,
     pub exit_event: EventFd,
@@ -62,7 +62,7 @@ type FooDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl VhostUserFooBackend {
     pub fn new(info: FooInfo) -> Result<Self> {
-        Ok(VhostUserFooBackend {
+        Ok(Self {
             info,
             event_idx: false,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
@@ -85,7 +85,7 @@ impl VhostUserFooBackend {
         //
         // The layout of the various structures, to be read from and written into the descriptor
         // buffers, is defined in the Virtio specification for each protocol.
-        for desc_chain in requests.clone() {
+        for desc_chain in requests {
             let counter = self.info.counter();
             let descriptors: Vec<_> = desc_chain.clone().collect();
 
@@ -266,7 +266,7 @@ mod tests {
     fn prepare_descriptors(
         mut next_addr: u64,
         mem: &GuestMemoryLoadGuard<GuestMemoryMmap<()>>,
-        buf: &mut Vec<u8>,
+        buf: &[u8],
     ) -> Vec<Descriptor> {
         let mut descriptors = Vec::new();
         let mut index = 0;
@@ -284,7 +284,7 @@ mod tests {
             VRING_DESC_F_NEXT as u16,
             index + 1,
         );
-        next_addr += desc_out.len() as u64;
+        next_addr += u64::from(desc_out.len());
         index += 1;
 
         mem.write_obj::<VirtioFooOutHdr>(out_hdr, desc_out.addr())
@@ -299,7 +299,7 @@ mod tests {
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 index + 1,
             );
-            next_addr += desc_buf.len() as u64;
+            next_addr += u64::from(desc_buf.len());
 
             mem.write(buf, desc_buf.addr()).unwrap();
             descriptors.push(desc_buf);
@@ -317,7 +317,7 @@ mod tests {
     }
 
     // Prepares a single chain of descriptors
-    fn prepare_desc_chain(buf: &mut Vec<u8>) -> (VhostUserFooBackend, VringRwLock) {
+    fn prepare_desc_chain(buf: &[u8]) -> (VhostUserFooBackend, VringRwLock) {
         let (mut backend, mem, vring) = init();
         let mem_handle = mem.memory();
         let vq = MockSplitQueue::new(&*mem_handle, 16);
@@ -351,7 +351,7 @@ mod tests {
     // Prepares a chain of descriptors
     fn prepare_desc_chains(
         mem: &GuestMemoryAtomic<GuestMemoryMmap>,
-        buf: &mut Vec<u8>,
+        buf: &[u8],
     ) -> FooDescriptorChain {
         let mem_handle = mem.memory();
         let vq = MockSplitQueue::new(&*mem_handle, 16);
@@ -395,8 +395,8 @@ mod tests {
     #[test]
     fn process_request_single() {
         // Single valid descriptor
-        let mut buf: Vec<u8> = vec![0; 30];
-        let (mut backend, vring) = prepare_desc_chain(&mut buf);
+        let buf: Vec<u8> = vec![0; 30];
+        let (mut backend, vring) = prepare_desc_chain(&buf);
         backend.process_queue(&vring).unwrap();
     }
 
@@ -405,19 +405,17 @@ mod tests {
         // Multiple valid descriptors
         let (mut backend, mem, vring) = init();
 
-        let mut bufs: Vec<Vec<u8>> = vec![vec![0; 30]; 6];
+        let bufs: Vec<Vec<u8>> = vec![vec![0; 30]; 6];
         let desc_chains = vec![
-            prepare_desc_chains(&mem, &mut bufs[0]),
-            prepare_desc_chains(&mem, &mut bufs[1]),
-            prepare_desc_chains(&mem, &mut bufs[2]),
-            prepare_desc_chains(&mem, &mut bufs[3]),
-            prepare_desc_chains(&mem, &mut bufs[4]),
-            prepare_desc_chains(&mem, &mut bufs[5]),
+            prepare_desc_chains(&mem, &bufs[0]),
+            prepare_desc_chains(&mem, &bufs[1]),
+            prepare_desc_chains(&mem, &bufs[2]),
+            prepare_desc_chains(&mem, &bufs[3]),
+            prepare_desc_chains(&mem, &bufs[4]),
+            prepare_desc_chains(&mem, &bufs[5]),
         ];
 
-        backend
-            .process_requests(desc_chains.clone(), &vring)
-            .unwrap();
+        backend.process_requests(desc_chains, &vring).unwrap();
     }
 
     #[test]

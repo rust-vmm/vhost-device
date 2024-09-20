@@ -99,7 +99,7 @@ impl TryFrom<RngArgs> for VuRngConfig {
         // to avoid overwhelming the HW.
         let max_bytes = max_bytes / socket_count as usize;
 
-        Ok(VuRngConfig {
+        Ok(Self {
             period_ms: period,
             max_bytes,
             count: socket_count,

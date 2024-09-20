@@ -28,7 +28,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, ThisError)]
 /// Errors related to low level i2c helpers
-pub(crate) enum Error {
+enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
     #[error("Failed while parsing adapter identifier")]
@@ -79,8 +79,8 @@ enum AdapterIdentifier {
 impl fmt::Display for AdapterIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AdapterIdentifier::Name(name) => write!(f, "adapter_name: {}", name),
-            AdapterIdentifier::Number(no) => write!(f, "adapter_no:: {}", no),
+            Self::Name(name) => write!(f, "adapter_name: {}", name),
+            Self::Number(no) => write!(f, "adapter_no:: {}", no),
         }
     }
 }
@@ -93,14 +93,14 @@ struct DeviceConfig {
 
 impl DeviceConfig {
     fn new_with_no(no: u32) -> Result<Self> {
-        Ok(DeviceConfig {
+        Ok(Self {
             adapter: AdapterIdentifier::Number(no),
             addr: Vec::new(),
         })
     }
 
     fn new_with_name(name: &str) -> Result<Self> {
-        Ok(DeviceConfig {
+        Ok(Self {
             adapter: AdapterIdentifier::Name(name.trim().to_string()),
             addr: Vec::new(),
         })
@@ -121,14 +121,15 @@ impl DeviceConfig {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) struct AdapterConfig {
+struct AdapterConfig {
     inner: Vec<DeviceConfig>,
 }
 
 impl AdapterConfig {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { inner: Vec::new() }
     }
+
     fn contains_adapter(&self, adapter: &DeviceConfig) -> bool {
         self.inner
             .iter()
@@ -160,7 +161,7 @@ impl TryFrom<&str> for AdapterConfig {
 
     fn try_from(list: &str) -> Result<Self> {
         let adapter_identifiers: Vec<&str> = list.split(',').collect();
-        let mut devices = AdapterConfig::new();
+        let mut devices = Self::new();
 
         for identifier_info in adapter_identifiers.iter() {
             let list: Vec<&str> = identifier_info.split(':').collect();
@@ -227,7 +228,7 @@ impl TryFrom<I2cArgs> for I2cConfiguration {
         }
 
         let devices = AdapterConfig::try_from(args.device_list.trim())?;
-        Ok(I2cConfiguration {
+        Ok(Self {
             socket_path: args.socket_path,
             socket_count: args.socket_count,
             devices,
@@ -320,7 +321,7 @@ mod tests {
 
     impl DeviceConfig {
         pub fn new_with(adaper_id: AdapterIdentifier, addr: Vec<u16>) -> Self {
-            DeviceConfig {
+            Self {
                 adapter: adaper_id,
                 addr,
             }
@@ -329,13 +330,13 @@ mod tests {
 
     impl AdapterConfig {
         pub fn new_with(devices: Vec<DeviceConfig>) -> Self {
-            AdapterConfig { inner: devices }
+            Self { inner: devices }
         }
     }
 
     impl I2cArgs {
-        fn from_args(path: &str, devices: &str, count: usize) -> I2cArgs {
-            I2cArgs {
+        fn from_args(path: &str, devices: &str, count: usize) -> Self {
+            Self {
                 socket_path: path.into(),
                 socket_count: count,
                 device_list: devices.to_string(),

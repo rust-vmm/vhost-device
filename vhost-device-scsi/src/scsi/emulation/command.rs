@@ -20,7 +20,7 @@ use crate::scsi::emulation::mode_page::ModePage;
 /// One of the modes supported by SCSI's REPORT LUNS command.
 #[derive(PartialEq, Eq, TryFromPrimitive, Debug, Copy, Clone)]
 #[repr(u8)]
-pub(crate) enum ReportLunsSelectReport {
+pub enum ReportLunsSelectReport {
     NoWellKnown = 0x0,
     WellKnownOnly = 0x1,
     All = 0x2,
@@ -31,7 +31,7 @@ pub(crate) enum ReportLunsSelectReport {
 
 /// A type of "vital product data" page returned by SCSI's INQUIRY command.
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
-pub(crate) enum VpdPage {
+pub enum VpdPage {
     Ascii(u8),
     Ata,                        // *
     BlockDeviceCharacteristics, // *
@@ -63,7 +63,7 @@ pub(crate) enum VpdPage {
 
 #[derive(PartialEq, Eq, TryFromPrimitive, Debug, Copy, Clone)]
 #[repr(u8)]
-pub(crate) enum ModeSensePageControl {
+pub enum ModeSensePageControl {
     Current = 0b00,
     Changeable = 0b01,
     Default = 0b10,
@@ -140,24 +140,24 @@ impl From<VpdPage> for u8 {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum SenseFormat {
+pub enum SenseFormat {
     Fixed,
     Descriptor,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum ModePageSelection {
+pub enum ModePageSelection {
     AllPageZeros,
     Single(ModePage),
 }
 
 #[derive(Debug)]
-pub(crate) enum LunIndependentCommand {
+pub enum LunIndependentCommand {
     ReportLuns(ReportLunsSelectReport),
 }
 
 #[derive(Debug)]
-pub(crate) enum LunSpecificCommand {
+pub enum LunSpecificCommand {
     Inquiry(Option<VpdPage>),
     ModeSense6 {
         pc: ModeSensePageControl,
@@ -201,13 +201,13 @@ pub(crate) enum LunSpecificCommand {
 }
 
 #[derive(Debug)]
-pub(crate) enum Command {
+pub enum Command {
     LunIndependentCommand(LunIndependentCommand),
     LunSpecificCommand(LunSpecificCommand),
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum CommandType {
+pub enum CommandType {
     Inquiry,
     ModeSense6,
     Read10,
@@ -222,7 +222,7 @@ pub(crate) enum CommandType {
     SynchronizeCache10,
 }
 
-pub(crate) const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
+pub const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
     (CommandType::TestUnitReady, (0x0, None)),
     (CommandType::RequestSense, (0x3, None)),
     (CommandType::Inquiry, (0x12, None)),
@@ -241,7 +241,7 @@ pub(crate) const OPCODES: &[(CommandType, (u8, Option<u16>))] = &[
 ];
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct UnparsedServiceAction(u8);
+pub struct UnparsedServiceAction(u8);
 impl UnparsedServiceAction {
     pub fn parse(self, service_action: u16) -> Option<CommandType> {
         OPCODES
@@ -253,7 +253,7 @@ impl UnparsedServiceAction {
 
 /// See `parse_opcode`
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ParseOpcodeResult {
+pub enum ParseOpcodeResult {
     /// The opcode represents a single command.
     Command(CommandType),
     /// The opcode requires a service action.
@@ -280,7 +280,7 @@ pub(crate) enum ParseOpcodeResult {
 /// - `ServiceAction`: the opcode is the first byte of a service action; the
 ///   caller needs to call .parse() on the `UnparsedServiceAction` we returned
 ///   with the service action byte.
-pub(crate) fn parse_opcode(opcode: u8) -> ParseOpcodeResult {
+pub fn parse_opcode(opcode: u8) -> ParseOpcodeResult {
     let found = OPCODES.iter().find(|(_, (x, _))| *x == opcode);
     match found {
         Some(&(ty, (_, None))) => ParseOpcodeResult::Command(ty),
@@ -464,14 +464,14 @@ impl CommandType {
 }
 
 #[derive(Debug)]
-pub(crate) struct Cdb {
+pub struct Cdb {
     pub command: Command,
     pub allocation_length: Option<u32>,
     pub naca: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub(crate) enum ParseError {
+pub enum ParseError {
     /// The opcode (specifically the first byte of the CDB) is unknown, i.e. we
     /// should respond with INVALID COMMAND OPERATION CODE
     InvalidCommand,
@@ -483,7 +483,7 @@ pub(crate) enum ParseError {
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub(crate) enum ReportSupportedOpCodesMode {
+pub enum ReportSupportedOpCodesMode {
     All,
     OneCommand(u8),
     OneServiceAction(u8, u16),

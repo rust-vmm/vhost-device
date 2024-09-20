@@ -14,7 +14,7 @@ use super::{
 };
 use crate::scsi::{sense, CmdError, CmdOutput, Request, Target, TaskAttr};
 
-pub(crate) struct LunRequest {
+pub struct LunRequest {
     pub _id: u64,
     pub task_attr: TaskAttr,
     pub crn: u8,
@@ -24,7 +24,7 @@ pub(crate) struct LunRequest {
 }
 
 /// A single logical unit of an emulated SCSI device.
-pub(crate) trait LogicalUnit: Send + Sync {
+pub trait LogicalUnit: Send + Sync {
     /// Process a SCSI command sent to this logical unit.
     ///
     /// # Return value
@@ -45,7 +45,7 @@ pub(crate) trait LogicalUnit: Send + Sync {
 }
 
 /// A SCSI target implemented by emulating a device within vhost-device-scsi.
-pub(crate) struct EmulatedTarget {
+pub struct EmulatedTarget {
     luns: Vec<Box<dyn LogicalUnit>>,
 }
 
@@ -58,7 +58,7 @@ impl EmulatedTarget {
         self.luns.push(logical_unit);
     }
 
-    pub(crate) fn luns(&self) -> impl Iterator<Item = u16> + ExactSizeIterator + '_ {
+    pub(crate) fn luns(&self) -> impl ExactSizeIterator<Item = u16> + '_ {
         // unwrap is safe: we limit LUNs at 256
         self.luns
             .iter()

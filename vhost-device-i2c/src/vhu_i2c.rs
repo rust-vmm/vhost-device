@@ -372,7 +372,7 @@ mod tests {
     // Prepares a single chain of descriptors
     fn prepare_desc_chain(
         start_addr: GuestAddress,
-        buf: &mut Vec<u8>,
+        buf: &mut [u8],
         flag: u32,
         client_addr: u16,
     ) -> I2cDescriptorChain {

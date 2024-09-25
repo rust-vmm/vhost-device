@@ -53,9 +53,9 @@ impl Drop for DbusSession {
 /// `PipewireTestHarness::new()`.
 #[non_exhaustive]
 pub struct PipewireTestHarness {
-    pub dbus: DbusSession,
+    pub _dbus: DbusSession,
     pub pipewire_child: Child,
-    pub tempdir: TempDir,
+    pub _tempdir: TempDir,
 }
 
 pub fn launch_pipewire(
@@ -92,9 +92,9 @@ impl PipewireTestHarness {
         std::env::set_var("XDG_RUNTIME_DIR", tempdir.path());
 
         Self {
-            dbus: dbus_session,
+            _dbus: dbus_session,
             pipewire_child,
-            tempdir,
+            _tempdir: tempdir,
         }
     }
 }

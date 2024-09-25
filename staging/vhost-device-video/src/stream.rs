@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 // Null Backend does not use all stream capabilities
-#![cfg_attr(not(any(feature)), allow(dead_code))]
+#![cfg_attr(not(any(feature = "default")), allow(dead_code))]
 
 use std::{
     collections::HashMap,

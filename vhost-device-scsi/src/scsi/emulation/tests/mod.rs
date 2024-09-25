@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-#![cfg(test)]
-
 mod bad_lun;
 mod generic;
 mod report_supported_operation_codes;

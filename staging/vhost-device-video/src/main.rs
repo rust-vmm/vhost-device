@@ -104,6 +104,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    #[cfg(feature = "v4l2-decoder")]
     use rstest::*;
     use tempfile::tempdir;
 
@@ -125,6 +126,7 @@ mod tests {
         backend: BackendType::Null,
     })]
     // Selecting different decoder
+    #[cfg(feature = "v4l2-decoder")]
     #[case::set_v4l2_decoder(vec![" ", "--socket-path", "long-video.sock", "-b", "v4l2-decoder"],
     VideoArgs {
         socket_path: "long-video.sock".into(),
@@ -137,6 +139,7 @@ mod tests {
         assert_eq!(VuVideoConfig::from(command_line), VuVideoConfig::from(args));
     }
 
+    #[cfg(feature = "v4l2-decoder")]
     #[test]
     fn test_fail_create_backend() {
         use vhu_video::VuVideoError;

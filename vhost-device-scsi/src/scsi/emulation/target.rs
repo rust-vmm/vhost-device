@@ -58,7 +58,7 @@ impl EmulatedTarget {
         self.luns.push(logical_unit);
     }
 
-    pub(crate) fn luns(&self) -> impl Iterator<Item = u16> + ExactSizeIterator + '_ {
+    pub(crate) fn luns(&self) -> impl ExactSizeIterator<Item = u16> + '_ {
         // unwrap is safe: we limit LUNs at 256
         self.luns
             .iter()

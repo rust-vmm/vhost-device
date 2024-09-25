@@ -266,7 +266,7 @@ mod tests {
     fn prepare_descriptors(
         mut next_addr: u64,
         mem: &GuestMemoryLoadGuard<GuestMemoryMmap<()>>,
-        buf: &mut Vec<u8>,
+        buf: &mut [u8],
     ) -> Vec<Descriptor> {
         let mut descriptors = Vec::new();
         let mut index = 0;
@@ -317,7 +317,7 @@ mod tests {
     }
 
     // Prepares a single chain of descriptors
-    fn prepare_desc_chain(buf: &mut Vec<u8>) -> (VhostUserFooBackend, VringRwLock) {
+    fn prepare_desc_chain(buf: &mut [u8]) -> (VhostUserFooBackend, VringRwLock) {
         let (mut backend, mem, vring) = init();
         let mem_handle = mem.memory();
         let vq = MockSplitQueue::new(&*mem_handle, 16);
@@ -351,7 +351,7 @@ mod tests {
     // Prepares a chain of descriptors
     fn prepare_desc_chains(
         mem: &GuestMemoryAtomic<GuestMemoryMmap>,
-        buf: &mut Vec<u8>,
+        buf: &mut [u8],
     ) -> FooDescriptorChain {
         let mem_handle = mem.memory();
         let vq = MockSplitQueue::new(&*mem_handle, 16);

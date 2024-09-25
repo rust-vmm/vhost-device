@@ -734,7 +734,7 @@ mod tests {
             let path = make_directory("_test");
             let directory = IIODirectory { path };
             for (file, content) in files.iter() {
-                fs::write(&directory.path.join(file), content).unwrap();
+                fs::write(directory.path.join(file), content).unwrap();
             }
             directory
         }

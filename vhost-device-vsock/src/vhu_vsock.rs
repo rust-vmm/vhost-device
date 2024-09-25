@@ -4,7 +4,6 @@ use std::{
     collections::{HashMap, HashSet},
     io::{self, Result as IoResult},
     sync::{Arc, Mutex, RwLock},
-    u16, u32, u64, u8,
 };
 
 use log::warn;

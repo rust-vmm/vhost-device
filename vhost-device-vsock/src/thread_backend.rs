@@ -604,12 +604,6 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_thread_backend_vsock() {
-        if VsockListener::bind_with_cid_port(libc::VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).is_err()
-        {
-            println!("  SKIPPED: AF_VSOCK is not available.");
-            return;
-        }
-
         let _listener = VsockListener::bind_with_cid_port(VMADDR_CID_ANY, VSOCK_PEER_PORT).unwrap();
         let backend_info = BackendType::Vsock(VsockProxyInfo {
             forward_cid: 1,

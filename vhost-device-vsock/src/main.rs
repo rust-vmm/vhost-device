@@ -483,8 +483,6 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
-    #[cfg(feature = "backend_vsock")]
-    use vsock::VsockListener;
 
     impl VsockArgs {
         fn from_args_unix(
@@ -1047,12 +1045,6 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_server_vsock() {
-        if VsockListener::bind_with_cid_port(libc::VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).is_err()
-        {
-            println!("  SKIPPED: AF_VSOCK is not available.");
-            return;
-        }
-
         const CID: u64 = 3;
         const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
         const QUEUE_SIZE: usize = 1024;

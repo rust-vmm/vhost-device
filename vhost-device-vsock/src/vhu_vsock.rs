@@ -404,8 +404,6 @@ mod tests {
     use tempfile::tempdir;
     use vhost_user_backend::VringT;
     use vm_memory::GuestAddress;
-    #[cfg(feature = "backend_vsock")]
-    use vsock::VsockListener;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
     const QUEUE_SIZE: usize = 1024;
@@ -503,12 +501,6 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_backend_vsock() {
-        if VsockListener::bind_with_cid_port(libc::VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).is_err()
-        {
-            println!("  SKIPPED: AF_VSOCK is not available.");
-            return;
-        }
-
         const CID: u64 = 3;
 
         let groups_list: Vec<String> = vec![String::from("default")];

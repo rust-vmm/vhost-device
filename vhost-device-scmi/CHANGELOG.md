@@ -7,9 +7,17 @@
 
 ### Fixed
 
-- [[#696]](https://github.com/rust-vmm/vhost-device/pull/696) scmi: Remove an unused piece of code
-
 ### Deprecated
+
+## v0.3.0
+
+### Added
+
+- [[#710]](https://github.com/rust-vmm/vhost-device/pull/710) Implement SCMI notifications
+
+### Fixed
+
+- [[#696]](https://github.com/rust-vmm/vhost-device/pull/696) scmi: Remove an unused piece of code
 
 ## v0.2.0
 

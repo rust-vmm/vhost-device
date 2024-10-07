@@ -1,0 +1,36 @@
+[package]
+name = "vhost-device-gpu"
+version = "0.1.0"
+authors = ["Dorinda Bassey <dbassey@redhat.com>", "Matej Hrica <mhrica@redhat.com>"]
+description = "A virtio-gpu device using the vhost-user protocol."
+repository = "https://github.com/rust-vmm/vhost-device"
+readme = "README.md"
+keywords = ["gpu", "vhost", "virt", "backend"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2021"
+publish = false
+
+[features]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+env_logger = "0.11.5"
+libc = "0.2"
+log = "0.4"
+rutabaga_gfx = { git = "https://github.com/dorindabassey/crosvm.git", package = "rutabaga_gfx",  branch = "minigbm_fix", features = ["gfxstream", "virgl_renderer"] }
+thiserror = "1.0"
+vhost = { git = "https://github.com/rust-vmm/vhost.git", package = "vhost", branch = "main", features = ["vhost-user-backend"] }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost.git", package = "vhost-user-backend", branch = "main",  features = ["gpu-socket"] }
+virtio-bindings = "0.2.2"
+virtio-queue = "0.12.0"
+vm-memory = "0.14.0"
+vmm-sys-util = "0.12.1"
+zerocopy = "0.6.3"
+
+[dev-dependencies]
+assert_matches = "1.5"
+virtio-queue = { version = "0.12", features = ["test-utils"] }
+vm-memory = { version = "0.14.0", features = ["backend-mmap", "backend-atomic"] }
+mockall = "0.13.0"
+rusty-fork = "0.3.0"

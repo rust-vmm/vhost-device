@@ -13,3 +13,12 @@ members = [
     "vhost-device-template",
     "vhost-device-vsock",
 ]
+
+[workspace.dependencies]
+vhost = "0.12"
+vhost-user-backend = "0.16"
+virtio-bindings = "0.2.2"
+virtio-queue = "0.13"
+virtio-vsock = "0.7"
+vm-memory = "0.15.0"
+vmm-sys-util = "0.12"

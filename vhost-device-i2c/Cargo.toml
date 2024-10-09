@@ -20,14 +20,14 @@ env_logger = "0.11"
 libc = "0.2"
 log = "0.4"
 thiserror = "1.0"
-vhost = { version = "0.12", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.16"
-virtio-bindings = "0.2.2"
-virtio-queue = "0.13"
-vm-memory = "0.15.0"
-vmm-sys-util = "0.12"
+vhost = { workspace = true, features = ["vhost-user-backend"] }
+vhost-user-backend = { workspace = true }
+virtio-bindings = { workspace = true }
+virtio-queue = { workspace = true }
+vm-memory = { workspace = true }
+vmm-sys-util = { workspace = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.13", features = ["test-utils"] }
-vm-memory = { version = "0.15.0", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { workspace = true, features = ["test-utils"] }
+vm-memory = { workspace = true, features = ["backend-mmap", "backend-atomic"] }

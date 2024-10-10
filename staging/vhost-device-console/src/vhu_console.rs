@@ -817,6 +817,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
@@ -839,15 +840,12 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
 
-        // Update memory
         vu_console_backend.update_memory(mem.clone()).unwrap();
 
-        // Artificial Vring
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
         vring.set_queue_ready(true);
@@ -884,12 +882,10 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
 
-        // Artificial Vring
         let vring = VringRwLock::new(mem.clone(), 0x1000).unwrap();
 
         // Empty descriptor chain should be ignored
@@ -945,7 +941,6 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Test 1: Empty queue
@@ -1020,7 +1015,6 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Test 1: Empty queue
@@ -1071,7 +1065,6 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory & update device's memory
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem_1 = GuestMemoryAtomic::new(mem.clone());
         vu_console_backend.update_memory(mem_1.clone()).unwrap();
@@ -1125,7 +1118,6 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Test 1: Empty queue
@@ -1181,7 +1173,6 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x200);
         let mem1 = GuestMemoryAtomic::new(mem.clone());
@@ -1223,7 +1214,6 @@ mod tests {
         let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
             .expect("Failed create vhuconsole backend");
 
-        // Artificial memory
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Test 1: Empty queue
@@ -1238,7 +1228,8 @@ mod tests {
         let mem1 = GuestMemoryAtomic::new(mem.clone());
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
-        assert!(!vu_console_backend
+
+        assert!(vu_console_backend
             .process_rx_requests(vec![desc_chain], &vring)
             .unwrap());
 
@@ -1248,14 +1239,16 @@ mod tests {
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
 
-        let input_buffer = "Hello!".to_string();
-        let _ = vu_console_backend.rx_data_fifo.add(input_buffer.clone());
-        assert_eq!(
-            vu_console_backend
-                .process_rx_requests(vec![desc_chain], &vring)
-                .unwrap_err(),
-            Error::DescriptorWriteFailed
-        );
+        let input_buffer = b"Hello!";
+        // Add each byte individually to the rx_data_fifo
+        for &byte in input_buffer.clone().iter() {
+            let _ = vu_console_backend.rx_data_fifo.add(byte);
+        }
+
+        // available_data are 0 so min_limit is 0 too
+        assert!(vu_console_backend
+            .process_rx_requests(vec![desc_chain], &vring)
+            .unwrap());
 
         // Test 4: Fill message to the buffer. Everything should work!
         let desc_chain = build_desc_chain(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
@@ -1263,8 +1256,10 @@ mod tests {
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
 
-        let input_buffer = "Hello!".to_string();
-        let _ = vu_console_backend.rx_data_fifo.add(input_buffer.clone());
+        let input_buffer = b"Hello!";
+        for &byte in input_buffer.clone().iter() {
+            let _ = vu_console_backend.rx_data_fifo.add(byte);
+        }
         assert!(vu_console_backend
             .process_rx_requests(vec![desc_chain.clone()], &vring)
             .unwrap());
@@ -1283,37 +1278,90 @@ mod tests {
             .copied()
             .collect();
 
-        assert_eq!(String::from_utf8(read_buffer).unwrap(), input_buffer);
-    }
-
-    #[test]
-    fn test_virtio_console_start_tcp_console_thread() {
-        let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let vu_console_backend = Arc::new(RwLock::new(
-            VhostUserConsoleBackend::new(console_controller)
-                .expect("Failed create vhuconsole backend"),
-        ));
-        let tcp_addr = "127.0.0.1:12345".to_string();
-
-        let read_handle = VhostUserConsoleBackend::start_tcp_console_thread(
-            &vu_console_backend,
-            tcp_addr.clone(),
-        );
-        vu_console_backend.read().unwrap().kill_console_thread();
-        assert!(read_handle.join().is_ok());
+        assert_eq!(read_buffer, input_buffer);
     }
 
     #[test]
     fn test_virtio_console_start_nested_console_thread() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let vu_console_backend = Arc::new(RwLock::new(
-            VhostUserConsoleBackend::new(console_controller)
-                .expect("Failed create vhuconsole backend"),
-        ));
+        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
+            .expect("Failed create vhuconsole backend");
 
-        let read_handle = VhostUserConsoleBackend::start_console_thread(&vu_console_backend);
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let mem = GuestMemoryAtomic::new(mem);
+        vu_console_backend.update_memory(mem.clone()).unwrap();
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
-        vu_console_backend.read().unwrap().kill_console_thread();
-        assert!(read_handle.join().is_ok());
+        let input_data = b"H";
+        let cursor = Cursor::new(input_data.clone().to_vec());
+
+        // Replace stdin with a cursor for testing
+        vu_console_backend.stdin = Some(Box::new(cursor));
+
+        vu_console_backend.ready_to_write = true;
+        assert!(vu_console_backend
+            .handle_event(KEY_EFD, EventSet::IN, &[vring], 0)
+            .is_ok());
+
+        let received_byte = vu_console_backend.rx_data_fifo.peek();
+
+        // verify that the character has been received and is the one we sent
+        assert!(received_byte.clone().is_ok());
+        assert_eq!(received_byte.unwrap(), input_data[0]);
+    }
+
+    #[test]
+    fn test_virtio_console_tcp_console_read_func() {
+        let console_controller =
+            Arc::new(RwLock::new(ConsoleController::new(BackendType::Network)));
+        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
+            .expect("Failed create vhuconsole backend");
+
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let mem = GuestMemoryAtomic::new(mem);
+        vu_console_backend.update_memory(mem.clone()).unwrap();
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+
+        let input_data = b"H";
+        let cursor = Cursor::new(input_data.clone().to_vec());
+
+        // Replace stream with a cursor for testing
+        vu_console_backend.stream = Some(Box::new(cursor));
+
+        vu_console_backend.ready_to_write = true;
+        assert!(vu_console_backend
+            .handle_event(KEY_EFD, EventSet::IN, &[vring], 0)
+            .is_ok());
+
+        let received_byte = vu_console_backend.rx_data_fifo.peek();
+
+        // verify that the character has been received and is the one we sent
+        assert!(received_byte.clone().is_ok());
+        assert_eq!(received_byte.unwrap(), input_data[0]);
+    }
+
+    #[test]
+    fn test_virtio_console_tcp_console_write_func() {
+        let console_controller =
+            Arc::new(RwLock::new(ConsoleController::new(BackendType::Network)));
+        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
+            .expect("Failed create vhuconsole backend");
+
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
+        let mem = GuestMemoryAtomic::new(mem);
+        vu_console_backend.update_memory(mem.clone()).unwrap();
+
+        // Test 1: Call the actual read function
+        let cursor = Cursor::new(Vec::new());
+
+        vu_console_backend.stream = Some(Box::new(cursor));
+        vu_console_backend
+            .output_queue
+            .add("Test".to_string())
+            .unwrap();
+        vu_console_backend.write_tcp_stream();
+
+        // All data has been consumed by the cursor
+        assert_eq!(vu_console_backend.output_queue.size(), 0);
     }
 }

@@ -17,12 +17,6 @@ arguments) and allows input/output to the guest console via that socket.
 This program is tested with QEMU's `vhost-user-device-pci` device.
 Examples' section below.
 
-## Staging Device
-This device will be in `staging` until we complete the following steps:
-- [ ] Increase test coverage
-- [ ] Support VIRTIO_CONSOLE_F_SIZE feature (optional)
-- [ ] Support VIRTIO_CONSOLE_F_EMERG_WRITE feature (optional)
-
 ## Synopsis
 ```text
 vhost-device-console --socket-path=<SOCKET_PATH>

@@ -2,6 +2,7 @@
 resolver = "2"
 
 members = [
+    "vhost-device-console",
     "vhost-device-gpio",
     "vhost-device-i2c",
     "vhost-device-input",

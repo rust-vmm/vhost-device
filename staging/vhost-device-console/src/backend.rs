@@ -5,7 +5,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{error, info, warn};
+use log::{error, info};
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -28,6 +28,8 @@ pub(crate) enum Error {
     SocketCountInvalid(usize),
     #[error("Could not create console backend: {0}")]
     CouldNotCreateBackend(crate::vhu_console::Error),
+    #[error("Could not create console backend: {0}")]
+    CouldNotInitBackend(crate::vhu_console::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),
     #[error("Fatal error: {0}")]
@@ -92,6 +94,12 @@ pub(crate) fn start_backend_server(
             VhostUserConsoleBackend::new(arc_controller).map_err(Error::CouldNotCreateBackend)?,
         ));
 
+        vu_console_backend
+            .write()
+            .unwrap()
+            .assign_input_method(tcp_addr.clone())
+            .map_err(Error::CouldNotInitBackend)?;
+
         let mut daemon = VhostUserDaemon::new(
             String::from("vhost-device-console-backend"),
             vu_console_backend.clone(),
@@ -102,26 +110,15 @@ pub(crate) fn start_backend_server(
         let vring_workers = daemon.get_epoll_handlers();
         vu_console_backend
             .read()
-            .unwrap()
-            .set_vring_worker(&vring_workers[0]);
+            .expect("Cannot open as write\n")
+            .set_vring_worker(vring_workers[0].clone());
 
-        // Start the corresponding console thread
-        let read_handle = if backend == BackendType::Nested {
-            VhostUserConsoleBackend::start_console_thread(&vu_console_backend)
-        } else {
-            VhostUserConsoleBackend::start_tcp_console_thread(&vu_console_backend, tcp_addr.clone())
-        };
-
-        daemon.serve(&socket).map_err(Error::ServeFailed)?;
-
-        // Kill console input thread
-        vu_console_backend.read().unwrap().kill_console_thread();
-
-        // Wait for read thread to exit
-        match read_handle.join() {
-            Ok(_) => info!("The read thread returned successfully"),
-            Err(e) => warn!("The read thread returned the error: {:?}", e),
-        }
+        daemon.serve(&socket).map_err(|e| {
+            // Even if daemon stops unexpectedly, the backend should
+            // be terminated properly (disable raw mode).
+            vu_console_backend.read().unwrap().prepare_exit();
+            Error::ServeFailed(e)
+        })?;
     }
 }
 

@@ -80,7 +80,7 @@ impl VuConsoleConfig {
     }
 }
 
-// This is the public API through which an external program starts the
+/// This is the public API through which an external program starts the
 /// vhost-device-console backend server.
 pub(crate) fn start_backend_server(
     socket: PathBuf,
@@ -240,71 +240,43 @@ mod tests {
         assert!(VuConsoleConfig::try_from(args).is_ok());
     }
 
-    fn test_backend_start_and_stop(args: ConsoleArgs) {
+    fn test_backend_start_and_stop(args: ConsoleArgs) -> Result<()> {
         let config = VuConsoleConfig::try_from(args).expect("Wrong config");
 
         let tcp_addrs = config.generate_tcp_addrs();
         let backend = config.backend;
 
-        for (_socket, tcp_addr) in config
+        for (socket, tcp_addr) in config
             .generate_socket_paths()
             .into_iter()
             .zip(tcp_addrs.iter())
         {
-            let controller = ConsoleController::new(backend);
-            let arc_controller = Arc::new(RwLock::new(controller));
-            let vu_console_backend = Arc::new(RwLock::new(
-                VhostUserConsoleBackend::new(arc_controller)
-                    .map_err(Error::CouldNotCreateBackend)
-                    .expect("Fail create vhuconsole backend"),
-            ));
-
-            let mut _daemon = VhostUserDaemon::new(
-                String::from("vhost-device-console-backend"),
-                vu_console_backend.clone(),
-                GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-            )
-            .map_err(Error::CouldNotCreateDaemon)
-            .expect("Failed create daemon");
-
-            // Start the corresponinding console thread
-            let read_handle = if backend == BackendType::Nested {
-                VhostUserConsoleBackend::start_console_thread(&vu_console_backend)
-            } else {
-                VhostUserConsoleBackend::start_tcp_console_thread(
-                    &vu_console_backend,
-                    tcp_addr.clone(),
-                )
-            };
-
-            // Kill console input thread
-            vu_console_backend.read().unwrap().kill_console_thread();
-
-            // Wait for read thread to exit
-            assert_matches!(read_handle.join(), Ok(_));
+            start_backend_server(socket, tcp_addr.to_string(), backend)?;
         }
+        Ok(())
     }
+
     #[test]
-    fn test_start_net_backend_success() {
+    fn test_start_backend_server_success() {
         let args = ConsoleArgs {
-            socket_path: String::from("/tmp/vhost.sock").into(),
+            socket_path: String::from("/not_a_dir/vhost.sock").into(),
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
         };
 
-        test_backend_start_and_stop(args);
+        assert!(test_backend_start_and_stop(args).is_err());
     }
 
     #[test]
-    fn test_start_nested_backend_success() {
-        let args = ConsoleArgs {
-            socket_path: String::from("/tmp/vhost.sock").into(),
-            backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+    fn test_start_backend_success() {
+        let config = VuConsoleConfig {
+            socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            backend: BackendType::Network,
+            tcp_port: String::from("12346"),
             socket_count: 1,
         };
 
-        test_backend_start_and_stop(args);
+        assert!(start_backend(config).is_err());
     }
 }

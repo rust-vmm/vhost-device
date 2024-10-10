@@ -17,7 +17,6 @@ xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 [dependencies]
 console = "0.15.7"
 crossterm = "0.28.1"
-nix = "0.26.4"
 queues = "1.0.2"
 clap = { version = "4.5",  features = ["derive"] }
 env_logger = "0.11"

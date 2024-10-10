@@ -20,7 +20,6 @@ pub enum BackendType {
 pub(crate) struct ConsoleController {
     config: VirtioConsoleConfig,
     pub backend: BackendType,
-    pub exit: bool,
 }
 
 impl ConsoleController {
@@ -33,7 +32,6 @@ impl ConsoleController {
                 emerg_wr: 64.into(),
             },
             backend,
-            exit: false,
         }
     }
 

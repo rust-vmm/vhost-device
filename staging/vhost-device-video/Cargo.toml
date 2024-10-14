@@ -30,7 +30,7 @@ vhost = { version = "0.12", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.16"
 virtio-bindings = "0.2.1"
 virtio-queue = "0.13"
-vm-memory = "0.15.0"
+vm-memory = "0.16.0"
 vmm-sys-util = "0.12"
 v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "110fd77", optional = true }
 
@@ -39,4 +39,4 @@ assert_matches = "1.5"
 rstest = "0.23.0"
 tempfile = "3.13.0"
 virtio-queue = { version = "0.13", features = ["test-utils"] }
-vm-memory = { version = "0.15.0", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.16.0", features = ["backend-mmap", "backend-atomic"] }

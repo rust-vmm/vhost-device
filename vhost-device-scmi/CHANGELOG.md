@@ -3,6 +3,8 @@
 
 ### Added
 
+- [[#798]](https://github.com/rust-vmm/vhost-device/pull/798) scmi: extended sensor attributes support
+
 ### Changed
 
 ### Fixed

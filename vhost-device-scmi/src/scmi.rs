@@ -1384,9 +1384,15 @@ mod tests {
         let name = format!("acc_{}", char::from_u32('X' as u32 + axis_index).unwrap()).to_string();
         let mut description = vec![
             MessageValue::Unsigned(axis_index),
-            MessageValue::Unsigned(0),
+            MessageValue::Unsigned(1 << 8),
             MessageValue::Unsigned(u32::from(SENSOR_UNIT_METERS_PER_SECOND_SQUARED)),
             MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
+            // Add extended attributes
+            MessageValue::Unsigned(0),
+            MessageValue::Signed(0),
+            MessageValue::Signed(i32::MIN),
+            MessageValue::Signed(-1i32),
+            MessageValue::Signed(i32::MAX),
         ];
         result.append(&mut description);
         test_message(

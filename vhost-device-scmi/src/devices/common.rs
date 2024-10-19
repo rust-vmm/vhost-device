@@ -359,6 +359,11 @@ pub trait SensorT: Send {
         0
     }
 
+    /// Returns the resolution of the sensor scale.
+    fn resolution(&self) -> u32 {
+        0
+    }
+
     /// Returns the prefix of axes names.
     ///
     /// Usually no need to redefine this.
@@ -383,8 +388,10 @@ pub trait SensorT: Send {
     /// Usually no need to redefine this.
     fn axis_description(&self, axis: u32) -> Vec<MessageValue> {
         let mut values = vec![];
+        let axis_exponent = self.unit_exponent(0);
+        let axis_resolution = self.resolution();
         values.push(MessageValue::Unsigned(axis)); // axis id
-        values.push(MessageValue::Unsigned(0)); // attributes low
+        values.push(MessageValue::Unsigned(1 << 8)); // attributes low (Extended attributes support)
         values.push(MessageValue::Unsigned(self.format_unit(axis))); // attributes high
 
         // Name in the recommended format, 16 bytes:
@@ -394,6 +401,22 @@ pub trait SensorT: Send {
             format!("{prefix}_{suffix}"),
             MAX_SIMPLE_STRING_LENGTH,
         ));
+
+        // Extended attribute
+        values.push(MessageValue::Unsigned(
+            axis_resolution | ((axis_exponent as u32) << 27),
+        )); //resolution
+
+        // In SCMI spec, it specifies that if the sensor does not report the min and max range,
+        // the following field should be as as:
+        // axis_min_range_low 0x0
+        // axis_min_range_high 0x80000000
+        // axis_max_range_low 0xFFFFFFFF
+        // axis_max_range_high 0x7FFFFFFF
+        values.push(MessageValue::Signed(0)); // min_range_low
+        values.push(MessageValue::Signed(i32::MIN)); // min_range_high
+        values.push(MessageValue::Signed(-1i32)); // max_range_low
+        values.push(MessageValue::Signed(i32::MAX)); // max_range_high
         values
     }
 

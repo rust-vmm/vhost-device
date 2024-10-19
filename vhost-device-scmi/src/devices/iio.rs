@@ -255,6 +255,10 @@ struct Axis {
     /// sufficiently accurate SCMI value that is represented by an integer (not
     /// a float) + decadic exponent.
     custom_exponent: i8,
+    /// This is an extended attribute field. It reports the resolution of the sensor axis.
+    /// The representation is in [custom_resolution] x 10^[custom_exponent] format.
+    /// This field is present only if Bit[8] of axis_attributes_low is set to 1.
+    custom_resolution: u64,
     /// Channel scan type, necessary if the sensor supports notifications.
     /// The data from /dev/iio:deviceX will be formatted according to this.
     /// The ChanScanType is parsed from "scan_elements/<channel>_type"
@@ -262,7 +266,7 @@ struct Axis {
 }
 
 impl Axis {
-    fn new(path: OsString, unit_exponent: i8, custom_exponent: i8) -> Axis {
+    fn new(path: OsString, unit_exponent: i8, custom_exponent: i8, custom_resolution: u64) -> Axis {
         let scan_path = Path::new(&path).parent().unwrap().join("scan_elements");
         let mut scan_name = path.clone();
         scan_name.push("_type");
@@ -273,6 +277,7 @@ impl Axis {
                 path,
                 unit_exponent,
                 custom_exponent,
+                custom_resolution,
                 scan_type: ChanScanType::new(scan_type),
             }
         } else {
@@ -280,6 +285,7 @@ impl Axis {
                 path,
                 unit_exponent,
                 custom_exponent,
+                custom_resolution,
                 scan_type: None,
             }
         }
@@ -369,6 +375,13 @@ impl SensorT for IIOSensor {
     fn unit_exponent(&self, axis_index: u32) -> i8 {
         let axis: &Axis = self.axes.get(axis_index as usize).unwrap();
         axis.unit_exponent + axis.custom_exponent
+    }
+
+    fn resolution(&self) -> u32 {
+        // All the axes are supposed to have the same value for resolution.
+        // We are just using the values from the Axis 0 here.
+        let axis: &Axis = self.axes.first().unwrap();
+        axis.custom_resolution as u32
     }
 
     fn number_of_axes(&self) -> u32 {
@@ -579,14 +592,23 @@ impl IIOSensor {
         }
     }
 
-    fn custom_exponent(&self, path: &OsStr, unit_exponent: i8) -> i8 {
+    // This function gets both custom exponent and resolution by reading "scale"
+    // A scale value should be parsed as "[resolution]e[exponent]"
+    fn custom_exponent_and_resolution(&self, path: &OsStr, unit_exponent: i8) -> (i8, u64) {
         let mut custom_exponent: i8 = 0;
+        let mut custom_resolution: u64 = 0;
         if let Ok(Some(scale)) = self.read_axis_scale(path) {
             // Crash completely OK if *this* doesn't fit:
             custom_exponent = scale.log10() as i8;
             if scale < 1.0 {
                 // The logarithm is truncated towards zero, we need floor
                 custom_exponent -= 1;
+                // Calculate the resolution of scale
+                custom_resolution =
+                    (scale * 10i32.pow(-custom_exponent as u32) as f64).trunc() as u64;
+            } else {
+                custom_resolution =
+                    (scale / 10i32.pow(custom_exponent as u32) as f64).trunc() as u64;
             }
             // The SCMI exponent (unit_exponent + custom_exponent) can have max. 5 bits:
             custom_exponent = min(15 - unit_exponent, custom_exponent);
@@ -596,7 +618,7 @@ impl IIOSensor {
                 &path, custom_exponent
             );
         }
-        custom_exponent
+        (custom_exponent, custom_resolution)
     }
 
     fn add_axis(&mut self, axes: &mut Vec<Axis>, path: &OsStr) {
@@ -606,11 +628,13 @@ impl IIOSensor {
             .map_or(0, |mapping| mapping.unit_exponent);
         // To get meaningful integer values, we must adjust exponent to
         // the provided scale if any.
-        let custom_exponent = self.custom_exponent(path, unit_exponent);
+        let (custom_exponent, custom_resolution) =
+            self.custom_exponent_and_resolution(path, unit_exponent);
         axes.push(Axis::new(
             OsString::from(path),
             unit_exponent,
             custom_exponent,
+            custom_resolution,
         ));
     }
 

@@ -3,6 +3,8 @@
 
 ### Added
 
+- [[#746]](https://github.com/rust-vmm/vhost-device/pull/746) Add new sampling rates 12000Hz and 24000Hz
+
 ### Changed
 
 ### Fixed

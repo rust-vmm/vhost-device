@@ -75,7 +75,8 @@ fn update_pcm(
                 virtio_sound::VIRTIO_SND_PCM_RATE_96000 => 96000,
                 virtio_sound::VIRTIO_SND_PCM_RATE_176400 => 176400,
                 virtio_sound::VIRTIO_SND_PCM_RATE_192000 => 192000,
-                virtio_sound::VIRTIO_SND_PCM_RATE_384000 => 384000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_12000 => 12000,
+                virtio_sound::VIRTIO_SND_PCM_RATE_24000 => 24000,
                 // We check if a rate value is supported in PCM_SET_PARAMS so it should never have
                 // an unknown value.
                 _ => unreachable!(),
@@ -752,6 +753,8 @@ mod tests {
         virtio_sound::VIRTIO_SND_PCM_RATE_176400,
         virtio_sound::VIRTIO_SND_PCM_RATE_192000,
         virtio_sound::VIRTIO_SND_PCM_RATE_384000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_12000,
+        virtio_sound::VIRTIO_SND_PCM_RATE_24000,
     ];
 
     const FORMATS: [u8; _VIRTIO_SND_PCM_FMT_MAX as usize] = [

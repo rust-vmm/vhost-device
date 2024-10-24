@@ -107,7 +107,9 @@ pub const VIRTIO_SND_PCM_RATE_96000: u8 = 10;
 pub const VIRTIO_SND_PCM_RATE_176400: u8 = 11;
 pub const VIRTIO_SND_PCM_RATE_192000: u8 = 12;
 pub const VIRTIO_SND_PCM_RATE_384000: u8 = 13;
-pub(crate) const _VIRTIO_SND_PCM_RATE_MAX: u8 = 14;
+pub const VIRTIO_SND_PCM_RATE_12000: u8 = 14;
+pub const VIRTIO_SND_PCM_RATE_24000: u8 = 15;
+pub(crate) const _VIRTIO_SND_PCM_RATE_MAX: u8 = 16;
 
 // standard channel position definition
 

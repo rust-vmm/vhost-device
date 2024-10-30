@@ -306,7 +306,7 @@ impl VhostUserBackend for VhostUserVsockBackend {
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::CONFIG
+        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
     }
 
     fn set_event_idx(&self, enabled: bool) {

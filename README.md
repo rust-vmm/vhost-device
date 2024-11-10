@@ -14,6 +14,7 @@ To be included here device backends must:
 
 Here is the list of device backends that we support:
 
+- [CAN](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-can/README.md)
 - [Console](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-console/README.md)
 - [GPIO](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-gpio/README.md)
 - [I2C](https://github.com/rust-vmm/vhost-device/blob/main/vhost-device-i2c/README.md)
@@ -48,7 +49,6 @@ More information may be found in its [README file](./staging/README.md).
 Here is the list of device backends in **staging**:
 
 - [Video](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-video/README.md)
-- [Can](https://github.com/rust-vmm/vhost-device/blob/main/staging/vhost-device-can/README.md)
 
 <!--
 Template:

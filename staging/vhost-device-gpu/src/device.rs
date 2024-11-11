@@ -11,7 +11,7 @@ use std::{
     sync::{self, Arc, Mutex},
 };
 
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use rutabaga_gfx::{
     ResourceCreate3D, RutabagaFence, Transfer3D, RUTABAGA_PIPE_BIND_RENDER_TARGET,
     RUTABAGA_PIPE_TEXTURE_2D,
@@ -50,7 +50,7 @@ use crate::{
         VIRTIO_GPU_FLAG_FENCE, VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_MAX_SCANOUTS,
     },
     virtio_gpu::{RutabagaVirtioGpu, VirtioGpu, VirtioGpuRing},
-    GpuConfig, GpuMode,
+    GpuConfig,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -101,7 +101,7 @@ struct VhostUserGpuBackendInner {
     gpu_backend: Option<GpuBackend>,
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    gpu_mode: GpuMode,
+    gpu_config: GpuConfig,
 }
 
 pub struct VhostUserGpuBackend {
@@ -112,20 +112,26 @@ pub struct VhostUserGpuBackend {
 }
 
 impl VhostUserGpuBackend {
-    pub fn new(gpu_config: &GpuConfig) -> Result<Arc<Self>> {
-        log::trace!("VhostUserGpuBackend::new(config = {:?})", &gpu_config);
+    pub fn new(gpu_config: GpuConfig) -> Result<Arc<Self>> {
+        info!(
+            "GpuBackend using mode {} (capsets: '{}'), flags: {:?}",
+            gpu_config.gpu_mode(),
+            gpu_config.capsets(),
+            gpu_config.flags()
+        );
+
         let inner = VhostUserGpuBackendInner {
             virtio_cfg: VirtioGpuConfig {
                 events_read: 0.into(),
                 events_clear: 0.into(),
                 num_scanouts: Le32::from(VIRTIO_GPU_MAX_SCANOUTS),
-                num_capsets: RutabagaVirtioGpu::MAX_NUMBER_OF_CAPSETS.into(),
+                num_capsets: Le32::from(gpu_config.capsets().num_capsets()),
             },
             event_idx_enabled: false,
             gpu_backend: None,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             mem: None,
-            gpu_mode: gpu_config.gpu_mode(),
+            gpu_config,
         };
 
         Ok(Arc::new(Self {
@@ -575,7 +581,7 @@ impl VhostUserGpuBackendInner {
                     // so if somehow another thread accidentally wants to create another gpu here,
                     // it will panic anyway
                     let virtio_gpu =
-                        RutabagaVirtioGpu::new(control_vring, self.gpu_mode, gpu_backend);
+                        RutabagaVirtioGpu::new(control_vring, &self.gpu_config, gpu_backend);
                     event_poll_fd = virtio_gpu.get_event_poll_fd();
 
                     maybe_virtio_gpu.insert(virtio_gpu)
@@ -715,7 +721,6 @@ mod tests {
     use assert_matches::assert_matches;
     use mockall::predicate;
     use rusty_fork::rusty_fork_test;
-    use tempfile::tempdir;
     use vhost::vhost_user::gpu_message::{VhostUserGpuScanout, VhostUserGpuUpdate};
     use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
@@ -742,9 +747,9 @@ mod tests {
             VIRTIO_GPU_RESP_OK_NODATA,
         },
         virtio_gpu::MockVirtioGpu,
+        GpuCapset, GpuFlags, GpuMode,
     };
 
-    const SOCKET_PATH: &str = "vgpu.socket";
     const MEM_SIZE: usize = 2 * 1024 * 1024; // 2MiB
 
     const CURSOR_QUEUE_ADDR: GuestAddress = GuestAddress(0x0);
@@ -755,10 +760,13 @@ mod tests {
     const CONTROL_QUEUE_SIZE: u16 = 1024;
 
     fn init() -> (Arc<VhostUserGpuBackend>, GuestMemoryAtomic<GuestMemoryMmap>) {
-        let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let socket_path = test_dir.path().join(SOCKET_PATH);
-        let backend =
-            VhostUserGpuBackend::new(&GpuConfig::new(socket_path, GpuMode::VirglRenderer)).unwrap();
+        let config = GpuConfig::new(
+            GpuMode::VirglRenderer,
+            Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
+            GpuFlags::default(),
+        )
+        .unwrap();
+        let backend = VhostUserGpuBackend::new(config).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
         );
@@ -1340,10 +1348,8 @@ mod tests {
     rusty_fork_test! {
         #[test]
         fn test_verify_backend() {
-            let test_dir = tempdir().expect("Could not create a temp test directory.");
-            let socket_path = test_dir.path().join(SOCKET_PATH);
-            let gpu_config = GpuConfig::new(socket_path, GpuMode::VirglRenderer);
-            let backend = VhostUserGpuBackend::new(&gpu_config).unwrap();
+            let gpu_config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
+            let backend = VhostUserGpuBackend::new(gpu_config).unwrap();
 
             assert_eq!(backend.num_queues(), NUM_QUEUES);
             assert_eq!(backend.max_queue_size(), QUEUE_SIZE);

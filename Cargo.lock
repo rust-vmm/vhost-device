@@ -206,9 +206,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
-version = "1.1.36"
+version = "1.1.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baee610e9452a8f6f0a1b6194ec09ff9e2d85dea54432acdae41aa0761c95d70"
+checksum = "40545c26d092346d8a8dab71ee48e7685a7a9cba76e634790c215b41a4a7b4cf"
 dependencies = [
  "shlex",
 ]
@@ -449,14 +449,14 @@ dependencies = [
  "cfg-if",
  "libc",
  "nix 0.23.2",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "fastrand"
-version = "2.1.1"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
+checksum = "486f806e73c5707928240ddc295403b1b93c96a02038563881c4a2fd84b81ac4"
 
 [[package]]
 name = "figment"
@@ -691,9 +691,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.161"
+version = "0.2.162"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e9489c2807c139ffd9c1794f4af0ebe86a828db53ecdc7fea2111d0fed085d1"
+checksum = "18d287de67fe55fd7e1581fe933d965a5a9477b38e949cfa9f8574ef01506398"
 
 [[package]]
 name = "libgpiod"
@@ -705,7 +705,7 @@ dependencies = [
  "intmap",
  "libc",
  "libgpiod-sys",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -950,7 +950,7 @@ dependencies = [
  "nix 0.27.1",
  "once_cell",
  "pipewire-sys",
- "thiserror",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1094,9 +1094,9 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
 name = "rstest"
-version = "0.19.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d5316d2a1479eeef1ea21e7f9ddc67c191d497abc8fc3ba2467857abbb68330"
+checksum = "0a2c585be59b6b5dd66a9d2084aa1d8bd52fbdb806eafdeffb52791147862035"
 dependencies = [
  "futures",
  "futures-timer",
@@ -1106,12 +1106,13 @@ dependencies = [
 
 [[package]]
 name = "rstest_macros"
-version = "0.19.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04a9df72cc1f67020b0d63ad9bfe4a323e459ea7eb68e03bd9824db49f9a4c25"
+checksum = "825ea780781b15345a146be27eaefb05085e337e869bff01b4306a4fd4a9ad5a"
 dependencies = [
  "cfg-if",
  "glob",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "regex",
@@ -1138,9 +1139,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.39"
+version = "0.38.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "375116bee2be9ed569afe2154ea6a99dfdffd257f533f187498c2a8f5feaf4ee"
+checksum = "99e4ea3e1cdc4b559b8e5650f9c8e5998e3e5c1343b4eaf034565f32318d63c0"
 dependencies = [
  "bitflags 2.6.0",
  "errno 0.3.9",
@@ -1316,7 +1317,7 @@ dependencies = [
  "pkg-config",
  "strum",
  "strum_macros",
- "thiserror",
+ "thiserror 1.0.69",
  "toml 0.5.11",
  "version-compare 0.0.11",
 ]
@@ -1348,9 +1349,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "tempfile"
-version = "3.13.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f2c9fc62d0beef6951ccffd757e241266a2c833136efbe35af6cd2567dca5b"
+checksum = "28cce251fcbc87fac86a866eeb0d6c2d536fc16d06f184bb61aeae11aa4cee0c"
 dependencies = [
  "cfg-if",
  "fastrand",
@@ -1361,18 +1362,38 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02dd99dc800bbb97186339685293e1cc5d9df1f8fae2d0aecd9ff1c77efea892"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.69",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+dependencies = [
+ "thiserror-impl 2.0.3",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c61ec9a6f64d2793d8a45faba21efbe3ced62a886d44c36a009b2b519b4c7e"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1526,7 +1547,7 @@ dependencies = [
  "epoll",
  "log",
  "queues",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1545,7 +1566,7 @@ dependencies = [
  "libc",
  "libgpiod",
  "log",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1563,7 +1584,7 @@ dependencies = [
  "env_logger",
  "libc",
  "log",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1586,7 +1607,7 @@ dependencies = [
  "nix 0.29.0",
  "rand",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1607,7 +1628,7 @@ dependencies = [
  "log",
  "rand",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1625,7 +1646,7 @@ dependencies = [
  "env_logger",
  "itertools 0.13.0",
  "log",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1645,7 +1666,7 @@ dependencies = [
  "log",
  "num_enum",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1665,7 +1686,7 @@ dependencies = [
  "pipewire",
  "rstest",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1684,7 +1705,7 @@ dependencies = [
  "env_logger",
  "libc",
  "log",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1702,7 +1723,7 @@ dependencies = [
  "env_logger",
  "libc",
  "log",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1725,7 +1746,7 @@ dependencies = [
  "log",
  "serde",
  "tempfile",
- "thiserror",
+ "thiserror 2.0.3",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -1789,7 +1810,7 @@ dependencies = [
  "arc-swap",
  "bitflags 2.6.0",
  "libc",
- "thiserror",
+ "thiserror 1.0.69",
  "vmm-sys-util",
  "winapi",
 ]

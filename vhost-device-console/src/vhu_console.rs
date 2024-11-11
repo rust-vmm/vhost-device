@@ -63,8 +63,8 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 pub(crate) enum Error {
-    #[error("Failed to handle unknown event")]
-    HandleEventUnknown,
+    #[error("Failed to handle unknown event: {0}")]
+    HandleEventUnknown(u16),
     #[error("Descriptor not found")]
     DescriptorNotFound,
     #[error("Failed to send notification")]
@@ -351,9 +351,9 @@ impl VhostUserConsoleBackend {
             VIRTIO_CONSOLE_PORT_OPEN => {
                 trace!("VIRTIO_CONSOLE_PORT_OPEN");
             }
-            _ => {
-                trace!("Uknown control event");
-                return Err(Error::HandleEventUnknown);
+            other => {
+                trace!("Uknown control event: {}", other);
+                return Err(Error::HandleEventUnknown(other));
             }
         };
         Ok(())
@@ -742,8 +742,10 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
             &vrings[RX_QUEUE as usize]
         } else if device_event == BACKEND_CTRL_RX_EFD {
             &vrings[CTRL_RX_QUEUE as usize]
-        } else {
+        } else if (device_event as usize) < NUM_QUEUES {
             &vrings[device_event as usize]
+        } else {
+            return Err(Error::HandleEventUnknown(device_event).into());
         };
 
         if self.event_idx {
@@ -777,7 +779,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
                         let _ = self.rx_ctrl_event.read();
                         self.process_ctrl_rx_queue(vring)
                     }
-                    _ => Err(Error::HandleEventUnknown),
+                    other => Err(Error::HandleEventUnknown(other)),
                 }?;
                 if !vring.enable_notification().unwrap() {
                     break;
@@ -800,7 +802,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
                     let _ = self.rx_ctrl_event.read();
                     self.process_ctrl_rx_queue(vring)
                 }
-                _ => Err(Error::HandleEventUnknown),
+                other => Err(Error::HandleEventUnknown(other)),
             }?;
         }
         Ok(())
@@ -1097,7 +1099,7 @@ mod tests {
             vu_console_backend
                 .handle_control_msg(ctrl_msg_err)
                 .unwrap_err(),
-            Error::HandleEventUnknown
+            Error::HandleEventUnknown(4)
         );
 
         assert!(vu_console_backend.handle_control_msg(ctrl_msg_1).is_ok());

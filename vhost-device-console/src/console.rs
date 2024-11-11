@@ -5,9 +5,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use crate::virtio_console::VirtioConsoleConfig;
 use clap::ValueEnum;
 use log::trace;
+
+use crate::virtio_console::VirtioConsoleConfig;
 
 #[derive(ValueEnum, Clone, Copy, Default, Debug, Eq, PartialEq)]
 pub enum BackendType {

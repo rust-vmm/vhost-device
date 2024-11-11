@@ -5,19 +5,23 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{error, info};
-use std::any::Any;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::thread::Builder;
+use std::{
+    any::Any,
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+    thread::Builder,
+};
 
+use log::{error, info};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::console::{BackendType, ConsoleController};
-use crate::vhu_console::VhostUserConsoleBackend;
+use crate::{
+    console::{BackendType, ConsoleController},
+    vhu_console::VhostUserConsoleBackend,
+};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -170,9 +174,10 @@ pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
+
     use super::*;
     use crate::ConsoleArgs;
-    use assert_matches::assert_matches;
 
     #[test]
     fn test_console_valid_configuration_nested() {

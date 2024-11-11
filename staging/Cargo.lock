@@ -934,6 +934,7 @@ name = "vhost-device-gpu"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
+ "bitflags 2.6.0",
  "clap",
  "env_logger",
  "libc",

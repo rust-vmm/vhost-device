@@ -34,6 +34,7 @@ virtio-bindings = "0.2.2"
 virtio-queue = "0.14.0"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
+bitflags = "2.6.0"
 
 [dev-dependencies]
 assert_matches = "1.5"

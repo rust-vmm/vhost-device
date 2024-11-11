@@ -39,7 +39,7 @@ use crate::{
         GpuResponsePlaneInfo, VirtioGpuResult, VIRTIO_GPU_FLAG_INFO_RING_IDX,
         VIRTIO_GPU_MAX_SCANOUTS,
     },
-    GpuMode,
+    GpuConfig, GpuMode,
 };
 
 fn sglist_to_rutabaga_iovecs(
@@ -331,10 +331,6 @@ pub struct RutabagaVirtioGpu {
 const READ_RESOURCE_BYTES_PER_PIXEL: u32 = 4;
 
 impl RutabagaVirtioGpu {
-    // TODO: this depends on Rutabaga builder, so this will need to be handled at
-    // runtime eventually
-    pub const MAX_NUMBER_OF_CAPSETS: u32 = 3;
-
     fn create_fence_handler(
         queue_ctl: VringRwLock,
         fence_state: Arc<Mutex<FenceState>>,
@@ -387,24 +383,27 @@ impl RutabagaVirtioGpu {
         })
     }
 
-    fn configure_rutabaga_builder(gpu_mode: GpuMode) -> RutabagaBuilder {
-        let component = match gpu_mode {
+    fn configure_rutabaga_builder(gpu_config: &GpuConfig) -> RutabagaBuilder {
+        let component = match gpu_config.gpu_mode() {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
             #[cfg(feature = "gfxstream")]
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
-        RutabagaBuilder::new(component, 0)
-            .set_use_egl(true)
-            .set_use_gles(true)
-            .set_use_glx(true)
-            .set_use_surfaceless(true)
+
+        RutabagaBuilder::new(component, gpu_config.capsets().bits())
+            .set_use_egl(gpu_config.flags().use_egl)
+            .set_use_glx(gpu_config.flags().use_glx)
+            .set_use_gles(gpu_config.flags().use_gles)
+            .set_use_surfaceless(gpu_config.flags().use_surfaceless)
+            // Since vhost-user-gpu is out-of-process this is the only type of blob resource that
+            // could work, so this is always enabled
             .set_use_external_blob(true)
     }
 
-    pub fn new(queue_ctl: &VringRwLock, gpu_mode: GpuMode, gpu_backend: GpuBackend) -> Self {
+    pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
-        let rutabaga = Self::configure_rutabaga_builder(gpu_mode)
+        let rutabaga = Self::configure_rutabaga_builder(gpu_config)
             .build(fence, None)
             .expect("Rutabaga initialization failed!");
 
@@ -907,7 +906,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM;
+    use crate::{protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM, GpuCapset, GpuFlags};
 
     const CREATE_RESOURCE_2D_720P: ResourceCreate3D = ResourceCreate3D {
         target: RUTABAGA_PIPE_TEXTURE_2D,
@@ -941,7 +940,13 @@ mod tests {
     }
 
     fn new_gpu() -> RutabagaVirtioGpu {
-        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(GpuMode::VirglRenderer);
+        let config = GpuConfig::new(
+            GpuMode::VirglRenderer,
+            Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
+            GpuFlags::default(),
+        )
+        .unwrap();
+        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(&config);
         let rutabaga = builder.build(RutabagaHandler::new(|_| {}), None).unwrap();
         RutabagaVirtioGpu {
             rutabaga,

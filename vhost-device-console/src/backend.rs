@@ -28,7 +28,7 @@ pub(crate) enum Error {
     SocketCountInvalid(usize),
     #[error("Could not create console backend: {0}")]
     CouldNotCreateBackend(crate::vhu_console::Error),
-    #[error("Could not create console backend: {0}")]
+    #[error("Could not initialize console backend: {0}")]
     CouldNotInitBackend(crate::vhu_console::Error),
     #[error("Could not create daemon: {0}")]
     CouldNotCreateDaemon(vhost_user_backend::Error),

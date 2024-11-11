@@ -110,7 +110,7 @@ pub(crate) fn start_backend_server(
         let vring_workers = daemon.get_epoll_handlers();
         vu_console_backend
             .read()
-            .expect("Cannot open as write\n")
+            .expect("Cannot unlock console backend with read-only access.")
             .set_vring_worker(vring_workers[0].clone());
 
         daemon.serve(&socket).map_err(|e| {

@@ -33,32 +33,6 @@ use vm_memory::{
 use vmm_sys_util::epoll::EventSet;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
-/// Virtio configuration
-const QUEUE_SIZE: usize = 128;
-const NUM_QUEUES: usize = 4;
-
-/// Queue events
-const RX_QUEUE: u16 = 0;
-const TX_QUEUE: u16 = 1;
-const CTRL_RX_QUEUE: u16 = 2;
-const CTRL_TX_QUEUE: u16 = 3;
-
-/// The two following events are used to help the vhu_console
-/// backend trigger events to itself. For example:
-/// a) BACKEND_RX_EFD is being triggered when the backend
-///    has new data to send to the RX queue.
-/// b) BACKEND_CTRL_RX_EFD event is used when the backend
-///    needs to write to the RX control queue.
-const BACKEND_RX_EFD: u16 = (NUM_QUEUES + 1) as u16;
-const BACKEND_CTRL_RX_EFD: u16 = (NUM_QUEUES + 2) as u16;
-const KEY_EFD: u16 = (NUM_QUEUES + 3) as u16;
-const LISTENER_EFD: u16 = (NUM_QUEUES + 4) as u16;
-const EXIT_EFD: u16 = (NUM_QUEUES + 5) as u16;
-
-/// Port name - Need to be updated when MULTIPORT feature
-///             is supported for more than one devices.
-const PORT_NAME: &[u8] = b"org.test.foo!";
-
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, PartialEq, ThisError)]
@@ -93,8 +67,45 @@ impl From<Error> for io::Error {
     }
 }
 
+/// Queue events
+#[repr(u16)]
+#[derive(Copy, Clone, Debug)]
+enum QueueEvents {
+    RxQueue = 0,
+    TxQueue = 1,
+    CtrlRxQueue = 2,
+    CtrlTxQueue = 3,
+    /// `BACKEND_RX_EFD` is being triggered when the backend has new data to send to the RX queue.
+    BackendRxEfd = (VhostUserConsoleBackend::NUM_QUEUES + 1),
+    /// `BACKEND_CTRL_RX_EFD` event is used when the backend needs to write to the RX control queue.
+    BackendCtrlRxEfd = (VhostUserConsoleBackend::NUM_QUEUES + 2),
+    KeyEfd = (VhostUserConsoleBackend::NUM_QUEUES + 3),
+    ListenerEfd = (VhostUserConsoleBackend::NUM_QUEUES + 4),
+    ExitEfd = (VhostUserConsoleBackend::NUM_QUEUES + 5),
+}
+
+impl QueueEvents {
+    const RX_QUEUE: u16 = Self::RxQueue as u16;
+    const TX_QUEUE: u16 = Self::TxQueue as u16;
+    const CTRL_RX_QUEUE: u16 = Self::CtrlRxQueue as u16;
+    const CTRL_TX_QUEUE: u16 = Self::CtrlTxQueue as u16;
+    // The two following events are used to help the vhu_console
+    // backend trigger events to itself. For example:
+    const BACKEND_RX_EFD: u16 = Self::BackendRxEfd as u16;
+    const BACKEND_CTRL_RX_EFD: u16 = Self::BackendCtrlRxEfd as u16;
+    const KEY_EFD: u16 = Self::KeyEfd as u16;
+    const LISTENER_EFD: u16 = Self::ListenerEfd as u16;
+    const EXIT_EFD: u16 = Self::ExitEfd as u16;
+}
+
+/// Port name
+///
+/// Need to be updated when `MULTIPORT` feature is supported for more than one devices.
+const PORT_NAME: &[u8] = b"org.test.foo!";
+
 // Define a new trait that combines Read and Write
 pub trait ReadWrite: Read + Write {}
+
 impl<T: Read + Write> ReadWrite for T {}
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -124,6 +135,10 @@ pub(crate) struct VhostUserConsoleBackend {
 type ConsoleDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
 
 impl VhostUserConsoleBackend {
+    // Virtio configuration
+    pub const QUEUE_SIZE: usize = 128;
+    pub const NUM_QUEUES: u16 = 4;
+
     pub(crate) fn new(controller: Arc<RwLock<ConsoleController>>) -> Result<Self> {
         Ok(VhostUserConsoleBackend {
             controller: controller.clone(),
@@ -204,7 +219,7 @@ impl VhostUserConsoleBackend {
 
                 vring
                     .add_used(desc_chain.head_index(), writer.bytes_written() as u32)
-                    .map_err(|_| Error::AddUsedElemFailed(RX_QUEUE))?;
+                    .map_err(|_| Error::AddUsedElemFailed(QueueEvents::RX_QUEUE))?;
             }
         }
 
@@ -249,7 +264,7 @@ impl VhostUserConsoleBackend {
 
             vring
                 .add_used(desc_chain.head_index(), reader.bytes_read() as u32)
-                .map_err(|_| Error::AddUsedElemFailed(TX_QUEUE))?;
+                .map_err(|_| Error::AddUsedElemFailed(QueueEvents::TX_QUEUE))?;
         }
 
         Ok(true)
@@ -298,7 +313,7 @@ impl VhostUserConsoleBackend {
 
             vring
                 .add_used(desc_chain.head_index(), writer.bytes_written() as u32)
-                .map_err(|_| Error::AddUsedElemFailed(CTRL_RX_QUEUE))?;
+                .map_err(|_| Error::AddUsedElemFailed(QueueEvents::CTRL_RX_QUEUE))?;
         }
 
         Ok(true)
@@ -390,7 +405,7 @@ impl VhostUserConsoleBackend {
 
             vring
                 .add_used(desc_chain.head_index(), reader.bytes_read() as u32)
-                .map_err(|_| Error::AddUsedElemFailed(CTRL_TX_QUEUE))?;
+                .map_err(|_| Error::AddUsedElemFailed(QueueEvents::CTRL_TX_QUEUE))?;
         }
 
         Ok(true)
@@ -475,7 +490,11 @@ impl VhostUserConsoleBackend {
     ) {
         let rx_event_fd = self.rx_event.as_raw_fd();
         vring_worker
-            .register_listener(rx_event_fd, EventSet::IN, u64::from(BACKEND_RX_EFD))
+            .register_listener(
+                rx_event_fd,
+                EventSet::IN,
+                u64::from(QueueEvents::BACKEND_RX_EFD),
+            )
             .unwrap();
 
         let rx_ctrl_event_fd = self.rx_ctrl_event.as_raw_fd();
@@ -483,24 +502,32 @@ impl VhostUserConsoleBackend {
             .register_listener(
                 rx_ctrl_event_fd,
                 EventSet::IN,
-                u64::from(BACKEND_CTRL_RX_EFD),
+                u64::from(QueueEvents::BACKEND_CTRL_RX_EFD),
             )
             .unwrap();
 
         let exit_event_fd = self.exit_event.as_raw_fd();
         vring_worker
-            .register_listener(exit_event_fd, EventSet::IN, u64::from(EXIT_EFD))
+            .register_listener(
+                exit_event_fd,
+                EventSet::IN,
+                u64::from(QueueEvents::EXIT_EFD),
+            )
             .unwrap();
 
         let epoll_fd = self.epoll_fd.as_raw_fd();
         vring_worker
-            .register_listener(epoll_fd, EventSet::IN, u64::from(KEY_EFD))
+            .register_listener(epoll_fd, EventSet::IN, u64::from(QueueEvents::KEY_EFD))
             .unwrap();
 
         if self.controller.read().unwrap().backend == BackendType::Network {
             let listener_fd = self.listener.as_ref().expect("asd").as_raw_fd();
             vring_worker
-                .register_listener(listener_fd, EventSet::IN, u64::from(LISTENER_EFD))
+                .register_listener(
+                    listener_fd,
+                    EventSet::IN,
+                    u64::from(QueueEvents::LISTENER_EFD),
+                )
                 .unwrap();
         }
     }
@@ -659,11 +686,11 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
     type Bitmap = ();
 
     fn num_queues(&self) -> usize {
-        NUM_QUEUES
+        usize::from(Self::NUM_QUEUES)
     }
 
     fn max_queue_size(&self) -> usize {
-        QUEUE_SIZE
+        Self::QUEUE_SIZE
     }
 
     fn features(&self) -> u64 {
@@ -719,17 +746,17 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
         vrings: &[VringRwLock],
         _thread_id: usize,
     ) -> IoResult<()> {
-        if device_event == EXIT_EFD {
+        if device_event == QueueEvents::EXIT_EFD {
             self.prepare_exit();
             return Ok(());
         }
 
-        if device_event == LISTENER_EFD {
+        if device_event == QueueEvents::LISTENER_EFD {
             self.create_new_stream_thread();
             return Ok(());
         }
 
-        if device_event == KEY_EFD {
+        if device_event == QueueEvents::KEY_EFD {
             if self.controller.read().unwrap().backend == BackendType::Nested {
                 return self.read_char_thread();
             } else {
@@ -738,11 +765,11 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
             }
         }
 
-        let vring = if device_event == BACKEND_RX_EFD {
-            &vrings[RX_QUEUE as usize]
-        } else if device_event == BACKEND_CTRL_RX_EFD {
-            &vrings[CTRL_RX_QUEUE as usize]
-        } else if (device_event as usize) < NUM_QUEUES {
+        let vring = if device_event == QueueEvents::BACKEND_RX_EFD {
+            &vrings[QueueEvents::RX_QUEUE as usize]
+        } else if device_event == QueueEvents::BACKEND_CTRL_RX_EFD {
+            &vrings[QueueEvents::CTRL_RX_QUEUE as usize]
+        } else if device_event < Self::NUM_QUEUES {
             &vrings[device_event as usize]
         } else {
             return Err(Error::HandleEventUnknown(device_event).into());
@@ -752,30 +779,30 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
             loop {
                 vring.disable_notification().unwrap();
                 match device_event {
-                    RX_QUEUE => {
+                    QueueEvents::RX_QUEUE => {
                         if self.rx_data_fifo.size() != 0 {
                             self.process_rx_queue(vring)
                         } else {
                             break;
                         }
                     }
-                    TX_QUEUE => {
+                    QueueEvents::TX_QUEUE => {
                         self.ready_to_write = true;
                         self.process_tx_queue(vring)
                     }
-                    CTRL_RX_QUEUE => {
+                    QueueEvents::CTRL_RX_QUEUE => {
                         if self.ready && (self.rx_ctrl_fifo.size() != 0) {
                             self.process_ctrl_rx_queue(vring)
                         } else {
                             break;
                         }
                     }
-                    CTRL_TX_QUEUE => self.process_ctrl_tx_queue(vring),
-                    BACKEND_RX_EFD => {
+                    QueueEvents::CTRL_TX_QUEUE => self.process_ctrl_tx_queue(vring),
+                    QueueEvents::BACKEND_RX_EFD => {
                         let _ = self.rx_event.read();
                         self.process_rx_queue(vring)
                     }
-                    BACKEND_CTRL_RX_EFD => {
+                    QueueEvents::BACKEND_CTRL_RX_EFD => {
                         let _ = self.rx_ctrl_event.read();
                         self.process_ctrl_rx_queue(vring)
                     }
@@ -787,18 +814,18 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
             }
         } else {
             match device_event {
-                RX_QUEUE => self.process_rx_queue(vring),
-                TX_QUEUE => {
+                QueueEvents::RX_QUEUE => self.process_rx_queue(vring),
+                QueueEvents::TX_QUEUE => {
                     self.ready_to_write = true;
                     self.process_tx_queue(vring)
                 }
-                CTRL_RX_QUEUE => self.process_ctrl_rx_queue(vring),
-                CTRL_TX_QUEUE => self.process_ctrl_tx_queue(vring),
-                BACKEND_RX_EFD => {
+                QueueEvents::CTRL_RX_QUEUE => self.process_ctrl_rx_queue(vring),
+                QueueEvents::CTRL_TX_QUEUE => self.process_ctrl_tx_queue(vring),
+                QueueEvents::BACKEND_RX_EFD => {
                     let _ = self.rx_event.read();
                     self.process_rx_queue(vring)
                 }
-                BACKEND_CTRL_RX_EFD => {
+                QueueEvents::BACKEND_CTRL_RX_EFD => {
                     let _ = self.rx_ctrl_event.read();
                     self.process_ctrl_rx_queue(vring)
                 }
@@ -851,27 +878,32 @@ mod tests {
         let list_vrings = [vring.clone(), vring.clone(), vring.clone(), vring.clone()];
 
         vu_console_backend
-            .handle_event(RX_QUEUE, EventSet::IN, &list_vrings, 0)
+            .handle_event(QueueEvents::RX_QUEUE, EventSet::IN, &list_vrings, 0)
             .unwrap();
 
         vu_console_backend
-            .handle_event(TX_QUEUE, EventSet::IN, &list_vrings, 0)
+            .handle_event(QueueEvents::TX_QUEUE, EventSet::IN, &list_vrings, 0)
             .unwrap();
 
         vu_console_backend
-            .handle_event(CTRL_RX_QUEUE, EventSet::IN, &list_vrings, 0)
+            .handle_event(QueueEvents::CTRL_RX_QUEUE, EventSet::IN, &list_vrings, 0)
             .unwrap();
 
         vu_console_backend
-            .handle_event(CTRL_TX_QUEUE, EventSet::IN, &list_vrings, 0)
+            .handle_event(QueueEvents::CTRL_TX_QUEUE, EventSet::IN, &list_vrings, 0)
             .unwrap();
 
         vu_console_backend
-            .handle_event(BACKEND_RX_EFD, EventSet::IN, &list_vrings, 0)
+            .handle_event(QueueEvents::BACKEND_RX_EFD, EventSet::IN, &list_vrings, 0)
             .unwrap();
 
         vu_console_backend
-            .handle_event(BACKEND_CTRL_RX_EFD, EventSet::IN, &list_vrings, 0)
+            .handle_event(
+                QueueEvents::BACKEND_CTRL_RX_EFD,
+                EventSet::IN,
+                &list_vrings,
+                0,
+            )
             .unwrap();
     }
 
@@ -1299,7 +1331,7 @@ mod tests {
 
         vu_console_backend.ready_to_write = true;
         assert!(vu_console_backend
-            .handle_event(KEY_EFD, EventSet::IN, &[vring], 0)
+            .handle_event(QueueEvents::KEY_EFD, EventSet::IN, &[vring], 0)
             .is_ok());
 
         let received_byte = vu_console_backend.rx_data_fifo.peek();
@@ -1329,7 +1361,7 @@ mod tests {
 
         vu_console_backend.ready_to_write = true;
         assert!(vu_console_backend
-            .handle_event(KEY_EFD, EventSet::IN, &[vring], 0)
+            .handle_event(QueueEvents::KEY_EFD, EventSet::IN, &[vring], 0)
             .is_ok());
 
         let received_byte = vu_console_backend.rx_data_fifo.peek();

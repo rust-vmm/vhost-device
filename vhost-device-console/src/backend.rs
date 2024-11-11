@@ -23,11 +23,11 @@ use crate::{
     vhu_console::VhostUserConsoleBackend,
 };
 
-pub(crate) type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, ThisError)]
 /// Errors related to low level Console helpers
-pub(crate) enum Error {
+pub enum Error {
     #[error("Invalid socket count: {0}")]
     SocketCountInvalid(usize),
     #[error("Could not create console backend: {0}")]
@@ -44,12 +44,12 @@ pub(crate) enum Error {
     WrongBackendSocket,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct VuConsoleConfig {
-    pub(crate) socket_path: PathBuf,
-    pub(crate) backend: BackendType,
-    pub(crate) tcp_port: String,
-    pub(crate) socket_count: u32,
+    pub socket_path: PathBuf,
+    pub backend: BackendType,
+    pub tcp_port: String,
+    pub socket_count: u32,
 }
 
 impl VuConsoleConfig {
@@ -86,11 +86,7 @@ impl VuConsoleConfig {
 
 /// This is the public API through which an external program starts the
 /// vhost-device-console backend server.
-pub(crate) fn start_backend_server(
-    socket: PathBuf,
-    tcp_addr: String,
-    backend: BackendType,
-) -> Result<()> {
+pub fn start_backend_server(socket: PathBuf, tcp_addr: String, backend: BackendType) -> Result<()> {
     loop {
         let controller = ConsoleController::new(backend);
         let arc_controller = Arc::new(RwLock::new(controller));
@@ -188,7 +184,7 @@ mod tests {
             socket_count: 1,
         };
 
-        assert!(VuConsoleConfig::try_from(args).is_ok());
+        VuConsoleConfig::try_from(args).unwrap();
     }
 
     #[test]
@@ -230,7 +226,7 @@ mod tests {
             socket_count: 1,
         };
 
-        assert!(VuConsoleConfig::try_from(args).is_ok());
+        VuConsoleConfig::try_from(args).unwrap();
     }
 
     #[test]
@@ -242,7 +238,7 @@ mod tests {
             socket_count: 2,
         };
 
-        assert!(VuConsoleConfig::try_from(args).is_ok());
+        VuConsoleConfig::try_from(args).unwrap();
     }
 
     fn test_backend_start_and_stop(args: ConsoleArgs) -> Result<()> {

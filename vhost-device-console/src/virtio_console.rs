@@ -27,9 +27,9 @@ pub const VIRTIO_CONSOLE_PORT_OPEN: u16 = 6;
 pub const VIRTIO_CONSOLE_PORT_NAME: u16 = 7;
 
 /// Virtio Console Config
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct VirtioConsoleConfig {
+pub struct VirtioConsoleConfig {
     pub cols: Le16,
     pub rows: Le16,
     pub max_nr_ports: Le32,
@@ -40,9 +40,9 @@ pub(crate) struct VirtioConsoleConfig {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioConsoleConfig {}
 
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
-pub(crate) struct VirtioConsoleControl {
+pub struct VirtioConsoleControl {
     pub id: Le32,
     pub event: Le16,
     pub value: Le16,

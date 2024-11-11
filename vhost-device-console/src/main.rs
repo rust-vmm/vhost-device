@@ -4,6 +4,31 @@
 //          Timos Ampelikiotis <t.ampelikiotis@virtualopensystems.com>
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
+#![deny(
+    clippy::undocumented_unsafe_blocks,
+    /* groups */
+    clippy::correctness,
+    clippy::suspicious,
+    clippy::complexity,
+    clippy::perf,
+    clippy::style,
+    clippy::nursery,
+    //* restriction */
+    clippy::dbg_macro,
+    clippy::rc_buffer,
+    clippy::as_underscore,
+    clippy::assertions_on_result_states,
+    //* pedantic */
+    clippy::cast_lossless,
+    clippy::cast_possible_wrap,
+    clippy::ptr_as_ptr,
+    clippy::bool_to_int_with_if,
+    clippy::borrow_as_ptr,
+    clippy::case_sensitive_file_extension_comparisons,
+    clippy::cast_lossless,
+    clippy::cast_ptr_alignment,
+    clippy::naive_bytecount
+)]
 
 mod backend;
 mod console;
@@ -16,7 +41,7 @@ use log::error;
 
 use crate::console::BackendType;
 
-pub(crate) type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 use crate::backend::{start_backend, Error, VuConsoleConfig};
 
 #[derive(Parser, Debug)]
@@ -54,11 +79,18 @@ impl TryFrom<ConsoleArgs> for VuConsoleConfig {
             return Err(Error::WrongBackendSocket);
         }
 
-        Ok(VuConsoleConfig {
-            socket_path: args.socket_path,
-            backend: args.backend,
-            tcp_port: args.tcp_port,
-            socket_count: args.socket_count,
+        let ConsoleArgs {
+            socket_path,
+            backend,
+            tcp_port,
+            socket_count,
+        } = args;
+
+        Ok(Self {
+            socket_path,
+            backend,
+            tcp_port,
+            socket_count,
         })
     }
 }

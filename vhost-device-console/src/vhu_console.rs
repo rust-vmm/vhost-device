@@ -14,14 +14,11 @@ use crate::virtio_console::{
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use log::{error, trace, warn};
 use queues::{IsQueue, Queue};
+use std::io::{self, Read, Result as IoResult, Write};
 use std::net::TcpListener;
 use std::os::fd::{AsRawFd, RawFd};
 use std::slice::from_raw_parts;
 use std::sync::{Arc, RwLock};
-use std::{
-    convert,
-    io::{self, Read, Result as IoResult, Write},
-};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};
@@ -90,9 +87,9 @@ pub(crate) enum Error {
     EpollFdCreate,
 }
 
-impl convert::From<Error> for io::Error {
-    fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+impl From<Error> for io::Error {
+    fn from(err: Error) -> Self {
+        io::Error::new(io::ErrorKind::Other, err)
     }
 }
 

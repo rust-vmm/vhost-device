@@ -5,33 +5,41 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use crate::console::{BackendType, ConsoleController};
-use crate::virtio_console::{
-    VirtioConsoleControl, VIRTIO_CONSOLE_CONSOLE_PORT, VIRTIO_CONSOLE_DEVICE_READY,
-    VIRTIO_CONSOLE_F_MULTIPORT, VIRTIO_CONSOLE_PORT_ADD, VIRTIO_CONSOLE_PORT_NAME,
-    VIRTIO_CONSOLE_PORT_OPEN, VIRTIO_CONSOLE_PORT_READY,
+use std::{
+    io::{self, Read, Result as IoResult, Write},
+    net::TcpListener,
+    os::fd::{AsRawFd, RawFd},
+    slice::from_raw_parts,
+    sync::{Arc, RwLock},
 };
+
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use log::{error, trace, warn};
 use queues::{IsQueue, Queue};
-use std::io::{self, Read, Result as IoResult, Write};
-use std::net::TcpListener;
-use std::os::fd::{AsRawFd, RawFd};
-use std::slice::from_raw_parts;
-use std::sync::{Arc, RwLock};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
+
+use crate::{
+    console::{BackendType, ConsoleController},
+    virtio_console::{
+        VirtioConsoleControl, VIRTIO_CONSOLE_CONSOLE_PORT, VIRTIO_CONSOLE_DEVICE_READY,
+        VIRTIO_CONSOLE_F_MULTIPORT, VIRTIO_CONSOLE_PORT_ADD, VIRTIO_CONSOLE_PORT_NAME,
+        VIRTIO_CONSOLE_PORT_OPEN, VIRTIO_CONSOLE_PORT_READY,
+    },
+};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -75,9 +83,11 @@ enum QueueEvents {
     TxQueue = 1,
     CtrlRxQueue = 2,
     CtrlTxQueue = 3,
-    /// `BACKEND_RX_EFD` is being triggered when the backend has new data to send to the RX queue.
+    /// `BACKEND_RX_EFD` is being triggered when the backend has new data to
+    /// send to the RX queue.
     BackendRxEfd = (VhostUserConsoleBackend::NUM_QUEUES + 1),
-    /// `BACKEND_CTRL_RX_EFD` event is used when the backend needs to write to the RX control queue.
+    /// `BACKEND_CTRL_RX_EFD` event is used when the backend needs to write to
+    /// the RX control queue.
     BackendCtrlRxEfd = (VhostUserConsoleBackend::NUM_QUEUES + 2),
     KeyEfd = (VhostUserConsoleBackend::NUM_QUEUES + 3),
     ListenerEfd = (VhostUserConsoleBackend::NUM_QUEUES + 4),
@@ -100,7 +110,8 @@ impl QueueEvents {
 
 /// Port name
 ///
-/// Need to be updated when `MULTIPORT` feature is supported for more than one devices.
+/// Need to be updated when `MULTIPORT` feature is supported for more than one
+/// devices.
 const PORT_NAME: &[u8] = b"org.test.foo!";
 
 // Define a new trait that combines Read and Write
@@ -842,11 +853,13 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
+
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::*;
 
     #[test]
     fn test_vhost_user_console_backend_creation() {

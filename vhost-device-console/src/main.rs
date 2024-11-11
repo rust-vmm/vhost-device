@@ -9,11 +9,12 @@ mod backend;
 mod console;
 mod vhu_console;
 mod virtio_console;
-use crate::console::BackendType;
+use std::{path::PathBuf, process::exit};
+
 use clap::Parser;
 use log::error;
-use std::path::PathBuf;
-use std::process::exit;
+
+use crate::console::BackendType;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 use crate::backend::{start_backend, Error, VuConsoleConfig};
@@ -21,7 +22,8 @@ use crate::backend::{start_backend, Error, VuConsoleConfig};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct ConsoleArgs {
-    /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+    /// Location of vhost-user Unix domain socket. This is suffixed by
+    /// `0,1,2..(socket_count-1)`.
     #[clap(short = 's', long, value_name = "SOCKET")]
     socket_path: PathBuf,
 
@@ -33,8 +35,9 @@ struct ConsoleArgs {
     #[clap(short = 'b', long, value_enum, default_value = "nested")]
     backend: BackendType,
 
-    /// Initial tcp port to be used with "network" backend. If socket_count is N then
-    /// the following tcp ports will be created: tcp_port, tcp_port + 1, ..., tcp_port + (N - 1).
+    /// Initial tcp port to be used with `network` backend. If socket_count is
+    /// `N` then the following tcp ports will be created: `tcp_port`,
+    /// `tcp_port + 1`, ... , `tcp_port + (N - 1)`.
     #[clap(short = 'p', long, value_name = "PORT", default_value = "12345")]
     tcp_port: String,
 }

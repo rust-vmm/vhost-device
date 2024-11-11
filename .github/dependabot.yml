@@ -1,20 +1,42 @@
 version: 2
 updates:
 - package-ecosystem: cargo
-  directory: "/"
+  directories:
+    - "/"
+    - "/staging/"
   schedule:
     interval: weekly
   allow:
   - dependency-type: direct
   - dependency-type: indirect
   groups:
-      vhost-device:
+      rust-vmm:
+        patterns:
+          - "vhost"
+          - "vhost-user-backend"
+          - "virtio-bindings"
+          - "virtio-queue"
+          - "virtio-vsock"
+          - "vm-memory"
+          - "vmm-sys-util"
+      non-rust-vmm:
+        applies-to: security-updates
         patterns:
           - "*"
+        exclude-patterns:
+          - "vhost"
+          - "vhost-user-backend"
+          - "virtio-bindings"
+          - "virtio-queue"
+          - "virtio-vsock"
+          - "vm-memory"
+          - "vmm-sys-util"
 - package-ecosystem: cargo
-  directory: "/staging/"
+  directories:
+    - "/"
+    - "/staging/"
   schedule:
-    interval: weekly
+    interval: monthly
   allow:
   - dependency-type: direct
   - dependency-type: indirect

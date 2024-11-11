@@ -43,8 +43,8 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Copy, Clone, Debug, PartialEq, ThisError)]
-pub(crate) enum Error {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ThisError)]
+pub enum Error {
     #[error("Failed to handle unknown event: {0}")]
     HandleEventUnknown(u16),
     #[error("Descriptor not found")]
@@ -71,7 +71,7 @@ pub(crate) enum Error {
 
 impl From<Error> for io::Error {
     fn from(err: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, err)
+        Self::new(io::ErrorKind::Other, err)
     }
 }
 
@@ -123,7 +123,7 @@ impl<T: Read + Write> ReadWrite for T {}
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioConsoleControl {}
 
-pub(crate) struct VhostUserConsoleBackend {
+pub struct VhostUserConsoleBackend {
     controller: Arc<RwLock<ConsoleController>>,
     acked_features: u64,
     event_idx: bool,
@@ -131,15 +131,15 @@ pub(crate) struct VhostUserConsoleBackend {
     rx_data_fifo: Queue<u8>,
     epoll_fd: i32,
     stream_fd: Option<i32>,
-    pub(crate) ready: bool,
-    pub(crate) ready_to_write: bool,
-    pub(crate) output_queue: Queue<String>,
-    pub(crate) stdin: Option<Box<dyn Read + Send + Sync>>,
-    pub(crate) listener: Option<TcpListener>,
-    pub(crate) stream: Option<Box<dyn ReadWrite + Send + Sync>>,
-    pub(crate) rx_event: EventFd,
-    pub(crate) rx_ctrl_event: EventFd,
-    pub(crate) exit_event: EventFd,
+    pub ready: bool,
+    pub ready_to_write: bool,
+    pub output_queue: Queue<String>,
+    pub stdin: Option<Box<dyn Read + Send + Sync>>,
+    pub listener: Option<TcpListener>,
+    pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
+    pub rx_event: EventFd,
+    pub rx_ctrl_event: EventFd,
+    pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -150,9 +150,9 @@ impl VhostUserConsoleBackend {
     pub const QUEUE_SIZE: usize = 128;
     pub const NUM_QUEUES: u16 = 4;
 
-    pub(crate) fn new(controller: Arc<RwLock<ConsoleController>>) -> Result<Self> {
-        Ok(VhostUserConsoleBackend {
-            controller: controller.clone(),
+    pub fn new(controller: Arc<RwLock<ConsoleController>>) -> Result<Self> {
+        Ok(Self {
+            controller,
             event_idx: false,
             rx_ctrl_fifo: Queue::new(),
             rx_data_fifo: Queue::new(),
@@ -184,7 +184,7 @@ impl VhostUserConsoleBackend {
             Self::epoll_register(self.epoll_fd.as_raw_fd(), stdin_fd, epoll::Events::EPOLLIN)
                 .map_err(|_| Error::EpollAdd)?;
         } else {
-            let listener = TcpListener::bind(tcpaddr_str.clone()).expect("asdasd");
+            let listener = TcpListener::bind(tcpaddr_str).expect("asdasd");
             self.listener = Some(listener);
         }
         Ok(())
@@ -495,10 +495,7 @@ impl VhostUserConsoleBackend {
     }
 
     /// Set self's VringWorker.
-    pub(crate) fn set_vring_worker(
-        &self,
-        vring_worker: Arc<VringEpollHandler<Arc<RwLock<VhostUserConsoleBackend>>>>,
-    ) {
+    pub fn set_vring_worker(&self, vring_worker: Arc<VringEpollHandler<Arc<RwLock<Self>>>>) {
         let rx_event_fd = self.rx_event.as_raw_fd();
         vring_worker
             .register_listener(
@@ -724,6 +721,12 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        debug_assert_eq!(
+            std::mem::size_of::<*const u8>(),
+            8,
+            "If we start supporting non-64-bit pointers, remove the following clippy lint."
+        );
+        #[allow(clippy::cast_possible_wrap)]
         // SAFETY: The layout of the structure is fixed and can be initialized by
         // reading its content from byte array.
         unsafe {
@@ -734,7 +737,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
                     .config()
                     .as_slice()
                     .as_ptr()
-                    .offset(offset as isize) as *const _ as *const _,
+                    .offset(offset as isize),
                 size as usize,
             )
             .to_vec()
@@ -888,7 +891,7 @@ mod tests {
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
         vring.set_queue_ready(true);
-        let list_vrings = [vring.clone(), vring.clone(), vring.clone(), vring.clone()];
+        let list_vrings = [vring.clone(), vring.clone(), vring.clone(), vring];
 
         vu_console_backend
             .handle_event(QueueEvents::RX_QUEUE, EventSet::IN, &list_vrings, 0)
@@ -930,21 +933,21 @@ mod tests {
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
 
-        let vring = VringRwLock::new(mem.clone(), 0x1000).unwrap();
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
         // Empty descriptor chain should be ignored
-        assert!(vu_console_backend
+        vu_console_backend
             .process_rx_requests(Vec::<ConsoleDescriptorChain>::new(), &vring)
-            .is_ok());
-        assert!(vu_console_backend
+            .unwrap();
+        vu_console_backend
             .process_tx_requests(Vec::<ConsoleDescriptorChain>::new(), &vring)
-            .is_ok());
-        assert!(vu_console_backend
+            .unwrap();
+        vu_console_backend
             .process_ctrl_rx_requests(Vec::<ConsoleDescriptorChain>::new(), &vring)
-            .is_ok());
-        assert!(vu_console_backend
+            .unwrap();
+        vu_console_backend
             .process_ctrl_tx_requests(Vec::<ConsoleDescriptorChain>::new(), &vring)
-            .is_ok());
+            .unwrap();
     }
 
     fn build_desc_chain(
@@ -964,7 +967,7 @@ mod tests {
                 flags[i as usize] & !VRING_DESC_F_NEXT as u16
             };
 
-            let desc = Descriptor::new((0x100 * (i + 1)) as u64, len, desc_flags, i + 1);
+            let desc = Descriptor::new(u64::from(0x100 * (i + 1)), len, desc_flags, i + 1);
             desc_vec.push(desc);
         }
 
@@ -989,7 +992,7 @@ mod tests {
 
         // Test 1: Empty queue
         let mem1 = GuestMemoryAtomic::new(mem.clone());
-        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        let vring = VringRwLock::new(mem1, 0x1000).unwrap();
         assert!(vu_console_backend
             .process_ctrl_rx_requests(vec![], &vring)
             .unwrap());
@@ -1037,7 +1040,7 @@ mod tests {
 
         // Test 5: if message is VIRTIO_CONSOLE_PORT_NAME
         let desc_chain = build_desc_chain(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
-        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let mem1 = GuestMemoryAtomic::new(mem);
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
 
@@ -1049,7 +1052,7 @@ mod tests {
         let _ = vu_console_backend.rx_ctrl_fifo.add(ctrl_msg);
 
         assert!(vu_console_backend
-            .process_ctrl_rx_requests(vec![desc_chain.clone()], &vring)
+            .process_ctrl_rx_requests(vec![desc_chain], &vring)
             .unwrap());
     }
 
@@ -1063,7 +1066,7 @@ mod tests {
 
         // Test 1: Empty queue
         let mem1 = GuestMemoryAtomic::new(mem.clone());
-        let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
+        let vring = VringRwLock::new(mem1, 0x1000).unwrap();
         assert!(vu_console_backend
             .process_ctrl_tx_requests(vec![], &vring)
             .unwrap());
@@ -1088,18 +1091,18 @@ mod tests {
         vu_console_backend.update_memory(mem1).unwrap();
         assert_eq!(
             vu_console_backend
-                .process_ctrl_tx_requests(vec![desc_chain.clone()], &vring)
+                .process_ctrl_tx_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
             Error::DescriptorReadFailed
         );
 
         // Test 4: Complete function successfully -- VIRTIO_CONSOLE_PORT_READY message
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x8);
-        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let mem1 = GuestMemoryAtomic::new(mem);
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
         assert!(vu_console_backend
-            .process_ctrl_tx_requests(vec![desc_chain.clone()], &vring)
+            .process_ctrl_tx_requests(vec![desc_chain], &vring)
             .unwrap());
     }
 
@@ -1111,7 +1114,7 @@ mod tests {
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem_1 = GuestMemoryAtomic::new(mem.clone());
-        vu_console_backend.update_memory(mem_1.clone()).unwrap();
+        vu_console_backend.update_memory(mem_1).unwrap();
 
         // Test 1: Empty queue
         let ctrl_msg_1 = VirtioConsoleControl {
@@ -1138,7 +1141,7 @@ mod tests {
             value: 1.into(),
         };
 
-        assert!(vu_console_backend.handle_control_msg(ctrl_msg_3).is_ok());
+        vu_console_backend.handle_control_msg(ctrl_msg_3).unwrap();
 
         assert_eq!(
             vu_console_backend
@@ -1147,13 +1150,13 @@ mod tests {
             Error::HandleEventUnknown(4)
         );
 
-        assert!(vu_console_backend.handle_control_msg(ctrl_msg_1).is_ok());
+        vu_console_backend.handle_control_msg(ctrl_msg_1).unwrap();
 
         // Update memory
-        let mem_1 = GuestMemoryAtomic::new(mem.clone());
-        vu_console_backend.update_memory(mem_1.clone()).unwrap();
+        let mem_1 = GuestMemoryAtomic::new(mem);
+        vu_console_backend.update_memory(mem_1).unwrap();
 
-        assert!(vu_console_backend.handle_control_msg(ctrl_msg_2).is_ok());
+        vu_console_backend.handle_control_msg(ctrl_msg_2).unwrap();
     }
 
     #[test]
@@ -1167,18 +1170,18 @@ mod tests {
         // Test 1: Empty queue
         let mem1 = GuestMemoryAtomic::new(mem.clone());
         let vring = VringRwLock::new(mem1, 0x1000).unwrap();
-        assert!(vu_console_backend
+        vu_console_backend
             .process_tx_requests(vec![], &vring)
-            .is_ok());
+            .unwrap();
 
         // Test 2: Empty buffer
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x200);
         let mem1 = GuestMemoryAtomic::new(mem.clone());
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
-        assert!(vu_console_backend
+        vu_console_backend
             .process_tx_requests(vec![desc_chain], &vring)
-            .is_ok());
+            .unwrap();
 
         // Test 3: Fill message to the buffer
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x200);
@@ -1186,7 +1189,7 @@ mod tests {
 
         // Build the Vec with the desired string
         let mut buffer: Vec<u8> = Vec::new();
-        let string_bytes = "Hello!".as_bytes();
+        let string_bytes = b"Hello!";
         buffer.extend_from_slice(string_bytes);
 
         // Write a new buffer into the desc_chain
@@ -1205,9 +1208,9 @@ mod tests {
             String::from_utf8(buffer).unwrap()
         );
 
-        assert!(vu_console_backend
+        vu_console_backend
             .process_tx_requests(vec![desc_chain], &vring)
-            .is_ok());
+            .unwrap();
     }
 
     #[test]
@@ -1219,7 +1222,7 @@ mod tests {
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x200);
-        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let mem1 = GuestMemoryAtomic::new(mem);
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
 
         // Test: Fill message to the buffer
@@ -1228,7 +1231,7 @@ mod tests {
 
         // Build the Vec with the desired string
         let mut buffer: Vec<u8> = Vec::new();
-        let string_bytes = "Hello!".as_bytes();
+        let string_bytes = b"Hello!";
         buffer.extend_from_slice(string_bytes);
 
         // Write a new buffer into the desc_chain
@@ -1247,9 +1250,9 @@ mod tests {
             String::from_utf8(buffer).unwrap()
         );
 
-        assert!(vu_console_backend
+        vu_console_backend
             .process_tx_requests(vec![desc_chain], &vring)
-            .is_ok());
+            .unwrap();
     }
 
     #[test]
@@ -1263,9 +1266,9 @@ mod tests {
         // Test 1: Empty queue
         let mem1 = GuestMemoryAtomic::new(mem.clone());
         let vring = VringRwLock::new(mem1, 0x1000).unwrap();
-        assert!(vu_console_backend
+        vu_console_backend
             .process_rx_requests(vec![], &vring)
-            .is_ok());
+            .unwrap();
 
         // Test 2: Empty buffer
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x200);
@@ -1296,7 +1299,7 @@ mod tests {
 
         // Test 4: Fill message to the buffer. Everything should work!
         let desc_chain = build_desc_chain(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
-        let mem1 = GuestMemoryAtomic::new(mem.clone());
+        let mem1 = GuestMemoryAtomic::new(mem);
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
 
@@ -1343,14 +1346,13 @@ mod tests {
         vu_console_backend.stdin = Some(Box::new(cursor));
 
         vu_console_backend.ready_to_write = true;
-        assert!(vu_console_backend
+        vu_console_backend
             .handle_event(QueueEvents::KEY_EFD, EventSet::IN, &[vring], 0)
-            .is_ok());
+            .unwrap();
 
         let received_byte = vu_console_backend.rx_data_fifo.peek();
 
         // verify that the character has been received and is the one we sent
-        assert!(received_byte.clone().is_ok());
         assert_eq!(received_byte.unwrap(), input_data[0]);
     }
 
@@ -1373,14 +1375,13 @@ mod tests {
         vu_console_backend.stream = Some(Box::new(cursor));
 
         vu_console_backend.ready_to_write = true;
-        assert!(vu_console_backend
+        vu_console_backend
             .handle_event(QueueEvents::KEY_EFD, EventSet::IN, &[vring], 0)
-            .is_ok());
+            .unwrap();
 
         let received_byte = vu_console_backend.rx_data_fifo.peek();
 
         // verify that the character has been received and is the one we sent
-        assert!(received_byte.clone().is_ok());
         assert_eq!(received_byte.unwrap(), input_data[0]);
     }
 
@@ -1393,7 +1394,7 @@ mod tests {
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem = GuestMemoryAtomic::new(mem);
-        vu_console_backend.update_memory(mem.clone()).unwrap();
+        vu_console_backend.update_memory(mem).unwrap();
 
         // Test 1: Call the actual read function
         let cursor = Cursor::new(Vec::new());

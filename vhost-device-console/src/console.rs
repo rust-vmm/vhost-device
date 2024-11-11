@@ -18,14 +18,14 @@ pub enum BackendType {
 }
 
 #[derive(Debug)]
-pub(crate) struct ConsoleController {
+pub struct ConsoleController {
     config: VirtioConsoleConfig,
     pub backend: BackendType,
 }
 
 impl ConsoleController {
-    pub(crate) fn new(backend: BackendType) -> ConsoleController {
-        ConsoleController {
+    pub fn new(backend: BackendType) -> Self {
+        Self {
             config: VirtioConsoleConfig {
                 cols: 20.into(),
                 rows: 20.into(),
@@ -36,8 +36,8 @@ impl ConsoleController {
         }
     }
 
-    pub(crate) fn config(&self) -> &VirtioConsoleConfig {
-        trace!("Get config\n");
+    pub fn config(&self) -> &VirtioConsoleConfig {
+        trace!("Get config");
         &self.config
     }
 }

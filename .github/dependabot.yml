@@ -44,6 +44,14 @@ updates:
       vhost-device:
         patterns:
           - "*"
+        exclude-patterns:
+          - "vhost"
+          - "vhost-user-backend"
+          - "virtio-bindings"
+          - "virtio-queue"
+          - "virtio-vsock"
+          - "vm-memory"
+          - "vmm-sys-util"
   # Makes it possible to have another config for the same directory.
   # https://github.com/dependabot/dependabot-core/issues/1778#issuecomment-1988140219
   target-branch: main

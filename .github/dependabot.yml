@@ -44,6 +44,10 @@ updates:
       vhost-device:
         patterns:
           - "*"
+  # Makes it possible to have another config for the same directory.
+  # https://github.com/dependabot/dependabot-core/issues/1778#issuecomment-1988140219
+  target-branch: main
+
 - package-ecosystem: gitsubmodule
   directory: "/"
   schedule:

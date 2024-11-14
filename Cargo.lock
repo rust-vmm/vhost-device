@@ -1659,7 +1659,7 @@ dependencies = [
  "log",
  "queues",
  "socketcan",
- "thiserror 1.0.69",
+ "thiserror 2.0.3",
  "vhost 0.11.0",
  "vhost-user-backend 0.15.0",
  "virtio-bindings",

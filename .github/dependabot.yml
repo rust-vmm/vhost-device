@@ -7,30 +7,17 @@ updates:
   schedule:
     interval: weekly
   allow:
-  - dependency-type: direct
-  - dependency-type: indirect
+    - dependency-name: "vhost"
+    - dependency-name: "vhost-user-backend"
+    - dependency-name: "virtio-bindings"
+    - dependency-name: "virtio-queue"
+    - dependency-name: "virtio-vsock"
+    - dependency-name: "vm-memory"
+    - dependency-name: "vmm-sys-util"
   groups:
       rust-vmm:
         patterns:
-          - "vhost"
-          - "vhost-user-backend"
-          - "virtio-bindings"
-          - "virtio-queue"
-          - "virtio-vsock"
-          - "vm-memory"
-          - "vmm-sys-util"
-      non-rust-vmm:
-        applies-to: security-updates
-        patterns:
           - "*"
-        exclude-patterns:
-          - "vhost"
-          - "vhost-user-backend"
-          - "virtio-bindings"
-          - "virtio-queue"
-          - "virtio-vsock"
-          - "vm-memory"
-          - "vmm-sys-util"
 - package-ecosystem: cargo
   directories:
     - "/"
@@ -38,10 +25,17 @@ updates:
   schedule:
     interval: monthly
   allow:
-  - dependency-type: direct
-  - dependency-type: indirect
+    - dependency-type: all
+  ignore:
+    - dependency-name: "vhost"
+    - dependency-name: "vhost-user-backend"
+    - dependency-name: "virtio-bindings"
+    - dependency-name: "virtio-queue"
+    - dependency-name: "virtio-vsock"
+    - dependency-name: "vm-memory"
+    - dependency-name: "vmm-sys-util"
   groups:
-      vhost-device:
+      non-rust-vmm:
         patterns:
           - "*"
   # Makes it possible to have another config for the same directory.

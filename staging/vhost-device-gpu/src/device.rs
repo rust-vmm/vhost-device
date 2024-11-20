@@ -727,14 +727,18 @@ mod tests {
     use super::*;
     use crate::{
         protocol::{
+            virtio_gpu_ctx_create, virtio_gpu_ctx_destroy, virtio_gpu_ctx_resource,
             virtio_gpu_mem_entry, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
-            virtio_gpu_resource_flush, virtio_gpu_set_scanout,
+            virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush, virtio_gpu_set_scanout,
             GpuResponse::{OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
+            VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE, VIRTIO_GPU_CMD_CTX_CREATE,
+            VIRTIO_GPU_CMD_CTX_DESTROY, VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE,
             VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
-            VIRTIO_GPU_CMD_RESOURCE_FLUSH, VIRTIO_GPU_CMD_SET_SCANOUT,
-            VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
-            VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D, VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
-            VIRTIO_GPU_RESP_ERR_UNSPEC, VIRTIO_GPU_RESP_OK_NODATA,
+            VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING, VIRTIO_GPU_CMD_RESOURCE_FLUSH,
+            VIRTIO_GPU_CMD_SET_SCANOUT, VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D,
+            VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D,
+            VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM, VIRTIO_GPU_RESP_ERR_UNSPEC,
+            VIRTIO_GPU_RESP_OK_NODATA,
         },
         virtio_gpu::MockVirtioGpu,
     };
@@ -1529,6 +1533,17 @@ mod tests {
                 writable_desc_lengths: &[RESP_SIZE],
             };
 
+            // Construct a command to detach backing memory location(s) from the resource
+            let hdr = new_hdr(VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING);
+            let cmd = virtio_gpu_resource_detach_backing {
+                resource_id: 1.into(),
+                padding: Default::default(),
+            };
+            let detach_backing_cmd = TestingDescChainArgs {
+                readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
+                writable_desc_lengths: &[RESP_SIZE],
+            };
+
             // Construct a command to transfer the resource data from the attached memory to gpu
             let hdr = new_hdr(VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
             let cmd = virtio_gpu_transfer_to_host_2d {
@@ -1538,6 +1553,46 @@ mod tests {
                 padding: Default::default(),
             };
             let transfer_to_host_cmd = TestingDescChainArgs {
+                readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
+                writable_desc_lengths: &[RESP_SIZE],
+            };
+
+            // Construct a command to transfer the resource data from the host gpu to the attached memory
+            let hdr = new_hdr(VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D);
+            let cmd = virtio_gpu_transfer_host_3d::default();
+            let transfer_from_host_cmd = TestingDescChainArgs {
+                readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
+                writable_desc_lengths: &[RESP_SIZE],
+            };
+
+            // Construct a command to create a context for the given ctx_id in the hdr
+            let hdr = new_hdr(VIRTIO_GPU_CMD_CTX_CREATE);
+            let cmd = virtio_gpu_ctx_create::default();
+            let ctx_create_cmd = TestingDescChainArgs {
+                readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
+                writable_desc_lengths: &[RESP_SIZE],
+            };
+
+            // Construct a command to destroy a context for the given ctx_id in the hdr
+            let hdr = new_hdr(VIRTIO_GPU_CMD_CTX_DESTROY);
+            let cmd = virtio_gpu_ctx_destroy::default();
+            let ctx_destroy_cmd = TestingDescChainArgs {
+                readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
+                writable_desc_lengths: &[RESP_SIZE],
+            };
+
+            // Construct a command to attach a context for the given ctx_id in the hdr
+            let hdr = new_hdr(VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE);
+            let cmd = virtio_gpu_ctx_resource::default();
+            let ctx_attach_cmd = TestingDescChainArgs {
+                readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
+                writable_desc_lengths: &[RESP_SIZE],
+            };
+
+            // Construct a command to detach a context for the given ctx_id in the hdr
+            let hdr = new_hdr(VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE);
+            let cmd = virtio_gpu_ctx_resource::default();
+            let ctx_detach_cmd = TestingDescChainArgs {
                 readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
                 writable_desc_lengths: &[RESP_SIZE],
             };
@@ -1571,8 +1626,14 @@ mod tests {
                 create_resource_cmd,
                 attach_backing_cmd,
                 transfer_to_host_cmd,
+                transfer_from_host_cmd,
                 set_scanout_cmd,
                 flush_resource_cmd,
+                detach_backing_cmd,
+                ctx_create_cmd,
+                ctx_attach_cmd,
+                ctx_detach_cmd,
+                ctx_destroy_cmd,
             ];
             let (control_vring, _, _) = create_control_vring(&mem, &commands);
 

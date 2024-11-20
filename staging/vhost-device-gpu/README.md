@@ -34,8 +34,6 @@ VIRTIO_GPU_CMD_SET_SCANOUT_BLOB and VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID features
 
 Currently this crate requires some necessary bits in order to move the crate out of staging:
 
-- Achieving a minimum of ~87% code coverage in the main vhost-device repository,
-  which requires some additional unit tests to increase code coverage.
 - Addition of CLI arguments to specify the exact number of capsets and use
   a default capset configuration when no capset is specified rather than using
   hard-coded capset value.

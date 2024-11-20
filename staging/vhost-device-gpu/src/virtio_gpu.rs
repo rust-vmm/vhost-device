@@ -239,7 +239,7 @@ pub trait VirtioGpu {
     fn event_poll(&self);
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VirtioGpuRing {
     Global,
     ContextSpecific { ctx_id: u32, ring_idx: u8 },
@@ -902,7 +902,7 @@ mod tests {
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;
     use rutabaga_gfx::{
-        RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
+        RutabagaFence, RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
     };
 
     use super::*;
@@ -914,6 +914,19 @@ mod tests {
         bind: RUTABAGA_PIPE_BIND_RENDER_TARGET,
         width: 1280,
         height: 720,
+        depth: 1,
+        array_size: 1,
+        last_level: 0,
+        nr_samples: 0,
+        flags: 0,
+    };
+
+    const CREATE_RESOURCE_CURSOR: ResourceCreate3D = ResourceCreate3D {
+        target: RUTABAGA_PIPE_TEXTURE_2D,
+        format: VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
+        bind: RUTABAGA_PIPE_BIND_RENDER_TARGET,
+        width: 64,
+        height: 64,
         depth: 1,
         array_size: 1,
         last_level: 0,
@@ -996,6 +1009,67 @@ mod tests {
             // The resource exists, but the dimensions are wrong
             let result = virtio_gpu.update_cursor(1, cursor_pos, 0, 0);
             assert_matches!(result, Err(ErrInvalidParameter));
+
+            // Create a resource with correct cursor dimensions
+            let cursor_resource_id = 2;
+            virtio_gpu
+                .resource_create_3d(
+                    cursor_resource_id,
+                    CREATE_RESOURCE_CURSOR).unwrap();
+
+            // The resource exists, the dimensions are correct but the test
+            // fails to update cursor position from frontend
+            let result = virtio_gpu.update_cursor(cursor_resource_id, cursor_pos, 5, 5);
+            assert_matches!(result, Err(ErrUnspec));
+        }
+
+        #[test]
+        fn test_move_cursor_fails() {
+            let mut virtio_gpu = new_gpu();
+            let cursor_pos = VhostUserGpuCursorPos {
+                scanout_id: 1,
+                x: 123,
+                y: 123,
+            };
+
+            // No resources exists, but the test fails to set cursor position from frontend
+            let result = virtio_gpu.move_cursor(0, cursor_pos);
+            assert_matches!(result, Err(ErrUnspec));
+
+            // Resources exists, but the test fails to set cursor position from frontend
+            let result = virtio_gpu.move_cursor(1, cursor_pos);
+            assert_matches!(result, Err(ErrUnspec));
+        }
+
+        #[test]
+        fn test_process_fence() {
+            let mut virtio_gpu = new_gpu();
+            let fence = RutabagaFence {
+                flags: 0,
+                fence_id: 0,
+                ctx_id: 1,
+                ring_idx: 0,
+            };
+
+            // Test creating a fence with the `RutabagaFence` that can be used to determine when the previous
+            // command completed.
+            let result = virtio_gpu.create_fence(fence);
+            assert_matches!(result, Ok(OkNoData));
+
+            // Test processing gpu fence: If the fence has already been signaled return true
+            let ring = VirtioGpuRing::Global;
+            let result = virtio_gpu.process_fence(ring.clone(), 0, 0, 0);
+            assert_matches!(result, true);
+
+            // Test processing gpu fence: If the fence has not yet been signaled return false
+            let result = virtio_gpu.process_fence(ring, 1, 0, 0);
+            assert_matches!(result, false);
+        }
+
+        #[test]
+        fn test_event_poll() {
+            let virtio_gpu = new_gpu();
+            virtio_gpu.event_poll();
         }
 
         #[test]

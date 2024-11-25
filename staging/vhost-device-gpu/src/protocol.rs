@@ -1171,25 +1171,25 @@ mod tests {
     #[test]
     fn test_invalid_command_type_display() {
         let error = InvalidCommandType(42);
-        assert_eq!(format!("{}", error), "Invalid command type 42");
+        assert_eq!(format!("{error}"), "Invalid command type 42");
     }
 
     #[test]
     fn test_gpu_response_display() {
         let err_rutabaga = GpuResponse::ErrRutabaga(RutabagaError::InvalidContextId);
         assert_eq!(
-            format!("{}", err_rutabaga),
+            format!("{err_rutabaga}"),
             "renderer error: invalid context id"
         );
 
         let err_scanout = GpuResponse::ErrScanout { num_scanouts: 3 };
-        assert_eq!(format!("{}", err_scanout), "non-zero scanout: 3");
+        assert_eq!(format!("{err_scanout}"), "non-zero scanout: 3");
     }
 
     #[test]
     fn test_invalid_type_error() {
         let error = GpuCommandDecodeError::InvalidType(42);
-        assert_eq!(format!("{}", error), "invalid command type (42)");
+        assert_eq!(format!("{error}"), "invalid command type (42)");
     }
 
     // Test io_error conversion to gpu command decode error
@@ -1313,7 +1313,7 @@ mod tests {
         ];
 
         for (command, expected) in test_cases {
-            assert_eq!(format!("{:?}", command), expected);
+            assert_eq!(format!("{command:?}"), expected);
         }
     }
 
@@ -1330,7 +1330,7 @@ mod tests {
             nlen: (bytes.len() as u32).into(),
         };
 
-        let debug_string = format!("{:?}", original);
+        let debug_string = format!("{original:?}");
         assert_eq!(
             debug_string,
             "virtio_gpu_ctx_create { debug_name: \"test_debug\", context_init: Le32(0), .. }"

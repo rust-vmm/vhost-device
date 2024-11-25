@@ -728,8 +728,9 @@ mod tests {
     use crate::{
         protocol::{
             virtio_gpu_ctx_create, virtio_gpu_ctx_destroy, virtio_gpu_ctx_resource,
-            virtio_gpu_mem_entry, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
-            virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush, virtio_gpu_set_scanout,
+            virtio_gpu_get_capset_info, virtio_gpu_mem_entry, virtio_gpu_rect,
+            virtio_gpu_resource_attach_backing, virtio_gpu_resource_detach_backing,
+            virtio_gpu_resource_flush, virtio_gpu_resource_unref, virtio_gpu_set_scanout,
             GpuResponse::{OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
             VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE, VIRTIO_GPU_CMD_CTX_CREATE,
             VIRTIO_GPU_CMD_CTX_DESTROY, VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE,
@@ -808,7 +809,7 @@ mod tests {
         });
         assert_matches!(result, Ok(OkDisplayInfo(_)));
 
-        let cmd = GpuCommand::GetEdid(Default::default());
+        let cmd = GpuCommand::GetEdid(virtio_gpu_get_edid::default());
         let result = test_cmd(cmd, |g| {
             g.expect_get_edid().return_once(|_| {
                 Ok(OkEdid {
@@ -818,52 +819,55 @@ mod tests {
         });
         assert_matches!(result, Ok(OkEdid { .. }));
 
-        let cmd = GpuCommand::ResourceCreate2d(Default::default());
+        let cmd = GpuCommand::ResourceCreate2d(virtio_gpu_resource_create_2d::default());
         let result = test_cmd(cmd, |g| {
             g.expect_resource_create_3d()
                 .return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::ResourceUnref(Default::default());
+        let cmd = GpuCommand::ResourceUnref(virtio_gpu_resource_unref::default());
         let result = test_cmd(cmd, |g| {
             g.expect_unref_resource().return_once(|_| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::SetScanout(Default::default());
+        let cmd = GpuCommand::SetScanout(virtio_gpu_set_scanout::default());
         let result = test_cmd(cmd, |g| {
             g.expect_set_scanout().return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::ResourceFlush(Default::default());
+        let cmd = GpuCommand::ResourceFlush(virtio_gpu_resource_flush::default());
         let result = test_cmd(cmd, |g| {
             g.expect_flush_resource().return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::TransferToHost2d(Default::default());
+        let cmd = GpuCommand::TransferToHost2d(virtio_gpu_transfer_to_host_2d::default());
         let result = test_cmd(cmd, |g| {
             g.expect_transfer_write()
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::ResourceAttachBacking(Default::default(), Default::default());
+        let cmd = GpuCommand::ResourceAttachBacking(
+            virtio_gpu_resource_attach_backing::default(),
+            Vec::default(),
+        );
         let result = test_cmd(cmd, |g| {
             g.expect_attach_backing()
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::ResourceDetachBacking(Default::default());
+        let cmd = GpuCommand::ResourceDetachBacking(virtio_gpu_resource_detach_backing::default());
         let result = test_cmd(cmd, |g| {
             g.expect_detach_backing().return_once(|_| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::GetCapsetInfo(Default::default());
+        let cmd = GpuCommand::GetCapsetInfo(virtio_gpu_get_capset_info::default());
         let result = test_cmd(cmd, |g| {
             g.expect_get_capset_info().return_once(|_| {
                 Ok(OkCapsetInfo {
@@ -882,48 +886,48 @@ mod tests {
             })
         );
 
-        let cmd = GpuCommand::CtxCreate(Default::default());
+        let cmd = GpuCommand::CtxCreate(virtio_gpu_ctx_create::default());
         let result = test_cmd(cmd, |g| {
             g.expect_create_context()
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::CtxDestroy(Default::default());
+        let cmd = GpuCommand::CtxDestroy(virtio_gpu_ctx_destroy::default());
         let result = test_cmd(cmd, |g| {
             g.expect_destroy_context().return_once(|_| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::CtxAttachResource(Default::default());
+        let cmd = GpuCommand::CtxAttachResource(virtio_gpu_ctx_resource::default());
         let result = test_cmd(cmd, |g| {
             g.expect_context_attach_resource()
                 .return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::CtxDetachResource(Default::default());
+        let cmd = GpuCommand::CtxDetachResource(virtio_gpu_ctx_resource::default());
         let result = test_cmd(cmd, |g| {
             g.expect_context_detach_resource()
                 .return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::ResourceCreate3d(Default::default());
+        let cmd = GpuCommand::ResourceCreate3d(virtio_gpu_resource_create_3d::default());
         let result = test_cmd(cmd, |g| {
             g.expect_resource_create_3d()
                 .return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::TransferToHost3d(Default::default());
+        let cmd = GpuCommand::TransferToHost3d(virtio_gpu_transfer_host_3d::default());
         let result = test_cmd(cmd, |g| {
             g.expect_transfer_write()
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::TransferFromHost3d(Default::default());
+        let cmd = GpuCommand::TransferFromHost3d(virtio_gpu_transfer_host_3d::default());
         let result = test_cmd(cmd, |g| {
             g.expect_transfer_read()
                 .return_once(|_, _, _, _| Ok(OkNoData));
@@ -940,20 +944,20 @@ mod tests {
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::UpdateCursor(Default::default());
+        let cmd = GpuCommand::UpdateCursor(virtio_gpu_update_cursor::default());
         let result = test_cmd(cmd, |g| {
             g.expect_update_cursor()
                 .return_once(|_, _, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::MoveCursor(Default::default());
+        let cmd = GpuCommand::MoveCursor(virtio_gpu_update_cursor::default());
         let result = test_cmd(cmd, |g| {
             g.expect_move_cursor().return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
-        let cmd = GpuCommand::MoveCursor(Default::default());
+        let cmd = GpuCommand::MoveCursor(virtio_gpu_update_cursor::default());
         let result = test_cmd(cmd, |g| {
             g.expect_move_cursor().return_once(|_, _| Ok(OkNoData));
         });
@@ -1175,11 +1179,11 @@ mod tests {
 
     #[test]
     fn test_command_with_fence_ready_immediately() {
+        const FENCE_ID: u64 = 123;
+
         let (backend, mem) = init();
         backend.update_memory(mem.clone()).unwrap();
         let backend_inner = backend.inner.lock().unwrap();
-
-        const FENCE_ID: u64 = 123;
 
         let hdr = virtio_gpu_ctrl_hdr {
             type_: VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D.into(),
@@ -1258,13 +1262,13 @@ mod tests {
 
     #[test]
     fn test_command_with_fence_not_ready() {
-        let (backend, mem) = init();
-        backend.update_memory(mem.clone()).unwrap();
-        let backend_inner = backend.inner.lock().unwrap();
-
         const FENCE_ID: u64 = 123;
         const CTX_ID: u32 = 1;
         const RING_IDX: u8 = 2;
+
+        let (backend, mem) = init();
+        backend.update_memory(mem.clone()).unwrap();
+        let backend_inner = backend.inner.lock().unwrap();
 
         let hdr = virtio_gpu_ctrl_hdr {
             type_: VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D.into(),
@@ -1343,7 +1347,7 @@ mod tests {
 
             assert_eq!(backend.num_queues(), NUM_QUEUES);
             assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
-            assert_eq!(backend.features(), 0x1017100001B);
+            assert_eq!(backend.features(), 0x0101_7100_001B);
             assert_eq!(
                 backend.protocol_features(),
                 VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ
@@ -1399,8 +1403,8 @@ mod tests {
 
     mod test_image {
         use super::*;
-        const GREEN_PIXEL: u32 = 0x00FF00FF;
-        const RED_PIXEL: u32 = 0xFF0000FF;
+        const GREEN_PIXEL: u32 = 0x00FF_00FF;
+        const RED_PIXEL: u32 = 0x00FF_00FF;
         const BYTES_PER_PIXEL: usize = 4;
 
         pub fn write(mem: &GuestMemoryMmap, image_addr: GuestAddress, width: u32, height: u32) {
@@ -1442,7 +1446,7 @@ mod tests {
             entries.push(virtio_gpu_mem_entry {
                 addr: addr.into(),
                 length: chunk_size.into(),
-                padding: Default::default(),
+                padding: Le32::default(),
             });
             addr += u64::from(chunk_size);
             remaining -= chunk_size;
@@ -1452,8 +1456,8 @@ mod tests {
             entries.push(virtio_gpu_mem_entry {
                 addr: addr.into(),
                 length: remaining.into(),
-                padding: Default::default(),
-            })
+                padding: Le32::default(),
+            });
         }
 
         entries
@@ -1471,6 +1475,24 @@ mod tests {
         /// then present the display output.
         #[test]
         fn test_display_output() {
+            const IMAGE_ADDR: GuestAddress = GuestAddress(0x30_000);
+            const IMAGE_WIDTH: u32 = 640;
+            const IMAGE_HEIGHT: u32 = 480;
+            const RESP_SIZE: u32 = mem::size_of::<virtio_gpu_ctrl_hdr>() as u32;
+            const EXPECTED_SCANOUT_REQUEST: VhostUserGpuScanout = VhostUserGpuScanout {
+                scanout_id: 1,
+                width: IMAGE_WIDTH,
+                height: IMAGE_HEIGHT,
+            };
+
+            const EXPECTED_UPDATE_REQUEST: VhostUserGpuUpdate = VhostUserGpuUpdate {
+                scanout_id: 1,
+                x: 0,
+                y: 0,
+                width: IMAGE_WIDTH,
+                height: IMAGE_HEIGHT,
+            };
+
             let (backend, mem) = init();
             let (mut gpu_frontend, gpu_backend) = gpu_backend_pair();
             gpu_frontend
@@ -1493,11 +1515,6 @@ mod tests {
             let epoll_handlers = daemon.get_epoll_handlers();
             backend.set_epoll_handler(&epoll_handlers);
             mem::drop(daemon);
-
-            const IMAGE_ADDR: GuestAddress = GuestAddress(0x30_000);
-            const IMAGE_WIDTH: u32 = 640;
-            const IMAGE_HEIGHT: u32 = 480;
-            const RESP_SIZE: u32 = mem::size_of::<virtio_gpu_ctrl_hdr>() as u32;
 
             let image_rect = virtio_gpu_rect {
                 x: 0.into(),
@@ -1527,7 +1544,7 @@ mod tests {
                 nr_entries: (mem_entries.len() as u32).into(),
             };
             let mut readable_desc_bufs = vec![hdr.as_slice(), cmd.as_slice()];
-            readable_desc_bufs.extend(mem_entries.iter().map(|entry| entry.as_slice()));
+            readable_desc_bufs.extend(mem_entries.iter().map(ByteValued::as_slice));
             let attach_backing_cmd = TestingDescChainArgs {
                 readable_desc_bufs: &readable_desc_bufs,
                 writable_desc_lengths: &[RESP_SIZE],
@@ -1537,7 +1554,7 @@ mod tests {
             let hdr = new_hdr(VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING);
             let cmd = virtio_gpu_resource_detach_backing {
                 resource_id: 1.into(),
-                padding: Default::default(),
+                padding: Le32::default(),
             };
             let detach_backing_cmd = TestingDescChainArgs {
                 readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
@@ -1550,7 +1567,7 @@ mod tests {
                 r: image_rect,
                 offset: 0.into(),
                 resource_id: 1.into(),
-                padding: Default::default(),
+                padding: Le32::default(),
             };
             let transfer_to_host_cmd = TestingDescChainArgs {
                 readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
@@ -1614,7 +1631,7 @@ mod tests {
             let cmd = virtio_gpu_resource_flush {
                 r: image_rect,
                 resource_id: 1.into(),
-                padding: Default::default(),
+                padding: Le32::default(),
             };
             let flush_resource_cmd = TestingDescChainArgs {
                 readable_desc_bufs: &[hdr.as_slice(), cmd.as_slice()],
@@ -1642,20 +1659,6 @@ mod tests {
 
             // Write the test image in guest memory
             test_image::write(&mem.memory(), IMAGE_ADDR, IMAGE_WIDTH, IMAGE_HEIGHT);
-
-            const EXPECTED_SCANOUT_REQUEST: VhostUserGpuScanout = VhostUserGpuScanout {
-                scanout_id: 1,
-                width: IMAGE_WIDTH,
-                height: IMAGE_HEIGHT,
-            };
-
-            const EXPECTED_UPDATE_REQUEST: VhostUserGpuUpdate = VhostUserGpuUpdate {
-                scanout_id: 1,
-                x: 0,
-                y: 0,
-                width: IMAGE_WIDTH,
-                height: IMAGE_HEIGHT,
-            };
 
             // This simulates the frontend vmm. Here we check the issued frontend requests and if the
             // output matches the test image.

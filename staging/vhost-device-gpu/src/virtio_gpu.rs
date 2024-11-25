@@ -945,8 +945,8 @@ mod tests {
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
-            resources: Default::default(),
-            fence_state: Arc::new(Mutex::new(Default::default())),
+            resources: BTreeMap::default(),
+            fence_state: Arc::new(Mutex::new(FenceState::default())),
             scanouts: Default::default(),
         }
     }

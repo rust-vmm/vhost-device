@@ -10,9 +10,14 @@ categories = ["multimedia::video", "virtualization"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 publish = false
+# "Features enabled on platform-specific dependencies for target architectures not currently being built are ignored."
+# See <https://doc.rust-lang.org/cargo/reference/features.html#feature-resolver-version-2>
+resolver = "2"
 
 [features]
+default = ["gfxstream"]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
+gfxstream = ["rutabaga_gfx/gfxstream"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
@@ -21,7 +26,7 @@ libc = "0.2"
 log = "0.4"
 
 [target.'cfg(not(target_env = "musl"))'.dependencies]
-rutabaga_gfx = { version = "0.1.4", features = ["gfxstream", "virgl_renderer"] }
+rutabaga_gfx = { version = "0.1.4", features = ["virgl_renderer"] }
 thiserror = "2.0.3"
 vhost = { version = "0.13.0", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"

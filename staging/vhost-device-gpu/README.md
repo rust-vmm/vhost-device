@@ -19,6 +19,9 @@ A virtio-gpu device using the vhost-user protocol.
   -V, --version               Print version
 ```
 
+_NOTE_: Option `-g, --gpu-mode` can only accept the `gfxstream` value if the
+crate has been built with the `gfxstream` feature, which is the default.
+
 ## Limitations
 
 We are currently only supporting sharing the display output to QEMU through a
@@ -41,6 +44,12 @@ Currently this crate requires some necessary bits in order to move the crate out
 The device leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx)
 crate to provide rendering with virglrenderer and gfxstream.
 
+gfxstream support is compiled by default, it can be disabled by not building with the `gfxstream` feature flag, for example:
+
+```session
+$ cargo build --no-default-features
+```
+
 With Virglrenderer, Rutabaga translates OpenGL API and Vulkan calls to an
 intermediate representation and allows for OpenGL acceleration on the host.
 
@@ -52,7 +61,7 @@ host with minimal modification.
 First start the daemon on the host machine using either of the 2 gpu modes:
 
 1) `virgl-renderer`
-2) `gfxstream`
+2) `gfxstream` (if the crate has been compiled with the feature `gfxstream`)
 
 ```shell
 host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virgl-renderer

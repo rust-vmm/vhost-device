@@ -481,6 +481,7 @@ unsafe impl ByteValued for virtio_gpu_cmd_submit {}
 
 pub const VIRTIO_GPU_CAPSET_VIRGL: u32 = 1;
 pub const VIRTIO_GPU_CAPSET_VIRGL2: u32 = 2;
+#[cfg(feature = "gfxstream")]
 pub const VIRTIO_GPU_CAPSET_GFXSTREAM: u32 = 3;
 pub const VIRTIO_GPU_CAPSET_VENUS: u32 = 4;
 pub const VIRTIO_GPU_CAPSET_CROSS_DOMAIN: u32 = 5;

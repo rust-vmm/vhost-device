@@ -390,6 +390,7 @@ impl RutabagaVirtioGpu {
     fn configure_rutabaga_builder(gpu_mode: GpuMode) -> RutabagaBuilder {
         let component = match gpu_mode {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
+            #[cfg(feature = "gfxstream")]
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
         RutabagaBuilder::new(component, 0)

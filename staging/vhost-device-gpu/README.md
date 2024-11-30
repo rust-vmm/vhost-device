@@ -1,36 +1,34 @@
 # vhost-device-gpu - GPU emulation backend daemon
 
 ## Synopsis
+
 ```shell
-vhost-device-gpu --socket-path <SOCKET>
+vhost-device-gpu --socket-path <SOCKET> --gpu-mode <GPU_MODE>
 ```
 
 ## Description
+
 A virtio-gpu device using the vhost-user protocol.
 
 ## Options
 
 ```text
-       -s, --socket-path <SOCKET>
-              vhost-user Unix domain socket path
-
-       -h, --help
-              Print help
-
-       -V, --version
-              Print version
+  -s, --socket-path <SOCKET>  vhost-user Unix domain socket
+  -g, --gpu-mode <GPU_MODE>   [possible values: virgl-renderer, gfxstream]
+  -h, --help                  Print help
+  -V, --version               Print version
 ```
 
 ## Limitations
 
 We are currently only supporting sharing the display output to QEMU through a
 socket using the transfer_read operation triggered by
-VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D to transfer data from and to virtio-gpu 3d
+`VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D` to transfer data from and to virtio-gpu 3D
 resources. It'll be nice to have support for directly sharing display output
 resource using dmabuf.
 
-This device does not yet support the VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB,
-VIRTIO_GPU_CMD_SET_SCANOUT_BLOB and VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID features.
+This device does not yet support the `VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB`,
+`VIRTIO_GPU_CMD_SET_SCANOUT_BLOB` and `VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID` features.
 
 Currently this crate requires some necessary bits in order to move the crate out of staging:
 
@@ -40,18 +38,21 @@ Currently this crate requires some necessary bits in order to move the crate out
 
 ## Features
 
-The device leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx) crate
-to provide virglrenderer and gfxstream rendering. With Virglrenderer, Rutabaga
-translates OpenGL API and Vulkan calls to an intermediate representation and allows
-for OpenGL acceleration on the host. With the gfxstream rendering mode, GLES and
-Vulkan calls are forwarded to the host with minimal modification.
+The device leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx)
+crate to provide rendering with virglrenderer and gfxstream.
+
+With Virglrenderer, Rutabaga translates OpenGL API and Vulkan calls to an
+intermediate representation and allows for OpenGL acceleration on the host.
+
+With the gfxstream rendering mode, GLES and Vulkan calls are forwarded to the
+host with minimal modification.
 
 ## Examples
 
 First start the daemon on the host machine using either of the 2 gpu modes:
 
-1) virgl-renderer
-2) gfxstream
+1) `virgl-renderer`
+2) `gfxstream`
 
 ```shell
 host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virgl-renderer

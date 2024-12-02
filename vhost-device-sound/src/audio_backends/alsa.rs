@@ -609,7 +609,7 @@ impl AudioBackend for AlsaBackend {
                     stream_id,
                     err
                 );
-                return Err(Error::UnexpectedAudioBackendError(err.to_string()));
+                return Err(Error::UnexpectedAudioBackendError(err.into()));
             }
         }
         self.senders[stream_id as usize].send(true).unwrap();
@@ -642,7 +642,7 @@ impl AudioBackend for AlsaBackend {
                     stream_id,
                     err
                 );
-                return Err(Error::UnexpectedAudioBackendError(err.to_string()));
+                return Err(Error::UnexpectedAudioBackendError(err.into()));
             }
         }
         Ok(())

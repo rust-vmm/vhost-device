@@ -161,7 +161,7 @@ pub enum Error {
     #[error("Audio backend not supported")]
     AudioBackendNotSupported,
     #[error("Audio backend unexpected error: {0}")]
-    UnexpectedAudioBackendError(String),
+    UnexpectedAudioBackendError(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("Audio backend configuration not supported")]
     UnexpectedAudioBackendConfiguration,
     #[error("No memory configured")]

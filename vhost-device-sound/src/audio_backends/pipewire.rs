@@ -596,17 +596,23 @@ pub mod test_utils;
 
 #[cfg(test)]
 mod tests {
-    use super::{test_utils::PipewireTestHarness, *};
+    use super::{
+        test_utils::{try_backoff, PipewireTestHarness},
+        *,
+    };
 
     #[test]
     fn test_pipewire_backend_success() {
         crate::init_logger();
-        let streams = Arc::new(RwLock::new(vec![Stream::default()]));
-        let stream_params = streams.clone();
+        let stream_params = Arc::new(RwLock::new(vec![Stream::default()]));
 
         let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = PwBackend::new(stream_params).unwrap();
+        let pw_backend = try_backoff(
+            || PwBackend::new(stream_params.clone()),
+            std::num::NonZeroU32::new(3),
+        )
+        .expect("reached maximum retry count");
         assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
         assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
         // set up minimal configuration for test
@@ -623,7 +629,7 @@ mod tests {
         pw_backend.read(0).unwrap();
         pw_backend.stop(0).unwrap();
         pw_backend.release(0).unwrap();
-        let streams = streams.read().unwrap();
+        let streams = stream_params.read().unwrap();
         assert_eq!(streams[0].requests.len(), 0);
     }
 
@@ -634,7 +640,11 @@ mod tests {
 
         let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = PwBackend::new(stream_params).unwrap();
+        let pw_backend = try_backoff(
+            || PwBackend::new(stream_params.clone()),
+            std::num::NonZeroU32::new(3),
+        )
+        .expect("reached maximum retry count");
 
         let request = VirtioSndPcmSetParams::default();
         let res = pw_backend.set_parameters(0, request);

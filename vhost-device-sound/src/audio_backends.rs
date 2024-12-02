@@ -80,11 +80,14 @@ mod tests {
         }
         #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
         {
-            use pipewire::{test_utils::PipewireTestHarness, *};
+            use pipewire::{
+                test_utils::{try_backoff, PipewireTestHarness},
+                *,
+            };
 
             let _test_harness = PipewireTestHarness::new();
             let v = BackendType::Pipewire;
-            let value = alloc_audio_backend(v, Default::default()).unwrap();
+            let value = try_backoff(|| alloc_audio_backend(v, Default::default()), std::num::NonZeroU32::new(3)).expect("reached maximum retry count");
             assert_eq!(TypeId::of::<PwBackend>(), value.as_any().type_id());
         }
         #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]

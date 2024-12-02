@@ -195,7 +195,7 @@ impl AudioBackend for PwBackend {
             .write()
             .unwrap()
             .get_mut(stream_id as usize)
-            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
+            .ok_or(Error::StreamWithIdNotFound(stream_id))?
             .state
             .prepare();
         if let Err(err) = prepare_result {
@@ -500,7 +500,7 @@ impl AudioBackend for PwBackend {
             .write()
             .unwrap()
             .get_mut(stream_id as usize)
-            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
+            .ok_or(Error::StreamWithIdNotFound(stream_id))?
             .state
             .release();
         if let Err(err) = release_result {
@@ -529,7 +529,7 @@ impl AudioBackend for PwBackend {
             .write()
             .unwrap()
             .get_mut(stream_id as usize)
-            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
+            .ok_or(Error::StreamWithIdNotFound(stream_id))?
             .state
             .start();
         if let Err(err) = start_result {
@@ -554,7 +554,7 @@ impl AudioBackend for PwBackend {
             .write()
             .unwrap()
             .get_mut(stream_id as usize)
-            .ok_or_else(|| Error::StreamWithIdNotFound(stream_id))?
+            .ok_or(Error::StreamWithIdNotFound(stream_id))?
             .state
             .stop();
         if let Err(err) = stop_result {

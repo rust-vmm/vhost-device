@@ -92,11 +92,11 @@ impl VhostUserSoundThread {
     ) -> IoResult<()> {
         let vring = &vrings
             .get(device_event as usize)
-            .ok_or_else(|| Error::HandleUnknownEvent(device_event))?;
+            .ok_or(Error::HandleUnknownEvent(device_event))?;
         let queue_idx = self
             .queue_indexes
             .get(device_event as usize)
-            .ok_or_else(|| Error::HandleUnknownEvent(device_event))?;
+            .ok_or(Error::HandleUnknownEvent(device_event))?;
         if self.event_idx {
             // vm-virtio's Queue implementation only checks avail_index
             // once, so to properly support EVENT_IDX we need to keep

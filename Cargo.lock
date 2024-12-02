@@ -1798,6 +1798,7 @@ dependencies = [
  "env_logger",
  "log",
  "pipewire",
+ "rand",
  "rstest",
  "tempfile",
  "thiserror 2.0.3",

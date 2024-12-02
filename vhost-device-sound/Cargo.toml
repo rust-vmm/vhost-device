@@ -38,3 +38,6 @@ rstest = "0.23.0"
 tempfile = "3.14"
 virtio-queue = { version = "0.14", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }
+
+[target.'cfg(target_env = "gnu")'.dev-dependencies]
+rand = { version = "0.8.5" }

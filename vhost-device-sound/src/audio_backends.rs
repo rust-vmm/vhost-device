@@ -54,7 +54,11 @@ pub fn alloc_audio_backend(
     match backend {
         BackendType::Null => Ok(Box::new(NullBackend::new(streams))),
         #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
-        BackendType::Pipewire => Ok(Box::new(PwBackend::new(streams))),
+        BackendType::Pipewire => {
+            Ok(Box::new(PwBackend::new(streams).map_err(|err| {
+                crate::Error::UnexpectedAudioBackendError(err.into())
+            })?))
+        }
         #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
         BackendType::Alsa => Ok(Box::new(AlsaBackend::new(streams))),
     }

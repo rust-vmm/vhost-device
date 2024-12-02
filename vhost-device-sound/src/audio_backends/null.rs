@@ -10,7 +10,7 @@ pub struct NullBackend {
 }
 
 impl NullBackend {
-    pub fn new(streams: Arc<RwLock<Vec<Stream>>>) -> Self {
+    pub const fn new(streams: Arc<RwLock<Vec<Stream>>>) -> Self {
         Self { streams }
     }
 }

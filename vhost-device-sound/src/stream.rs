@@ -266,7 +266,7 @@ impl std::fmt::Debug for Request {
 }
 
 impl Request {
-    pub fn new(len: usize, message: Arc<IOMessage>, direction: Direction) -> Self {
+    pub const fn new(len: usize, message: Arc<IOMessage>, direction: Direction) -> Self {
         Self {
             pos: 0,
             len,

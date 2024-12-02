@@ -654,7 +654,7 @@ impl AudioBackend for AlsaBackend {
             .write()
             .unwrap()
             .get_mut(id as usize)
-            .ok_or_else(|| Error::StreamWithIdNotFound(id))?
+            .ok_or(Error::StreamWithIdNotFound(id))?
             .state
             .stop()
         {

@@ -33,6 +33,7 @@ use spa::{
         SPA_AUDIO_FORMAT_UNKNOWN,
     },
 };
+use thiserror::Error as ThisError;
 
 use super::AudioBackend;
 use crate::{
@@ -64,6 +65,17 @@ impl From<Direction> for spa::utils::Direction {
     }
 }
 
+/// Error type for the Pipewire backend
+#[derive(Debug, ThisError)]
+pub enum PwError {
+    #[error("Failed to create Pipewire context: {0}")]
+    CreateContext(pw::Error),
+    #[error("Failed to connect to Pipewire core: {0}")]
+    ConnectToCore(pw::Error),
+    #[error("Failed to trigger sync event with Pipewire server: {0}")]
+    TriggerSyncEvent(pw::Error),
+}
+
 // SAFETY: Safe as the structure can be sent to another thread.
 unsafe impl Send for PwBackend {}
 
@@ -84,7 +96,7 @@ pub struct PwBackend {
 }
 
 impl PwBackend {
-    pub fn new(stream_params: Arc<RwLock<Vec<Stream>>>) -> Self {
+    pub fn new(stream_params: Arc<RwLock<Vec<Stream>>>) -> std::result::Result<Self, PwError> {
         pw::init();
 
         // SAFETY: safe as the thread loop cannot access objects associated
@@ -93,9 +105,9 @@ impl PwBackend {
 
         let lock_guard = thread_loop.lock();
 
-        let context = Context::new(&thread_loop).expect("failed to create context");
+        let context = Context::new(&thread_loop).map_err(PwError::CreateContext)?;
         thread_loop.start();
-        let core = context.connect(None).expect("Failed to connect to core");
+        let core = context.connect(None).map_err(PwError::ConnectToCore)?;
 
         // Create new reference for the variable so that it can be moved into the
         // closure.
@@ -104,7 +116,7 @@ impl PwBackend {
         // Trigger the sync event. The server's answer won't be processed until we start
         // the thread loop, so we can safely do this before setting up a
         // callback. This lets us avoid using a Cell.
-        let pending = core.sync(0).expect("sync failed");
+        let pending = core.sync(0).map_err(PwError::TriggerSyncEvent)?;
         let _listener_core = core
             .add_listener_local()
             .done(move |id, seq| {
@@ -119,14 +131,14 @@ impl PwBackend {
 
         log::trace!("pipewire backend running");
 
-        Self {
+        Ok(Self {
             stream_params,
             thread_loop,
             core,
             context,
             stream_hash: RwLock::new(HashMap::new()),
             stream_listener: RwLock::new(HashMap::new()),
-        }
+        })
     }
 }
 
@@ -594,7 +606,7 @@ mod tests {
 
         let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = PwBackend::new(stream_params);
+        let pw_backend = PwBackend::new(stream_params).unwrap();
         assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
         assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
         // set up minimal configuration for test
@@ -622,7 +634,7 @@ mod tests {
 
         let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = PwBackend::new(stream_params);
+        let pw_backend = PwBackend::new(stream_params).unwrap();
 
         let request = VirtioSndPcmSetParams::default();
         let res = pw_backend.set_parameters(0, request);

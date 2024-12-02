@@ -66,12 +66,12 @@ impl DeviceProperties {
         self.0.iter().map(|(n, _)| -> &str { n.as_str() }).collect()
     }
 
-    fn extra<'a>(&'a self, allowed: &[&'a str]) -> HashSet<&str> {
+    fn extra<'a>(&'a self, allowed: &[&'a str]) -> HashSet<&'a str> {
         let allowed_set: HashSet<&str> = HashSet::from_iter(allowed.iter().copied());
         self.names().difference(&allowed_set).copied().collect()
     }
 
-    fn missing<'a>(&'a self, required: &[&'a str]) -> HashSet<&str> {
+    fn missing<'a>(&'a self, required: &[&'a str]) -> HashSet<&'a str> {
         let required_set: HashSet<&str> = HashSet::from_iter(required.iter().copied());
         required_set.difference(&self.names()).copied().collect()
     }

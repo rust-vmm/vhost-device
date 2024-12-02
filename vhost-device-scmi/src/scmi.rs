@@ -468,11 +468,7 @@ impl HandlerMap {
                 let max_sensors_to_return = 256;
                 let sensors_to_return = min(n_sensors - first_index, max_sensors_to_return);
                 let last_non_returned_sensor = first_index + sensors_to_return;
-                let remaining_sensors = if n_sensors > last_non_returned_sensor {
-                    n_sensors - last_non_returned_sensor
-                } else {
-                    0
-                };
+                let remaining_sensors = n_sensors.saturating_sub(last_non_returned_sensor);
                 let mut values = vec![MessageValue::Unsigned(
                     sensors_to_return as u32 | (remaining_sensors as u32) << 16,
                 )];

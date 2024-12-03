@@ -13,6 +13,20 @@ use std::{
 use rand::distributions::Uniform;
 use tempfile::{tempdir, TempDir};
 
+macro_rules! try_wait_child {
+    ($child:expr, $id:literal) => {{
+        if let Some(status) = $child.try_wait().expect(concat!(
+            "Could not perform non-blocking wait on ",
+            $id,
+            " process child"
+        )) {
+            eprintln!("pipewire process exited with: {status}");
+            print_output(&mut $child, $id);
+            panic!(concat!("failed to start ", $id, "!"));
+        }
+    }};
+}
+
 /// Temporary Dbus session which is killed in drop().
 pub struct DbusSession {
     pub child: Child,
@@ -22,7 +36,7 @@ pub struct DbusSession {
 impl DbusSession {
     pub fn new(working_dir: &Path) -> Self {
         let address_prefix = format!("unix:path={}", working_dir.join("dbus").display());
-        let child = Command::new("/usr/bin/dbus-daemon")
+        let mut child = Command::new("/usr/bin/dbus-daemon")
             .args(["--session", "--address", &address_prefix, "--print-address"])
             .env("DBUS_VERBOSE", "1")
             .stdout(Stdio::piped())
@@ -31,6 +45,10 @@ impl DbusSession {
             .current_dir(working_dir)
             .spawn()
             .expect("ERROR: dbus-daemon binary not found");
+
+        eprintln!("INFO: Wait for dbus to setup...");
+        sleep(Duration::from_secs(1));
+        try_wait_child!(child, "dbus");
 
         Self {
             child,
@@ -41,9 +59,9 @@ impl DbusSession {
 
 impl Drop for DbusSession {
     fn drop(&mut self) {
-        println!("INFO: Killing Dbus session {}", self.child.id());
+        eprintln!("INFO: Killing Dbus session {}", self.child.id());
         if let Err(err) = self.child.kill() {
-            println!(
+            eprintln!(
                 "ERROR: could not kill dbus process {}: {err}",
                 self.child.id()
             );
@@ -80,20 +98,19 @@ impl PipewireTestHarness {
     pub fn new() -> Self {
         let tempdir = tempdir().unwrap();
 
+        std::env::set_var("XDG_RUNTIME_DIR", tempdir.path());
+
         let dbus_session = DbusSession::new(tempdir.path());
-        println!("INFO: dbus_session_bus_address={}", dbus_session.address);
-
-        println!("INFO: Wait for dbus to setup...");
-        sleep(Duration::from_secs(1));
-
-        println!("INFO: Launch pipewire.");
-        let pipewire_child = launch_pipewire(tempdir.path(), Path::new(&dbus_session.address))
-            .expect("ERROR: Could not launch pipewire");
-        println!("INFO: Wait for pipewire to setup...");
-        sleep(Duration::from_secs(1));
+        eprintln!("INFO: dbus_session_bus_address={}", dbus_session.address);
 
         std::env::set_var("DBUS_SESSION_BUS_ADDRESS", &dbus_session.address);
-        std::env::set_var("XDG_RUNTIME_DIR", tempdir.path());
+
+        eprintln!("INFO: Launch pipewire.");
+        let mut pipewire_child = launch_pipewire(tempdir.path(), Path::new(&dbus_session.address))
+            .expect("ERROR: Could not launch pipewire");
+        eprintln!("INFO: Wait for pipewire to setup...");
+        sleep(Duration::from_secs(1));
+        try_wait_child!(pipewire_child, "pipewire");
 
         Self {
             _dbus: dbus_session,
@@ -105,9 +122,9 @@ impl PipewireTestHarness {
 
 impl Drop for PipewireTestHarness {
     fn drop(&mut self) {
-        println!("INFO: Killing pipewire pid {}", self.pipewire_child.id());
+        eprintln!("INFO: Killing pipewire pid {}", self.pipewire_child.id());
         if let Err(err) = self.pipewire_child.kill() {
-            println!(
+            eprintln!(
                 "ERROR: could not kill Pipewire process {}: {err}",
                 self.pipewire_child.id()
             );
@@ -117,24 +134,49 @@ impl Drop for PipewireTestHarness {
     }
 }
 
-fn print_output(child: &mut Child, id: &'static str) -> Option<()> {
-    let mut stdout = child.stdout.take()?;
-    let mut stderr = child.stderr.take()?;
+fn print_output(child: &mut Child, id: &'static str) {
+    let delim: &str = "\n----------------\n";
 
-    let mut buf = String::new();
-    stdout.read_to_string(&mut buf).ok()?;
-    if !buf.trim().is_empty() {
-        println!("INFO: {id} stdout {buf}");
+    let mut buf = vec![];
+    if let Some(mut stdout) = child.stdout.take() {
+        match stdout.read_to_end(&mut buf) {
+            Err(err) => {
+                eprintln!("stdout for {id} could not be read from: {err}");
+            }
+            Ok(_) => {
+                let stdout = String::from_utf8_lossy(&buf);
+                eprint!("stdout: {id} stdout");
+                if !stdout.trim().is_empty() {
+                    eprintln!("\n{delim}{stdout}{delim}");
+                } else {
+                    eprintln!(" empty");
+                }
+            }
+        }
+    } else {
+        eprintln!("stdout for {id} wasn't captured, but should have been!");
     }
 
     buf.clear();
 
-    stderr.read_to_string(&mut buf).ok()?;
-    if !buf.trim().is_empty() {
-        println!("ERROR: {id} stderr {buf}");
+    if let Some(mut stderr) = child.stderr.take() {
+        match stderr.read_to_end(&mut buf) {
+            Err(err) => {
+                eprintln!("stderr for {id} could not be read from: {err}");
+            }
+            Ok(_) => {
+                let stderr = String::from_utf8_lossy(&buf);
+                eprint!("stderr: {id} stderr");
+                if !stderr.trim().is_empty() {
+                    eprintln!("\n{delim}{stderr}{delim}");
+                } else {
+                    eprintln!(" empty");
+                }
+            }
+        }
+    } else {
+        eprintln!("stderr for {id} wasn't captured, but should have been!");
     }
-
-    None
 }
 
 pub fn truncated_wait_delay<D: rand::distributions::Distribution<f32>, R: rand::Rng>(

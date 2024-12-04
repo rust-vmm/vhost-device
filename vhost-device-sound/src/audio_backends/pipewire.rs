@@ -596,78 +596,88 @@ pub mod test_utils;
 
 #[cfg(test)]
 mod tests {
+    use rusty_fork::rusty_fork_test;
+
     use super::{
         test_utils::{try_backoff, PipewireTestHarness},
         *,
     };
 
-    #[test]
-    fn test_pipewire_backend_success() {
-        crate::init_logger();
-        let stream_params = Arc::new(RwLock::new(vec![Stream::default()]));
+    // `PipewireTestHarness` modifies the process's environment, so this test should
+    // be executed on a forked process.
+    rusty_fork_test! {
+        #[test]
+        fn test_pipewire_backend_success() {
+            crate::init_logger();
+            let stream_params = Arc::new(RwLock::new(vec![Stream::default()]));
 
-        let _test_harness = PipewireTestHarness::new();
+            let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = try_backoff(
-            || PwBackend::new(stream_params.clone()),
-            std::num::NonZeroU32::new(3),
-        )
-        .expect("reached maximum retry count");
-        assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
-        assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
-        // set up minimal configuration for test
-        let request = VirtioSndPcmSetParams {
-            format: VIRTIO_SND_PCM_FMT_S16,
-            rate: VIRTIO_SND_PCM_RATE_11025,
-            channels: 1,
-            ..Default::default()
-        };
-        pw_backend.set_parameters(0, request).unwrap();
-        pw_backend.prepare(0).unwrap();
-        pw_backend.start(0).unwrap();
-        pw_backend.write(0).unwrap();
-        pw_backend.read(0).unwrap();
-        pw_backend.stop(0).unwrap();
-        pw_backend.release(0).unwrap();
-        let streams = stream_params.read().unwrap();
-        assert_eq!(streams[0].requests.len(), 0);
+            let pw_backend = try_backoff(
+                || PwBackend::new(stream_params.clone()),
+                std::num::NonZeroU32::new(3),
+            )
+            .expect("reached maximum retry count");
+            assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
+            assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
+            // set up minimal configuration for test
+            let request = VirtioSndPcmSetParams {
+                format: VIRTIO_SND_PCM_FMT_S16,
+                rate: VIRTIO_SND_PCM_RATE_11025,
+                channels: 1,
+                ..Default::default()
+            };
+            pw_backend.set_parameters(0, request).unwrap();
+            pw_backend.prepare(0).unwrap();
+            pw_backend.start(0).unwrap();
+            pw_backend.write(0).unwrap();
+            pw_backend.read(0).unwrap();
+            pw_backend.stop(0).unwrap();
+            pw_backend.release(0).unwrap();
+            let streams = stream_params.read().unwrap();
+            assert_eq!(streams[0].requests.len(), 0);
+        }
     }
 
-    #[test]
-    fn test_pipewire_backend_invalid_stream() {
-        crate::init_logger();
-        let stream_params = Arc::new(RwLock::new(vec![]));
+    // `PipewireTestHarness` modifies the process's environment, so this test should
+    // be executed on a forked process.
+    rusty_fork_test! {
+        #[test]
+        fn test_pipewire_backend_invalid_stream() {
+            crate::init_logger();
+            let stream_params = Arc::new(RwLock::new(vec![]));
 
-        let _test_harness = PipewireTestHarness::new();
+            let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = try_backoff(
-            || PwBackend::new(stream_params.clone()),
-            std::num::NonZeroU32::new(3),
-        )
-        .expect("reached maximum retry count");
+            let pw_backend = try_backoff(
+                || PwBackend::new(stream_params.clone()),
+                std::num::NonZeroU32::new(3),
+            )
+            .expect("reached maximum retry count");
 
-        let request = VirtioSndPcmSetParams::default();
-        let res = pw_backend.set_parameters(0, request);
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            Error::StreamWithIdNotFound(0).to_string()
-        );
+            let request = VirtioSndPcmSetParams::default();
+            let res = pw_backend.set_parameters(0, request);
+            assert_eq!(
+                res.unwrap_err().to_string(),
+                Error::StreamWithIdNotFound(0).to_string()
+            );
 
-        for res in [
-            pw_backend.prepare(0),
-            pw_backend.start(0),
-            pw_backend.stop(0),
-        ] {
+            for res in [
+                pw_backend.prepare(0),
+                pw_backend.start(0),
+                pw_backend.stop(0),
+            ] {
+                assert_eq!(
+                    res.unwrap_err().to_string(),
+                    Error::StreamWithIdNotFound(0).to_string()
+                );
+            }
+
+            let res = pw_backend.release(0);
             assert_eq!(
                 res.unwrap_err().to_string(),
                 Error::StreamWithIdNotFound(0).to_string()
             );
         }
-
-        let res = pw_backend.release(0);
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            Error::StreamWithIdNotFound(0).to_string()
-        );
     }
 }

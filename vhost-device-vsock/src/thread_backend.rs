@@ -604,6 +604,10 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_thread_backend_vsock() {
+        VsockListener::bind_with_cid_port(VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).expect(
+            "This test uses VMADDR_CID_LOCAL, so the vsock_loopback kernel module must be loaded",
+        );
+
         let _listener = VsockListener::bind_with_cid_port(VMADDR_CID_ANY, VSOCK_PEER_PORT).unwrap();
         let backend_info = BackendType::Vsock(VsockProxyInfo {
             forward_cid: VMADDR_CID_LOCAL,

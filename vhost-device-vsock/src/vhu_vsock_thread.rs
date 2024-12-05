@@ -1041,6 +1041,10 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     #[test]
     fn test_vsock_thread_vsock_backend() {
+        VsockListener::bind_with_cid_port(VMADDR_CID_LOCAL, libc::VMADDR_PORT_ANY).expect(
+            "This test uses VMADDR_CID_LOCAL, so the vsock_loopback kernel module must be loaded",
+        );
+
         let groups: Vec<String> = vec![String::from("default")];
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 

@@ -816,7 +816,7 @@ mod tests {
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
     #[cfg(feature = "backend_vsock")]
-    use vsock::VsockStream;
+    use vsock::{VsockStream, VMADDR_CID_LOCAL};
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
@@ -1046,7 +1046,7 @@ mod tests {
 
         let t = VhostUserVsockThread::new(
             BackendType::Vsock(VsockProxyInfo {
-                forward_cid: 1,
+                forward_cid: VMADDR_CID_LOCAL,
                 listen_ports: vec![9003, 9004],
             }),
             3,
@@ -1063,8 +1063,8 @@ mod tests {
 
         t.mem = Some(mem.clone());
 
-        let mut vs1 = VsockStream::connect_with_cid_port(1, 9003).unwrap();
-        let mut vs2 = VsockStream::connect_with_cid_port(1, 9004).unwrap();
+        let mut vs1 = VsockStream::connect_with_cid_port(VMADDR_CID_LOCAL, 9003).unwrap();
+        let mut vs2 = VsockStream::connect_with_cid_port(VMADDR_CID_LOCAL, 9004).unwrap();
         t.process_backend_evt(EventSet::empty());
 
         vs1.write_all(b"some data").unwrap();

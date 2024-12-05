@@ -241,6 +241,40 @@ application running on the host. Assuming the applications listening on port 900
 now run the applications that connect to port 9001 and 9002 (you need to modify the CID they connect to be the host CID i.e. 1)
 on the host machine.
 
+## Testing
+
+This crate contains several tests that can be run with `cargo test`.
+
+If `backend_vsock` feature is enabled (true by default), some of the tests use
+the AF_VSOCK loopback address [CID = 1] to run the tests, so you must have
+loaded the kernel module that handles it (`modprobe vsock_loopback`).
+
+Otherwise you may experience the following failures:
+```
+...
+test thread_backend::tests::test_vsock_thread_backend_vsock ... FAILED
+...
+test vhu_vsock_thread::tests::test_vsock_thread_vsock_backend ... FAILED
+
+failures:
+
+
+---- thread_backend::tests::test_vsock_thread_backend_vsock stdout ----
+thread 'thread_backend::tests::test_vsock_thread_backend_vsock' panicked at vhost-device-vsock/src/thread_backend.rs:607:84:
+This test uses VMADDR_CID_LOCAL, so the vsock_loopback kernel module must be loaded: Os { code: 99, kind: AddrNotAvailable, message: "Cannot assign requested address" }
+
+---- vhu_vsock_thread::tests::test_vsock_thread_vsock_backend stdout ----
+thread 'vhu_vsock_thread::tests::test_vsock_thread_vsock_backend' panicked at vhost-device-vsock/src/vhu_vsock_thread.rs:1044:84:
+This test uses VMADDR_CID_LOCAL, so the vsock_loopback kernel module must be loaded: Os { code: 99, kind: AddrNotAvailable, message: "Cannot assign requested address" }
+
+failures:
+    thread_backend::tests::test_vsock_thread_backend_vsock
+    vhu_vsock_thread::tests::test_vsock_thread_vsock_backend
+```
+
+With the `vsock_loopback` kernel module loaded in your system, all the tests
+should pass.
+
 ## License
 
 This project is licensed under either of

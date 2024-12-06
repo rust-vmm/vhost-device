@@ -54,7 +54,11 @@ pub fn alloc_audio_backend(
     match backend {
         BackendType::Null => Ok(Box::new(NullBackend::new(streams))),
         #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
-        BackendType::Pipewire => Ok(Box::new(PwBackend::new(streams))),
+        BackendType::Pipewire => {
+            Ok(Box::new(PwBackend::new(streams).map_err(|err| {
+                crate::Error::UnexpectedAudioBackendError(err.into())
+            })?))
+        }
         #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
         BackendType::Alsa => Ok(Box::new(AlsaBackend::new(streams))),
     }
@@ -64,27 +68,49 @@ pub fn alloc_audio_backend(
 mod tests {
     use std::any::TypeId;
 
+    #[cfg(all(
+        any(feature = "pw-backend", feature = "alsa-backend"),
+        target_env = "gnu"
+    ))]
+    use rusty_fork::rusty_fork_test;
+
     use super::*;
 
     #[test]
-    fn test_alloc_audio_backend() {
+    fn test_alloc_audio_backend_null() {
         crate::init_logger();
-        {
-            let v = BackendType::Null;
-            let value = alloc_audio_backend(v, Default::default()).unwrap();
-            assert_eq!(TypeId::of::<NullBackend>(), value.as_any().type_id());
-        }
-        #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
-        {
-            use pipewire::{test_utils::PipewireTestHarness, *};
+        let v = BackendType::Null;
+        let value = alloc_audio_backend(v, Default::default()).unwrap();
+        assert_eq!(TypeId::of::<NullBackend>(), value.as_any().type_id());
+    }
+
+    // `PipewireTestHarness` modifies the process's environment, so this test should
+    // be executed on a forked process.
+    #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
+    rusty_fork_test! {
+        #[test]
+        fn test_alloc_audio_backend_pipewire() {
+            crate::init_logger();
+            use pipewire::{
+                test_utils::{try_backoff, PipewireTestHarness},
+                *,
+            };
 
             let _test_harness = PipewireTestHarness::new();
             let v = BackendType::Pipewire;
-            let value = alloc_audio_backend(v, Default::default()).unwrap();
+            let value = try_backoff(|| alloc_audio_backend(v, Default::default()), std::num::NonZeroU32::new(3)).expect("reached maximum retry count");
             assert_eq!(TypeId::of::<PwBackend>(), value.as_any().type_id());
         }
-        #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
-        {
+    }
+
+    // `setup_alsa_conf` modifies the process's environment, so this test should be
+    // executed on a forked process.
+    #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
+    rusty_fork_test! {
+        #[test]
+        fn test_alloc_audio_backend_alsa() {
+            crate::init_logger();
+            let _harness = alsa::test_utils::setup_alsa_conf();
             let v = BackendType::Alsa;
             let value = alloc_audio_backend(v, Default::default()).unwrap();
             assert_eq!(TypeId::of::<AlsaBackend>(), value.as_any().type_id());

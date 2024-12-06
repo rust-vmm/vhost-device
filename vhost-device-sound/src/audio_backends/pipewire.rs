@@ -33,6 +33,7 @@ use spa::{
         SPA_AUDIO_FORMAT_UNKNOWN,
     },
 };
+use thiserror::Error as ThisError;
 
 use super::AudioBackend;
 use crate::{
@@ -64,6 +65,17 @@ impl From<Direction> for spa::utils::Direction {
     }
 }
 
+/// Error type for the Pipewire backend
+#[derive(Debug, ThisError)]
+pub enum PwError {
+    #[error("Failed to create Pipewire context: {0}")]
+    CreateContext(pw::Error),
+    #[error("Failed to connect to Pipewire core: {0}")]
+    ConnectToCore(pw::Error),
+    #[error("Failed to trigger sync event with Pipewire server: {0}")]
+    TriggerSyncEvent(pw::Error),
+}
+
 // SAFETY: Safe as the structure can be sent to another thread.
 unsafe impl Send for PwBackend {}
 
@@ -84,7 +96,7 @@ pub struct PwBackend {
 }
 
 impl PwBackend {
-    pub fn new(stream_params: Arc<RwLock<Vec<Stream>>>) -> Self {
+    pub fn new(stream_params: Arc<RwLock<Vec<Stream>>>) -> std::result::Result<Self, PwError> {
         pw::init();
 
         // SAFETY: safe as the thread loop cannot access objects associated
@@ -93,9 +105,9 @@ impl PwBackend {
 
         let lock_guard = thread_loop.lock();
 
-        let context = Context::new(&thread_loop).expect("failed to create context");
+        let context = Context::new(&thread_loop).map_err(PwError::CreateContext)?;
         thread_loop.start();
-        let core = context.connect(None).expect("Failed to connect to core");
+        let core = context.connect(None).map_err(PwError::ConnectToCore)?;
 
         // Create new reference for the variable so that it can be moved into the
         // closure.
@@ -104,7 +116,7 @@ impl PwBackend {
         // Trigger the sync event. The server's answer won't be processed until we start
         // the thread loop, so we can safely do this before setting up a
         // callback. This lets us avoid using a Cell.
-        let pending = core.sync(0).expect("sync failed");
+        let pending = core.sync(0).map_err(PwError::TriggerSyncEvent)?;
         let _listener_core = core
             .add_listener_local()
             .done(move |id, seq| {
@@ -119,14 +131,14 @@ impl PwBackend {
 
         log::trace!("pipewire backend running");
 
-        Self {
+        Ok(Self {
             stream_params,
             thread_loop,
             core,
             context,
             stream_hash: RwLock::new(HashMap::new()),
             stream_listener: RwLock::new(HashMap::new()),
-        }
+        })
     }
 }
 
@@ -584,68 +596,88 @@ pub mod test_utils;
 
 #[cfg(test)]
 mod tests {
-    use super::{test_utils::PipewireTestHarness, *};
+    use rusty_fork::rusty_fork_test;
 
-    #[test]
-    fn test_pipewire_backend_success() {
-        crate::init_logger();
-        let streams = Arc::new(RwLock::new(vec![Stream::default()]));
-        let stream_params = streams.clone();
+    use super::{
+        test_utils::{try_backoff, PipewireTestHarness},
+        *,
+    };
 
-        let _test_harness = PipewireTestHarness::new();
+    // `PipewireTestHarness` modifies the process's environment, so this test should
+    // be executed on a forked process.
+    rusty_fork_test! {
+        #[test]
+        fn test_pipewire_backend_success() {
+            crate::init_logger();
+            let stream_params = Arc::new(RwLock::new(vec![Stream::default()]));
 
-        let pw_backend = PwBackend::new(stream_params);
-        assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
-        assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
-        // set up minimal configuration for test
-        let request = VirtioSndPcmSetParams {
-            format: VIRTIO_SND_PCM_FMT_S16,
-            rate: VIRTIO_SND_PCM_RATE_11025,
-            channels: 1,
-            ..Default::default()
-        };
-        pw_backend.set_parameters(0, request).unwrap();
-        pw_backend.prepare(0).unwrap();
-        pw_backend.start(0).unwrap();
-        pw_backend.write(0).unwrap();
-        pw_backend.read(0).unwrap();
-        pw_backend.stop(0).unwrap();
-        pw_backend.release(0).unwrap();
-        let streams = streams.read().unwrap();
-        assert_eq!(streams[0].requests.len(), 0);
+            let _test_harness = PipewireTestHarness::new();
+
+            let pw_backend = try_backoff(
+                || PwBackend::new(stream_params.clone()),
+                std::num::NonZeroU32::new(3),
+            )
+            .expect("reached maximum retry count");
+            assert_eq!(pw_backend.stream_hash.read().unwrap().len(), 0);
+            assert_eq!(pw_backend.stream_listener.read().unwrap().len(), 0);
+            // set up minimal configuration for test
+            let request = VirtioSndPcmSetParams {
+                format: VIRTIO_SND_PCM_FMT_S16,
+                rate: VIRTIO_SND_PCM_RATE_11025,
+                channels: 1,
+                ..Default::default()
+            };
+            pw_backend.set_parameters(0, request).unwrap();
+            pw_backend.prepare(0).unwrap();
+            pw_backend.start(0).unwrap();
+            pw_backend.write(0).unwrap();
+            pw_backend.read(0).unwrap();
+            pw_backend.stop(0).unwrap();
+            pw_backend.release(0).unwrap();
+            let streams = stream_params.read().unwrap();
+            assert_eq!(streams[0].requests.len(), 0);
+        }
     }
 
-    #[test]
-    fn test_pipewire_backend_invalid_stream() {
-        crate::init_logger();
-        let stream_params = Arc::new(RwLock::new(vec![]));
+    // `PipewireTestHarness` modifies the process's environment, so this test should
+    // be executed on a forked process.
+    rusty_fork_test! {
+        #[test]
+        fn test_pipewire_backend_invalid_stream() {
+            crate::init_logger();
+            let stream_params = Arc::new(RwLock::new(vec![]));
 
-        let _test_harness = PipewireTestHarness::new();
+            let _test_harness = PipewireTestHarness::new();
 
-        let pw_backend = PwBackend::new(stream_params);
+            let pw_backend = try_backoff(
+                || PwBackend::new(stream_params.clone()),
+                std::num::NonZeroU32::new(3),
+            )
+            .expect("reached maximum retry count");
 
-        let request = VirtioSndPcmSetParams::default();
-        let res = pw_backend.set_parameters(0, request);
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            Error::StreamWithIdNotFound(0).to_string()
-        );
+            let request = VirtioSndPcmSetParams::default();
+            let res = pw_backend.set_parameters(0, request);
+            assert_eq!(
+                res.unwrap_err().to_string(),
+                Error::StreamWithIdNotFound(0).to_string()
+            );
 
-        for res in [
-            pw_backend.prepare(0),
-            pw_backend.start(0),
-            pw_backend.stop(0),
-        ] {
+            for res in [
+                pw_backend.prepare(0),
+                pw_backend.start(0),
+                pw_backend.stop(0),
+            ] {
+                assert_eq!(
+                    res.unwrap_err().to_string(),
+                    Error::StreamWithIdNotFound(0).to_string()
+                );
+            }
+
+            let res = pw_backend.release(0);
             assert_eq!(
                 res.unwrap_err().to_string(),
                 Error::StreamWithIdNotFound(0).to_string()
             );
         }
-
-        let res = pw_backend.release(0);
-        assert_eq!(
-            res.unwrap_err().to_string(),
-            Error::StreamWithIdNotFound(0).to_string()
-        );
     }
 }

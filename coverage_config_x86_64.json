@@ -1,5 +1,5 @@
 {
   "coverage_score": 86.60,
-  "exclude_path": "",
+  "exclude_path": "xtask",
   "crate_features": ""
 }

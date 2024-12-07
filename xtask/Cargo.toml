@@ -17,7 +17,8 @@ toml = { version = "0.8.19", optional = true }
 [build-dependencies]
 
 [features]
-default = ["vhost-device-sound"]
+default = ["vhost-device-sound", "vhost-device-scmi"]
+vhost-device-scmi = []
 vhost-device-sound = ["vhost-device-sound-alsa", "vhost-device-sound-pipewire"]
 vhost-device-sound-alsa = ["mangen"]
 vhost-device-sound-pipewire = ["mangen"]

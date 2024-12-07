@@ -26,6 +26,12 @@ use toml::value::Table;
 #[path = "../../vhost-device-sound/src/args.rs"]
 mod vhost_device_sound;
 
+// Use vhost-device-scmi's args module as our own using the #[path] attribute
+
+#[cfg(feature = "vhost-device-scmi")]
+#[path = "../../vhost-device-scmi/src/args.rs"]
+mod vhost_device_scmi;
+
 fn main() {
     if let Err(err) = run_app() {
         eprintln!("{}", err);
@@ -57,6 +63,49 @@ fn print_help() {
 }
 
 #[cfg(feature = "mangen")]
+fn mangen_for_crate<T: CommandFactory>(manifest: Table) -> Result<Vec<u8>, Box<dyn Error>> {
+    let name: &'static str = manifest["package"]["name"]
+        .as_str()
+        .unwrap()
+        .to_string()
+        .leak();
+    let version: &'static str = manifest["package"]["version"]
+        .as_str()
+        .unwrap()
+        .to_string()
+        .leak();
+    let repository: &'static str = manifest["package"]["repository"]
+        .as_str()
+        .unwrap()
+        .to_string()
+        .leak();
+    let description: &'static str = manifest["package"]["description"]
+        .as_str()
+        .unwrap()
+        .to_string()
+        .leak();
+    let cmd = <T as CommandFactory>::command()
+        .name(name)
+        .display_name(name)
+        .author(None)
+        .bin_name(name)
+        .version(version)
+        .about(description);
+    let man = Man::new(cmd);
+    let mut buffer: Vec<u8> = Default::default();
+    man.render(&mut buffer)?;
+    clap_mangen::roff::Roff::new()
+        .control("SH", ["REPORTING BUGS"])
+        .text(vec![format!(
+            "Report bugs to the project's issue tracker: {repository}"
+        )
+        .into()])
+        .to_writer(&mut buffer)?;
+
+    Ok(buffer)
+}
+
+#[cfg(feature = "mangen")]
 fn mangen() -> Result<(), Box<dyn Error>> {
     let workspace_dir = std::path::Path::new(&env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -67,8 +116,7 @@ fn mangen() -> Result<(), Box<dyn Error>> {
     let _ = std::fs::remove_dir_all(&dist_dir);
     std::fs::create_dir_all(&dist_dir)?;
 
-    let mut generated_artifacts = vec![];
-
+    let mut buffers = vec![];
     #[cfg(any(
         feature = "vhost-device-sound-pipewire",
         feature = "vhost-device-sound-alsa"
@@ -80,54 +128,38 @@ fn mangen() -> Result<(), Box<dyn Error>> {
             std::fs::read_to_string(workspace_dir.join("vhost-device-sound/Cargo.toml"))?;
         let manifest = manifest.as_str().parse::<Table>()?;
 
-        let name: &'static str = manifest["package"]["name"]
-            .as_str()
-            .unwrap()
-            .to_string()
-            .leak();
-        let version: &'static str = manifest["package"]["version"]
-            .as_str()
-            .unwrap()
-            .to_string()
-            .leak();
-        let repository: &'static str = manifest["package"]["repository"]
-            .as_str()
-            .unwrap()
-            .to_string()
-            .leak();
-        let description: &'static str = manifest["package"]["description"]
-            .as_str()
-            .unwrap()
-            .to_string()
-            .leak();
-        let cmd = <SoundArgs as CommandFactory>::command()
-            .name(name)
-            .display_name(name)
-            .bin_name(name)
-            .version(version)
-            .about(description);
-        let man = Man::new(cmd);
-        let mut buffer: Vec<u8> = Default::default();
-        man.render(&mut buffer)?;
-        clap_mangen::roff::Roff::new()
-            .control("SH", ["REPORTING BUGS"])
-            .text(vec![format!(
-                "Report bugs to the project's issue tracker: {repository}"
-            )
-            .into()])
-            .to_writer(&mut buffer)?;
-
+        let buffer = mangen_for_crate::<SoundArgs>(manifest)?;
         let man_path = dist_dir.join("vhost-device-sound.1");
+        buffers.push((man_path, buffer));
+    }
+    #[cfg(feature = "vhost-device-scmi")]
+    {
+        use vhost_device_scmi::ScmiArgs;
+
+        let manifest = std::fs::read_to_string(workspace_dir.join("vhost-device-scmi/Cargo.toml"))?;
+        let manifest = manifest.as_str().parse::<Table>()?;
+
+        let buffer = mangen_for_crate::<ScmiArgs>(manifest)?;
+        let man_path = dist_dir.join("vhost-device-scmi.1");
+        buffers.push((man_path, buffer));
+    }
+
+    if buffers.is_empty() {
+        println!("No manpages were generated! Try using the correct xtask cargo features.");
+        return Ok(());
+    }
+
+    let mut generated_artifacts = Vec::with_capacity(buffers.len());
+
+    for (man_path, buffer) in buffers {
         std::fs::write(&man_path, buffer)?;
         generated_artifacts.push(man_path);
     }
-    if generated_artifacts.is_empty() {
-        println!("No manpages were generated! Try using the correct xtask cargo features.");
-    } else {
-        println!("Generated the following manual pages:");
-        for art in generated_artifacts {
-            println!("{}", art.display());
-        }
+
+    assert!(!generated_artifacts.is_empty());
+    println!("Generated the following manual pages:");
+    for art in generated_artifacts {
+        println!("{}", art.display());
     }
 
     Ok(())

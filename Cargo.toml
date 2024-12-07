@@ -14,4 +14,5 @@ members = [
     "vhost-device-spi",
     "vhost-device-template",
     "vhost-device-vsock",
+    "xtask",
 ]

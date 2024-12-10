@@ -115,3 +115,11 @@ Supporting Xen requires special handling while mapping the guest memory. The
 
 It was decided by the `rust-vmm` maintainers to keep the interface simple and
 build the crate for either standard Unix memory mapping or Xen, and not both.
+
+## Packaging and distribution
+
+The [`xtask`](./xtask/) workspace crate provides support for generating ROFF manual pages.
+
+If the binary you're interested in packaging does not have a manual page
+generated you are encouraged to file a bug or even contribute the necessary
+changes by filing a pull request.

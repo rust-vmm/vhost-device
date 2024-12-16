@@ -71,7 +71,7 @@ impl convert::From<Error> for io::Error {
     }
 }
 
-/// I2C definitions from Virtio Spec
+// I2C definitions from Virtio Spec
 
 /// The final status written by the device
 const VIRTIO_I2C_MSG_OK: u8 = 0;

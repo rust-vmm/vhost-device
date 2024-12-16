@@ -56,8 +56,9 @@ pub(crate) enum Error {
     ParseFailure,
 }
 
-/// Linux I2C/SMBUS definitions
-/// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further details.
+// Linux I2C/SMBUS definitions
+
+// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further details.
 
 /// NOTE: Slave address is 7 or 10 bits, but 10-bit addresses are NOT supported!
 /// (due to code brokenness)
@@ -114,7 +115,6 @@ pub(crate) const I2C_M_RD: u16 = 0x0001; // read data, from slave to master
 /// and ACKed.  If this is the last message in a group, it is followed by
 /// a STOP.  Otherwise it is followed by the next @I2cMsg transaction
 /// segment, beginning with a (repeated) START.
-
 #[repr(C)]
 struct I2cMsg {
     addr: u16,

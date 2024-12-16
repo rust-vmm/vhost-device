@@ -27,9 +27,9 @@ use crate::{vhu_video_thread::VhostUserVideoThread, video_backends};
 
 /// Virtio Video Feature bits
 const VIRTIO_VIDEO_F_RESOURCE_GUEST_PAGES: u16 = 0;
-/// Unsupported
-/// const VIRTIO_VIDEO_F_RESOURCE_NON_CONTIG: u16 = 1;
-/// const VIRTIO_VIDEO_F_RESOURCE_VIRTIO_OBJECT: u16 = 2;
+// Unsupported
+// const VIRTIO_VIDEO_F_RESOURCE_NON_CONTIG: u16 = 1;
+// const VIRTIO_VIDEO_F_RESOURCE_VIRTIO_OBJECT: u16 = 2;
 
 const COMMAND_Q: u16 = 0;
 const EVENT_Q: u16 = 1;

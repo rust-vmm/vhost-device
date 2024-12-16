@@ -49,28 +49,24 @@ pub(crate) const VSOCK_HOST_CID: u64 = 2;
 /// Connection oriented packet
 pub(crate) const VSOCK_TYPE_STREAM: u16 = 1;
 
-/// Vsock packet operation ID
-
-/// Connection request
+/// Vsock packet operation ID - Connection request
 pub(crate) const VSOCK_OP_REQUEST: u16 = 1;
-/// Connection response
+/// Vsock packet operation ID - Connection response
 pub(crate) const VSOCK_OP_RESPONSE: u16 = 2;
-/// Connection reset
+/// Vsock packet operation ID - Connection reset
 pub(crate) const VSOCK_OP_RST: u16 = 3;
-/// Shutdown connection
+/// Vsock packet operation ID - Shutdown connection
 pub(crate) const VSOCK_OP_SHUTDOWN: u16 = 4;
-/// Data read/write
+/// Vsock packet operation ID - Data read/write
 pub(crate) const VSOCK_OP_RW: u16 = 5;
-/// Flow control credit update
+/// Vsock packet operation ID - Flow control credit update
 pub(crate) const VSOCK_OP_CREDIT_UPDATE: u16 = 6;
-/// Flow control credit request
+/// Vsock packet operation ID - Flow control credit request
 pub(crate) const VSOCK_OP_CREDIT_REQUEST: u16 = 7;
 
-/// Vsock packet flags
-
-/// VSOCK_OP_SHUTDOWN: Packet sender will receive no more data
+/// Vsock packet flags - `VSOCK_OP_SHUTDOWN`: Packet sender will receive no more data
 pub(crate) const VSOCK_FLAGS_SHUTDOWN_RCV: u32 = 1;
-/// VSOCK_OP_SHUTDOWN: Packet sender will send no more data
+/// Vsock packet flags - `VSOCK_OP_SHUTDOWN`: Packet sender will send no more data
 pub(crate) const VSOCK_FLAGS_SHUTDOWN_SEND: u32 = 2;
 
 // Queue mask to select vrings.

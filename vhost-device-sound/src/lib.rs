@@ -37,6 +37,7 @@ pub fn init_logger() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
+pub mod args;
 pub mod audio_backends;
 pub mod device;
 pub mod stream;
@@ -49,7 +50,7 @@ use std::{
     sync::Arc,
 };
 
-use clap::ValueEnum;
+pub use args::BackendType;
 pub use stream::Stream;
 use thiserror::Error as ThisError;
 use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
@@ -190,16 +191,6 @@ impl From<stream::Error> for Error {
     }
 }
 
-#[derive(ValueEnum, Clone, Copy, Default, Debug, Eq, PartialEq)]
-pub enum BackendType {
-    #[default]
-    Null,
-    #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
-    Pipewire,
-    #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
-    Alsa,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidControlMessage(u32);
 
@@ -260,6 +251,14 @@ pub struct SoundConfig {
     multi_thread: bool,
     /// audio backend variant
     audio_backend: BackendType,
+}
+
+impl From<args::SoundArgs> for SoundConfig {
+    fn from(cmd_args: args::SoundArgs) -> Self {
+        let socket = cmd_args.socket.trim().to_string();
+
+        Self::new(socket, false, cmd_args.backend)
+    }
 }
 
 impl SoundConfig {

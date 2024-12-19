@@ -10,19 +10,11 @@
 // rutabaga library is available for musl.
 #[cfg(target_env = "gnu")]
 pub mod gnu_main {
-    use std::{
-        path::{Path, PathBuf},
-        process::exit,
-    };
+    use std::{path::PathBuf, process::exit};
 
     use clap::{ArgAction, Parser, ValueEnum};
-    use log::{error, info};
-    use thiserror::Error as ThisError;
-    use vhost_device_gpu::{
-        device, device::VhostUserGpuBackend, GpuCapset, GpuConfig, GpuFlags, GpuMode,
-    };
-    use vhost_user_backend::VhostUserDaemon;
-    use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+    use log::error;
+    use vhost_device_gpu::{start_backend, GpuCapset, GpuConfig, GpuFlags, GpuMode};
 
     #[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
     #[repr(u64)]
@@ -116,18 +108,6 @@ pub mod gnu_main {
         use_surfaceless: bool,
     }
 
-    type Result<T> = std::result::Result<T, Error>;
-
-    #[derive(Debug, ThisError)]
-    pub enum Error {
-        #[error("Could not create backend: {0}")]
-        CouldNotCreateBackend(device::Error),
-        #[error("Could not create daemon: {0}")]
-        CouldNotCreateDaemon(vhost_user_backend::Error),
-        #[error("Fatal error: {0}")]
-        ServeFailed(vhost_user_backend::Error),
-    }
-
     impl From<GpuFlagsArgs> for GpuFlags {
         fn from(args: GpuFlagsArgs) -> Self {
             GpuFlags {
@@ -137,23 +117,6 @@ pub mod gnu_main {
                 use_surfaceless: args.use_surfaceless,
             }
         }
-    }
-
-    pub fn start_backend(socket_path: &Path, config: GpuConfig) -> Result<()> {
-        info!("Starting backend");
-        let backend = VhostUserGpuBackend::new(config).map_err(Error::CouldNotCreateBackend)?;
-
-        let mut daemon = VhostUserDaemon::new(
-            "vhost-device-gpu-backend".to_string(),
-            backend.clone(),
-            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-        )
-        .map_err(Error::CouldNotCreateDaemon)?;
-
-        backend.set_epoll_handler(&daemon.get_epoll_handlers());
-
-        daemon.serve(socket_path).map_err(Error::ServeFailed)?;
-        Ok(())
     }
 
     pub fn main() {
@@ -190,25 +153,10 @@ fn main() {}
 #[cfg(target_env = "gnu")]
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use assert_matches::assert_matches;
     use clap::ValueEnum;
-    use vhost_device_gpu::{GpuCapset, GpuConfig, GpuFlags, GpuMode};
+    use vhost_device_gpu::GpuCapset;
 
     use super::gnu_main::*;
-
-    #[test]
-    fn test_fail_listener() {
-        // This will fail the listeners and thread will panic.
-        let socket_name = Path::new("/proc/-1/nonexistent");
-        let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
-
-        assert_matches!(
-            start_backend(socket_name, config).unwrap_err(),
-            Error::ServeFailed(_)
-        );
-    }
 
     #[test]
     fn test_capset_enum_in_sync_with_capset_bitset() {

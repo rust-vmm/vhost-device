@@ -42,18 +42,26 @@ pub mod protocol;
 #[cfg(target_env = "gnu")]
 pub mod virtio_gpu;
 
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    path::Path,
+};
 
 use bitflags::bitflags;
 use clap::ValueEnum;
+use log::info;
 #[cfg(feature = "gfxstream")]
 use rutabaga_gfx::{RUTABAGA_CAPSET_GFXSTREAM_GLES, RUTABAGA_CAPSET_GFXSTREAM_VULKAN};
 use rutabaga_gfx::{RUTABAGA_CAPSET_VENUS, RUTABAGA_CAPSET_VIRGL, RUTABAGA_CAPSET_VIRGL2};
 use thiserror::Error as ThisError;
+use vhost_user_backend::VhostUserDaemon;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+use crate::device::VhostUserGpuBackend;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GpuMode {
-    #[value(name="virglrenderer", alias("virgl-renderer"))]
+    #[value(name = "virglrenderer", alias("virgl-renderer"))]
     VirglRenderer,
     #[cfg(feature = "gfxstream")]
     Gfxstream,
@@ -230,9 +238,35 @@ impl GpuConfig {
     }
 }
 
+#[derive(Debug, ThisError)]
+pub enum StartError {
+    #[error("Could not create backend: {0}")]
+    CouldNotCreateBackend(device::Error),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
+}
+
+pub fn start_backend(socket_path: &Path, config: GpuConfig) -> Result<(), StartError> {
+    info!("Starting backend");
+    let backend = VhostUserGpuBackend::new(config).map_err(StartError::CouldNotCreateBackend)?;
+
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-gpu-backend".to_string(),
+        backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(StartError::CouldNotCreateDaemon)?;
+
+    backend.set_epoll_handler(&daemon.get_epoll_handlers());
+
+    daemon.serve(socket_path).map_err(StartError::ServeFailed)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "gfxstream")]
     use assert_matches::assert_matches;
 
     use super::*;
@@ -315,5 +349,17 @@ mod tests {
         let capset = GpuCapset::VIRGL | GpuCapset::VIRGL2 | GpuCapset::VENUS;
         let output = format!("{capset}");
         assert_eq!(output, "virgl, virgl2, venus")
+    }
+
+    #[test]
+    fn test_fail_listener() {
+        // This will fail the listeners and thread will panic.
+        let socket_name = Path::new("/proc/-1/nonexistent");
+        let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
+
+        assert_matches!(
+            start_backend(socket_name, config).unwrap_err(),
+            StartError::ServeFailed(_)
+        );
     }
 }

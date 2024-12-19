@@ -48,6 +48,7 @@ use clap::ValueEnum;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GpuMode {
+    #[value(name = "virglrenderer", alias("virgl-renderer"))]
     VirglRenderer,
     #[cfg(feature = "gfxstream")]
     Gfxstream,

@@ -14,7 +14,7 @@ A virtio-gpu device using the vhost-user protocol.
 
 ```text
   -s, --socket-path <SOCKET>  vhost-user Unix domain socket
-  -g, --gpu-mode <GPU_MODE>   [possible values: virgl-renderer, gfxstream]
+  -g, --gpu-mode <GPU_MODE>   [possible values: virglrenderer, gfxstream]
   -h, --help                  Print help
   -V, --version               Print version
 ```
@@ -60,11 +60,11 @@ host with minimal modification.
 
 First start the daemon on the host machine using either of the 2 gpu modes:
 
-1) `virgl-renderer`
+1) `virglrenderer`
 2) `gfxstream` (if the crate has been compiled with the feature `gfxstream`)
 
 ```shell
-host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virgl-renderer
+host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virglrenderer
 ```
 
 With QEMU, there are two device front-ends you can use with this device.

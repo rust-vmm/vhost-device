@@ -19,7 +19,7 @@ A virtio-gpu device using the vhost-user protocol.
   -g, --gpu-mode <GPU_MODE>
           The mode specifies which backend implementation to use
           
-          [possible values: virgl-renderer, gfxstream]
+          [possible values: virglrenderer, gfxstream]
 
   -c, --capset <CAPSET>
           Comma separated list of enabled capsets

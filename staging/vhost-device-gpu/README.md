@@ -80,14 +80,11 @@ resources. It'll be nice to have support for directly sharing display output
 resource using dmabuf.
 
 This device does not yet support the `VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB`,
-`VIRTIO_GPU_CMD_SET_SCANOUT_BLOB` and `VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID` features.
-
-Currently this crate requires some necessary bits in order to move the crate out of staging:
-
-- Addition of CLI arguments to specify the exact number of capsets and use
-  a default capset configuration when no capset is specified rather than using
-  hard-coded capset value.
-
+`VIRTIO_GPU_CMD_SET_SCANOUT_BLOB` and `VIRTIO_GPU_CMD_RESOURCE_ASSIGN_UUID` features. 
+This requires https://github.com/rust-vmm/vhost/pull/251, which in turn requires QEMU API stabilization.
+Because blob resources are not yet supported, some capsets are limited:
+- Venus (Vulkan implementation in virglrenderer project) support is not available at all.
+- gfxstream-vulkan and gfxstream-gles support are exposed, but can practically only be used for display output, there is no hardware acceleration yet.
 ## Features
 
 The device leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx)

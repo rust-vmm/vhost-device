@@ -13,10 +13,53 @@ A virtio-gpu device using the vhost-user protocol.
 ## Options
 
 ```text
-  -s, --socket-path <SOCKET>  vhost-user Unix domain socket
-  -g, --gpu-mode <GPU_MODE>   [possible values: virgl-renderer, gfxstream]
-  -h, --help                  Print help
-  -V, --version               Print version
+  -s, --socket-path <SOCKET>
+          vhost-user Unix domain socket
+
+  -g, --gpu-mode <GPU_MODE>
+          The mode specifies which backend implementation to use
+          
+          [possible values: virglrenderer, gfxstream]
+
+  -c, --capset <CAPSET>
+          Comma separated list of enabled capsets
+
+          Possible values:
+          - virgl:            [virglrenderer] OpenGL implementation, superseded by Virgl2
+          - virgl2:           [virglrenderer] OpenGL implementation
+          - venus:            [virglrenderer] Vulkan implementation
+          - gfxstream-vulkan: [gfxstream]     Vulkan implementation
+          - gfxstream-gles:   [gfxstream]     OpenGL ES implementation
+
+      --use-egl <USE_EGL>
+          Enable backend to use EGL
+          
+          [default: true]
+          [possible values: true, false]
+
+      --use-glx <USE_GLX>
+          Enable backend to use GLX
+          
+          [default: false]
+          [possible values: true, false]
+
+      --use-gles <USE_GLES>
+          Enable backend to use GLES
+          
+          [default: true]
+          [possible values: true, false]
+
+      --use-surfaceless <USE_SURFACELESS>
+          Enable surfaceless backend option
+          
+          [default: true]
+          [possible values: true, false]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 ```
 
 _NOTE_: Option `-g, --gpu-mode` can only accept the `gfxstream` value if the

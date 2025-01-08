@@ -35,11 +35,8 @@
     clippy::significant_drop_tightening
 )]
 
-#[cfg(target_env = "gnu")]
 pub mod device;
-#[cfg(target_env = "gnu")]
 pub mod protocol;
-#[cfg(target_env = "gnu")]
 pub mod virtio_gpu;
 
 use std::path::{Path, PathBuf};

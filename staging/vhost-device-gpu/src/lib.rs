@@ -42,6 +42,24 @@ pub mod virtio_gpu;
 use std::path::{Path, PathBuf};
 
 use clap::ValueEnum;
+use log::info;
+use thiserror::Error as ThisError;
+use vhost_user_backend::VhostUserDaemon;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+use crate::device::VhostUserGpuBackend;
+
+type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, ThisError)]
+pub enum Error {
+    #[error("Could not create backend: {0}")]
+    CouldNotCreateBackend(device::Error),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(vhost_user_backend::Error),
+    #[error("Fatal error: {0}")]
+    ServeFailed(vhost_user_backend::Error),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GpuMode {
@@ -81,8 +99,29 @@ impl GpuConfig {
     }
 }
 
+pub fn start_backend(config: &GpuConfig) -> Result<()> {
+    info!("Starting backend");
+    let socket = config.socket_path();
+    let backend = VhostUserGpuBackend::new(config).map_err(Error::CouldNotCreateBackend)?;
+
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-gpu-backend".to_string(),
+        backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(Error::CouldNotCreateDaemon)?;
+
+    backend.set_epoll_handler(&daemon.get_epoll_handlers());
+
+    daemon.serve(socket).map_err(Error::ServeFailed)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use assert_matches::assert_matches;
     use tempfile::tempdir;
 
     use super::*;
@@ -94,5 +133,14 @@ mod tests {
         let socket_path = test_dir.path().join("socket");
         let gpu_config = GpuConfig::new(socket_path.clone(), GpuMode::VirglRenderer);
         assert_eq!(gpu_config.socket_path(), socket_path);
+    }
+
+    #[test]
+    fn test_fail_listener() {
+        // This will fail the listeners and thread will panic.
+        let socket_name = Path::new("/proc/-1/nonexistent");
+        let config = GpuConfig::new(socket_name.into(), GpuMode::VirglRenderer);
+
+        assert_matches!(start_backend(&config).unwrap_err(), Error::ServeFailed(_));
     }
 }

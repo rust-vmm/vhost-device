@@ -7,26 +7,8 @@
 use std::{path::PathBuf, process::exit};
 
 use clap::Parser;
-use log::{error, info};
-use thiserror::Error as ThisError;
-use vhost_device_gpu::{
-    device::{self, VhostUserGpuBackend},
-    GpuConfig, GpuMode,
-};
-use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
-type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug, ThisError)]
-pub enum Error {
-    #[error("Could not create backend: {0}")]
-    CouldNotCreateBackend(device::Error),
-    #[error("Could not create daemon: {0}")]
-    CouldNotCreateDaemon(vhost_user_backend::Error),
-    #[error("Fatal error: {0}")]
-    ServeFailed(vhost_user_backend::Error),
-}
+use log::error;
+use vhost_device_gpu::{start_backend, GpuConfig, GpuMode};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -47,24 +29,6 @@ impl From<GpuArgs> for GpuConfig {
     }
 }
 
-pub fn start_backend(config: &GpuConfig) -> Result<()> {
-    info!("Starting backend");
-    let socket = config.socket_path();
-    let backend = VhostUserGpuBackend::new(config).map_err(Error::CouldNotCreateBackend)?;
-
-    let mut daemon = VhostUserDaemon::new(
-        "vhost-device-gpu-backend".to_string(),
-        backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .map_err(Error::CouldNotCreateDaemon)?;
-
-    backend.set_epoll_handler(&daemon.get_epoll_handlers());
-
-    daemon.serve(socket).map_err(Error::ServeFailed)?;
-    Ok(())
-}
-
 fn main() {
     env_logger::init();
 
@@ -78,11 +42,10 @@ fn main() {
 mod tests {
     use std::path::Path;
 
-    use assert_matches::assert_matches;
     use tempfile::tempdir;
     use vhost_device_gpu::{GpuConfig, GpuMode};
 
-    use super::{start_backend, Error, GpuArgs};
+    use super::*;
 
     impl GpuArgs {
         pub(crate) fn from_args(path: &Path) -> Self {
@@ -102,15 +65,5 @@ mod tests {
         let config = GpuConfig::from(cmd_args);
 
         assert_eq!(config.socket_path(), socket_path);
-    }
-
-    #[test]
-    fn test_fail_listener() {
-        // This will fail the listeners and thread will panic.
-        let socket_name = Path::new("/proc/-1/nonexistent");
-        let cmd_args = GpuArgs::from_args(socket_name);
-        let config = GpuConfig::from(cmd_args);
-
-        assert_matches!(start_backend(&config).unwrap_err(), Error::ServeFailed(_));
     }
 }

@@ -42,48 +42,60 @@ pub mod protocol;
 #[cfg(target_env = "gnu")]
 pub mod virtio_gpu;
 
-use std::path::{Path, PathBuf};
+// Rust vmm container (https://github.com/rust-vmm/rust-vmm-container) doesn't
+// have tools to do a musl build at the moment, and adding that support is
+// tricky as well to the container. Skip musl builds until the time pre-built
+// rutabaga library is available for musl.
+#[cfg(target_env = "gnu")]
+mod gnu_only {
+    use std::path::{Path, PathBuf};
 
-use clap::ValueEnum;
+    use clap::ValueEnum;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum GpuMode {
-    #[value(name = "virglrenderer", alias("virgl-renderer"))]
-    VirglRenderer,
-    #[cfg(feature = "gfxstream")]
-    Gfxstream,
-}
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+    pub enum GpuMode {
+        #[value(name = "virglrenderer", alias("virgl-renderer"))]
+        VirglRenderer,
+        #[cfg(feature = "gfxstream")]
+        Gfxstream,
+    }
 
-#[derive(Debug, Clone)]
-/// This structure holds the internal configuration for the GPU backend,
-/// derived from the command-line arguments provided through `GpuArgs`.
-pub struct GpuConfig {
-    /// vhost-user Unix domain socket
-    socket_path: PathBuf,
-    gpu_mode: GpuMode,
-}
+    #[derive(Debug, Clone)]
+    /// This structure holds the internal configuration for the GPU backend,
+    /// derived from the command-line arguments provided through `GpuArgs`.
+    pub struct GpuConfig {
+        /// vhost-user Unix domain socket
+        socket_path: PathBuf,
+        gpu_mode: GpuMode,
+    }
 
-impl GpuConfig {
-    /// Create a new instance of the `GpuConfig` struct, containing the
-    /// parameters to be fed into the gpu-backend server.
-    pub const fn new(socket_path: PathBuf, gpu_mode: GpuMode) -> Self {
-        Self {
-            socket_path,
-            gpu_mode,
+    impl GpuConfig {
+        /// Create a new instance of the `GpuConfig` struct, containing the
+        /// parameters to be fed into the gpu-backend server.
+        pub const fn new(socket_path: PathBuf, gpu_mode: GpuMode) -> Self {
+            Self {
+                socket_path,
+                gpu_mode,
+            }
+        }
+
+        /// Return the path of the unix domain socket which is listening to
+        /// requests from the guest.
+        pub fn socket_path(&self) -> &Path {
+            &self.socket_path
+        }
+
+        pub const fn gpu_mode(&self) -> GpuMode {
+            self.gpu_mode
         }
     }
-
-    /// Return the path of the unix domain socket which is listening to
-    /// requests from the guest.
-    pub fn socket_path(&self) -> &Path {
-        &self.socket_path
-    }
-
-    pub const fn gpu_mode(&self) -> GpuMode {
-        self.gpu_mode
-    }
 }
 
+#[cfg(target_env = "gnu")]
+// Re-Export the public library function as if they weren't in a separate submodule
+pub use gnu_only::*;
+
+#[cfg(target_env = "gnu")]
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;

@@ -4,10 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-// Rust vmm container (https://github.com/rust-vmm/rust-vmm-container) doesn't
-// have tools to do a musl build at the moment, and adding that support is
-// tricky as well to the container. Skip musl builds until the time pre-built
-// rutabaga library is available for musl.
+// See the cfg(target_env = "gnu") explanation in lib.rs
 #[cfg(target_env = "gnu")]
 pub mod gnu_main {
     use std::{path::PathBuf, process::exit};

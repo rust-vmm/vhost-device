@@ -1377,17 +1377,18 @@ mod tests {
             MessageValue::Unsigned(0),
             MessageValue::Unsigned(axis_index),
         ];
-        let mut result = vec![MessageValue::Unsigned(n_axes - axis_index)];
-        for i in axis_index..n_axes {
-            let name = format!("acc_{}", char::from_u32('X' as u32 + i).unwrap()).to_string();
-            let mut description = vec![
-                MessageValue::Unsigned(i),
-                MessageValue::Unsigned(0),
-                MessageValue::Unsigned(u32::from(SENSOR_UNIT_METERS_PER_SECOND_SQUARED)),
-                MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
-            ];
-            result.append(&mut description);
-        }
+        // Each call will return only one descriptor to avoid exceeding the maximum length of the message
+        // and to inform about the number of the remaining sensor axis descriptions.
+        let num_axis_flags = 1 | (n_axes - axis_index - 1) << 26;
+        let mut result = vec![MessageValue::Unsigned(num_axis_flags)];
+        let name = format!("acc_{}", char::from_u32('X' as u32 + axis_index).unwrap()).to_string();
+        let mut description = vec![
+            MessageValue::Unsigned(axis_index),
+            MessageValue::Unsigned(0),
+            MessageValue::Unsigned(u32::from(SENSOR_UNIT_METERS_PER_SECOND_SQUARED)),
+            MessageValue::String(name, MAX_SIMPLE_STRING_LENGTH),
+        ];
+        result.append(&mut description);
         test_message(
             SENSOR_PROTOCOL_ID,
             SENSOR_AXIS_DESCRIPTION_GET,

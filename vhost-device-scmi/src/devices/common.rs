@@ -450,11 +450,11 @@ pub trait SensorT: Send {
                 if axis_desc_index >= n_sensor_axes {
                     return Result::Err(ScmiDeviceError::InvalidParameters);
                 }
-                let mut values = vec![MessageValue::Unsigned(n_sensor_axes - axis_desc_index)];
-                for i in axis_desc_index..n_sensor_axes {
-                    let mut description = self.axis_description(i);
-                    values.append(&mut description);
-                }
+                // Report only a single axis, in order to not exceed the descriptor size.
+                let num_axis_flags = 1 | ((n_sensor_axes - axis_desc_index - 1) << 26);
+                let mut values = vec![MessageValue::Unsigned(num_axis_flags)];
+                let mut description = self.axis_description(axis_desc_index);
+                values.append(&mut description);
                 Ok(values)
             }
             SENSOR_CONFIG_GET => self.config_get(),

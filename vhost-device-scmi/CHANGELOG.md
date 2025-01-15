@@ -7,6 +7,8 @@
 
 ### Fixed
 
+- [[#798]](https://github.com/rust-vmm/vhost-device/pull/798) Fix the wrong value number of remaining sensor axis descriptor.
+
 ### Deprecated
 
 ## v0.3.0

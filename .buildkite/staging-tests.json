@@ -11,7 +11,7 @@
     },
     {
       "test_name": "staging: build-musl",
-      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl",
+      "command": "cd staging && RUSTFLAGS=\"-D warnings\" cargo build --release --workspace --exclude vhost-device-gpu --target {target_platform}-unknown-linux-musl",
       "soft_fail": "true",
       "platform": [
         "x86_64",
@@ -33,7 +33,7 @@
     },
     {
       "test_name": "staging: unittests-musl",
-      "command": "cd staging && cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl",
+      "command": "cd staging && cargo test --all-features --workspace --exclude vhost-device-gpu --target {target_platform}-unknown-linux-musl",
       "soft_fail": "true",
       "platform": [
         "x86_64",

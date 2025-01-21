@@ -24,6 +24,11 @@ crate has been built with the `gfxstream` feature, which is the default.
 
 ## Limitations
 
+This device links native libaries (because of the usage of Rutabaga) compiled
+with GNU libc, so the CI is setup to not build this device for musl targets. 
+It might be possible to build those libraries using musl and then build the gpu
+device, but this is not tested.
+
 We are currently only supporting sharing the display output to QEMU through a
 socket using the transfer_read operation triggered by
 `VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D` to transfer data from and to virtio-gpu 3D

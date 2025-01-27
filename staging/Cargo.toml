@@ -1,6 +1,5 @@
 [workspace]
 resolver = "2"
 members = [
-  "vhost-device-gpu",
   "vhost-device-video",
 ]

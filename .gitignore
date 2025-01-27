@@ -1,4 +1,5 @@
 kcov_output/
 target/
 .vscode/
+.idea
 *.swp

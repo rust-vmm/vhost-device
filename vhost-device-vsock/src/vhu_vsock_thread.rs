@@ -18,9 +18,7 @@ use std::{
     thread,
 };
 
-#[cfg(feature = "backend_vsock")]
-use log::error;
-use log::warn;
+use log::{error, warn};
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
@@ -431,6 +429,9 @@ impl VhostUserVsockThread {
                 }
             } else {
                 // Previously connected connection
+
+                // Get epoll fd before getting conn as that takes self mut ref
+                let epoll_fd = self.get_epoll_fd();
                 let key = self.thread_backend.listener_map.get(&fd).unwrap();
                 let conn = self.thread_backend.conn_map.get_mut(key).unwrap();
 
@@ -441,6 +442,12 @@ impl VhostUserVsockThread {
                             if cnt > 0 {
                                 conn.fwd_cnt += Wrapping(cnt as u32);
                                 conn.rx_queue.enqueue(RxOps::CreditUpdate);
+                            } else {
+                                // If no remaining data to flush, try to disable EPOLLOUT
+                                if Self::epoll_modify(epoll_fd, fd, epoll::Events::EPOLLIN).is_err()
+                                {
+                                    error!("Failed to disable EPOLLOUT");
+                                }
                             }
                             self.thread_backend
                                 .backend_rxq

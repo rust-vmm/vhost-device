@@ -345,6 +345,16 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
         }
 
         if written_count != buf.len() {
+            // Try to re-enable EPOLLOUT in case it is disabled when txbuf is empty.
+            if VhostUserVsockThread::epoll_modify(
+                self.epoll_fd,
+                self.stream.as_raw_fd(),
+                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+            )
+            .is_err()
+            {
+                error!("Failed to re-enable EPOLLOUT");
+            }
             return self.tx_buf.push(&buf.offset(written_count).unwrap());
         }
 

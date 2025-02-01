@@ -19,8 +19,8 @@ env_logger = "0.11"
 epoll = "4.3"
 libc = "0.2"
 log = "0.4"
-rand = "0.8.5"
-tempfile = "3.14"
+rand = "0.9.0"
+tempfile = "3.16"
 thiserror = "2.0"
 vhost = { version = "0.13", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"
@@ -28,7 +28,7 @@ virtio-bindings = "0.2.2"
 virtio-queue = "0.14"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12"
-evdev = "0.12"
+evdev = "0.13"
 nix = { version = "0.29", features = ["ioctl"] }
 
 [dev-dependencies]

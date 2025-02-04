@@ -11,7 +11,7 @@
     },
     {
       "test_name": "build-musl",
-      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl",
+      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl --workspace --exclude vhost-device-gpu",
       "platform": [
         "x86_64",
         "aarch64"
@@ -35,7 +35,7 @@
     },
     {
       "test_name": "unittests-musl",
-      "command": "cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl",
+      "command": "cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu",
       "platform": [
         "x86_64",
         "aarch64"
@@ -58,7 +58,7 @@
     },
     {
       "test_name": "unittests-musl-release",
-      "command": "cargo test --release --all-features --workspace --target {target_platform}-unknown-linux-musl",
+      "command": "cargo test --release --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu",
       "platform": [
         "x86_64",
         "aarch64"

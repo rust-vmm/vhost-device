@@ -26,7 +26,7 @@ libc = "0.2"
 log = "0.4"
 
 [target.'cfg(not(target_env = "musl"))'.dependencies]
-rutabaga_gfx = { version = "0.1.4", features = ["virgl_renderer"] }
+rutabaga_gfx = { version = "0.1.5", features = ["virgl_renderer"] }
 thiserror = "2.0.9"
 vhost = { version = "0.13.0", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"

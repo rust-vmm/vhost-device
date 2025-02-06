@@ -264,14 +264,14 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                 if VhostUserVsockThread::epoll_modify(
                     self.epoll_fd,
                     self.stream.as_raw_fd(),
-                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT | epoll::Events::EPOLLET,
                 )
                 .is_err()
                 {
                     if let Err(e) = VhostUserVsockThread::epoll_register(
                         self.epoll_fd,
                         self.stream.as_raw_fd(),
-                        epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                        epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT | epoll::Events::EPOLLET,
                     ) {
                         // TODO: let's move this logic out of this func, and handle it properly
                         error!("epoll_register failed: {:?}, but proceed further.", e);

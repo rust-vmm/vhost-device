@@ -9,6 +9,7 @@
 ### Changed
 
 ### Fixed
+- [[#808]](https://github.com/rust-vmm/vhost-device/pull/808) pipewire: Fix rand module imports
 
 ### Deprecated
 

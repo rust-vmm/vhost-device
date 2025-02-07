@@ -573,6 +573,7 @@ impl VhostUserSoundBackend {
                 jacks: 0.into(),
                 streams: Le32::from(streams_no as u32),
                 chmaps: 1.into(),
+                controls: 0.into(),
             },
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
             audio_backend: RwLock::new(audio_backend),

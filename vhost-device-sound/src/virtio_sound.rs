@@ -163,6 +163,8 @@ pub struct VirtioSoundConfig {
     pub streams: Le32,
     /// total number of all available channel maps
     pub chmaps: Le32,
+    /// total number of all available control elements
+    pub controls: Le32,
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -350,8 +352,9 @@ mod tests {
         let val = VirtioSoundConfig::default();
 
         let debug_output = format!("{:?}", val);
-        let expected_debug =
-            "VirtioSoundConfig { jacks: Le32(0), streams: Le32(0), chmaps: Le32(0) }".to_string();
+        let expected_debug = "VirtioSoundConfig { jacks: Le32(0), streams: Le32(0), chmaps: \
+                              Le32(0), controls: Le32(0) }"
+            .to_string();
         assert_eq!(debug_output, expected_debug);
 
         let val = VirtioSoundHeader::default();

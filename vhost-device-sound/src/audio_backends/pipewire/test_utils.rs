@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::distributions::Uniform;
+use rand::distr::Uniform;
 use tempfile::{tempdir, TempDir};
 
 macro_rules! try_wait_child {
@@ -179,7 +179,7 @@ fn print_output(child: &mut Child, id: &'static str) {
     }
 }
 
-pub fn truncated_wait_delay<D: rand::distributions::Distribution<f32>, R: rand::Rng>(
+pub fn truncated_wait_delay<D: rand::distr::Distribution<f32>, R: rand::Rng>(
     slot_time: &Duration,
     attempts_so_far: u32,
     exponent_max: u32,
@@ -202,9 +202,15 @@ pub fn try_backoff<T, E: std::fmt::Display>(
     let max_retries: Option<u32> = max_retries.map(Into::into);
     let mut iterations: u32 = 0;
     let mut dur: Option<Duration> = None;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
-    let distribution = Uniform::new(0.0_f32, 1.0_f32);
+    let distribution = match Uniform::new(0.0_f32, 1.0_f32) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("Failed to create uniform distribution: {}", e);
+            return Err(());
+        }
+    };
 
     loop {
         if max_retries.is_some_and(|max| iterations >= max) {

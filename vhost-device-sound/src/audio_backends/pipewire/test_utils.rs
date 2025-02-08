@@ -207,7 +207,7 @@ pub fn try_backoff<T, E: std::fmt::Display>(
     let distribution = Uniform::new(0.0_f32, 1.0_f32);
 
     loop {
-        if max_retries.map_or(false, |max| iterations >= max) {
+        if max_retries.is_some_and(|max| iterations >= max) {
             return Err(());
         }
 

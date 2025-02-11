@@ -44,6 +44,8 @@ use crate::console::BackendType;
 pub type Result<T> = std::result::Result<T, Error>;
 use crate::backend::{start_backend, Error, VuConsoleConfig};
 
+const DEFAULT_QUEUE_SIZE: usize = 128;
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct ConsoleArgs {
@@ -65,6 +67,10 @@ struct ConsoleArgs {
     /// `tcp_port + 1`, ... , `tcp_port + (N - 1)`.
     #[clap(short = 'p', long, value_name = "PORT", default_value = "12345")]
     tcp_port: String,
+
+    /// Specify the maximum size of virtqueue, the default is 128.
+    #[clap(short = 'q', long, default_value_t = DEFAULT_QUEUE_SIZE)]
+    max_queue_size: usize,
 }
 
 impl TryFrom<ConsoleArgs> for VuConsoleConfig {
@@ -84,6 +90,7 @@ impl TryFrom<ConsoleArgs> for VuConsoleConfig {
             backend,
             tcp_port,
             socket_count,
+            max_queue_size,
         } = args;
 
         Ok(Self {
@@ -91,6 +98,7 @@ impl TryFrom<ConsoleArgs> for VuConsoleConfig {
             backend,
             tcp_port,
             socket_count,
+            max_queue_size,
         })
     }
 }

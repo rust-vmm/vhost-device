@@ -50,6 +50,7 @@ pub struct VuConsoleConfig {
     pub backend: BackendType,
     pub tcp_port: String,
     pub socket_count: u32,
+    pub max_queue_size: usize,
 }
 
 impl VuConsoleConfig {
@@ -86,12 +87,18 @@ impl VuConsoleConfig {
 
 /// This is the public API through which an external program starts the
 /// vhost-device-console backend server.
-pub fn start_backend_server(socket: PathBuf, tcp_addr: String, backend: BackendType) -> Result<()> {
+pub fn start_backend_server(
+    socket: PathBuf,
+    tcp_addr: String,
+    backend: BackendType,
+    max_queue_size: usize,
+) -> Result<()> {
     loop {
         let controller = ConsoleController::new(backend);
         let arc_controller = Arc::new(RwLock::new(controller));
         let vu_console_backend = Arc::new(RwLock::new(
-            VhostUserConsoleBackend::new(arc_controller).map_err(Error::CouldNotCreateBackend)?,
+            VhostUserConsoleBackend::new(max_queue_size, arc_controller)
+                .map_err(Error::CouldNotCreateBackend)?,
         ));
 
         vu_console_backend
@@ -127,6 +134,7 @@ pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
     let (senders, receiver) = std::sync::mpsc::channel();
     let tcp_addrs = config.generate_tcp_addrs();
     let backend = config.backend;
+    let max_queue_size = config.max_queue_size;
 
     for (thread_id, (socket, tcp_addr)) in config
         .generate_socket_paths()
@@ -143,7 +151,7 @@ pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
             .name(name.clone())
             .spawn(move || {
                 let result = std::panic::catch_unwind(move || {
-                    start_backend_server(socket, tcp_addr.to_string(), backend)
+                    start_backend_server(socket, tcp_addr.to_string(), backend, max_queue_size)
                 });
 
                 // Notify the main thread that we are done.
@@ -173,7 +181,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::ConsoleArgs;
+    use crate::{ConsoleArgs, DEFAULT_QUEUE_SIZE};
 
     #[test]
     fn test_console_valid_configuration_nested() {
@@ -182,6 +190,7 @@ mod tests {
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 1,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         VuConsoleConfig::try_from(args).unwrap();
@@ -194,6 +203,7 @@ mod tests {
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 0,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         assert_matches!(
@@ -209,6 +219,7 @@ mod tests {
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 2,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         assert_matches!(
@@ -224,6 +235,7 @@ mod tests {
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         VuConsoleConfig::try_from(args).unwrap();
@@ -236,6 +248,7 @@ mod tests {
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 2,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         VuConsoleConfig::try_from(args).unwrap();
@@ -246,13 +259,14 @@ mod tests {
 
         let tcp_addrs = config.generate_tcp_addrs();
         let backend = config.backend;
+        let max_queue_size = config.max_queue_size;
 
         for (socket, tcp_addr) in config
             .generate_socket_paths()
             .into_iter()
             .zip(tcp_addrs.iter())
         {
-            start_backend_server(socket, tcp_addr.to_string(), backend)?;
+            start_backend_server(socket, tcp_addr.to_string(), backend, max_queue_size)?;
         }
         Ok(())
     }
@@ -264,6 +278,7 @@ mod tests {
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         assert!(test_backend_start_and_stop(args).is_err());
@@ -276,6 +291,7 @@ mod tests {
             backend: BackendType::Network,
             tcp_port: String::from("12346"),
             socket_count: 1,
+            max_queue_size: DEFAULT_QUEUE_SIZE,
         };
 
         assert!(start_backend(config).is_err());

@@ -124,6 +124,7 @@ impl<T: Read + Write> ReadWrite for T {}
 unsafe impl ByteValued for VirtioConsoleControl {}
 
 pub struct VhostUserConsoleBackend {
+    max_queue_size: usize,
     controller: Arc<RwLock<ConsoleController>>,
     acked_features: u64,
     event_idx: bool,
@@ -147,11 +148,11 @@ type ConsoleDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMm
 
 impl VhostUserConsoleBackend {
     // Virtio configuration
-    pub const QUEUE_SIZE: usize = 128;
     pub const NUM_QUEUES: u16 = 4;
 
-    pub fn new(controller: Arc<RwLock<ConsoleController>>) -> Result<Self> {
+    pub fn new(max_queue_size: usize, controller: Arc<RwLock<ConsoleController>>) -> Result<Self> {
         Ok(Self {
+            max_queue_size,
             controller,
             event_idx: false,
             rx_ctrl_fifo: Queue::new(),
@@ -698,7 +699,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
     }
 
     fn max_queue_size(&self) -> usize {
-        Self::QUEUE_SIZE
+        self.max_queue_size
     }
 
     fn features(&self) -> u64 {
@@ -863,12 +864,14 @@ mod tests {
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
+    use crate::DEFAULT_QUEUE_SIZE;
 
     #[test]
     fn test_vhost_user_console_backend_creation() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let vhost_user_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let vhost_user_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         assert_eq!(vhost_user_console_backend.acked_features, 0);
         assert!(!vhost_user_console_backend.event_idx);
@@ -879,8 +882,9 @@ mod tests {
     #[test]
     fn test_virtio_console_empty_handle_request() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
@@ -926,8 +930,9 @@ mod tests {
     #[test]
     fn test_virtio_console_empty_requests() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
@@ -985,8 +990,9 @@ mod tests {
     #[test]
     fn test_virtio_console_ctrl_rx_request() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
@@ -1059,8 +1065,9 @@ mod tests {
     #[test]
     fn test_virtio_console_ctrl_tx_request() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
@@ -1109,8 +1116,9 @@ mod tests {
     #[test]
     fn test_virtio_console_handle_control_msg() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem_1 = GuestMemoryAtomic::new(mem.clone());
@@ -1162,8 +1170,9 @@ mod tests {
     #[test]
     fn test_virtio_console_tx_request() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
@@ -1217,8 +1226,9 @@ mod tests {
     fn test_virtio_console_tx_request_network() {
         let console_controller =
             Arc::new(RwLock::new(ConsoleController::new(BackendType::Network)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let desc_chain = build_desc_chain(&mem, 1, vec![0], 0x200);
@@ -1258,8 +1268,9 @@ mod tests {
     #[test]
     fn test_virtio_console_rx_request() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
@@ -1331,8 +1342,9 @@ mod tests {
     #[test]
     fn test_virtio_console_start_nested_console_thread() {
         let console_controller = Arc::new(RwLock::new(ConsoleController::new(BackendType::Nested)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem = GuestMemoryAtomic::new(mem);
@@ -1360,8 +1372,9 @@ mod tests {
     fn test_virtio_console_tcp_console_read_func() {
         let console_controller =
             Arc::new(RwLock::new(ConsoleController::new(BackendType::Network)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem = GuestMemoryAtomic::new(mem);
@@ -1389,8 +1402,9 @@ mod tests {
     fn test_virtio_console_tcp_console_write_func() {
         let console_controller =
             Arc::new(RwLock::new(ConsoleController::new(BackendType::Network)));
-        let mut vu_console_backend = VhostUserConsoleBackend::new(console_controller)
-            .expect("Failed create vhuconsole backend");
+        let mut vu_console_backend =
+            VhostUserConsoleBackend::new(DEFAULT_QUEUE_SIZE, console_controller)
+                .expect("Failed create vhuconsole backend");
 
         let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
         let mem = GuestMemoryAtomic::new(mem);

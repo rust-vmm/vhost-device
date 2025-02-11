@@ -47,6 +47,11 @@ vhost-device-console --socket-path=<SOCKET_PATH>
   Note: The nested backend is selected by default and can be used only when
         socket_count equals 1.
 
+.. option:: -q, --max-queue-size=SIZE
+
+  The maximum size of virtqueues. It is optional, and the default value is
+  128. The size must be greater than 0 and a power of 2.
+
 ## Limitations
 
 This device is still work-in-progress (WIP). The current version has been tested

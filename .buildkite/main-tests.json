@@ -1,0 +1,113 @@
+{
+  "tests": [
+    {
+      "test_name": "build-gnu",
+      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release",
+      "platform": [
+        "x86_64",
+        "aarch64",
+        "riscv64"
+      ]
+    },
+    {
+      "test_name": "build-musl",
+      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
+      "test_name": "style",
+      "command": "cargo fmt --all -- --check --config format_code_in_doc_comments=true"
+    },
+    {
+      "test_name": "unittests-gnu",
+      "command": "cargo test --all-features --workspace",
+      "platform": [
+        "x86_64",
+        "aarch64",
+        "riscv64"
+      ],
+      "docker_plugin": {
+        "privileged": true
+      }
+    },
+    {
+      "test_name": "unittests-musl",
+      "command": "cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ],
+      "docker_plugin": {
+        "privileged": true
+      }
+    },
+    {
+      "test_name": "unittests-gnu-release",
+      "command": "cargo test --release --all-features --workspace",
+      "platform": [
+        "x86_64",
+        "aarch64",
+        "riscv64"
+      ],
+      "docker_plugin": {
+        "privileged": true
+      }
+    },
+    {
+      "test_name": "unittests-musl-release",
+      "command": "cargo test --release --all-features --workspace --target {target_platform}-unknown-linux-musl",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ],
+      "docker_plugin": {
+        "privileged": true
+      }
+    },
+    {
+      "test_name": "clippy",
+      "command": "cargo clippy --workspace --bins --examples --benches --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
+      "platform": [
+        "x86_64",
+        "aarch64",
+        "riscv64"
+      ]
+    },
+    {
+      "test_name": "check-warnings",
+      "command": "RUSTFLAGS=\"-D warnings\" cargo check --all-targets --all-features --workspace",
+      "platform": [
+        "x86_64",
+        "aarch64",
+        "riscv64"
+      ]
+    },
+    {
+      "test_name": "coverage",
+      "command": "pytest $(find . -type f -name \"test_coverage.py\")",
+      "docker_plugin": {
+        "privileged": true
+      },
+      "platform": [
+        "x86_64"
+      ]
+    },
+    {
+      "test_name": "commit-format",
+      "command": "pytest $(find . -type f -name \"test_commit_format.py\")",
+      "docker_plugin": {
+        "propagate-environment": true
+      }
+    },
+    {
+      "test_name": "cargo-audit",
+      "command": "[ -e Cargo.lock ] || cargo generate-lockfile; cargo audit -q --deny warnings",
+      "platform": [
+        "x86_64"
+      ]
+    }
+  ]
+}

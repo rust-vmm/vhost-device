@@ -94,7 +94,7 @@ host# qemu-system                                               \
     <normal QEMU options>                                       \
     -machine <machine options>,memory-backend=mem0              \
     -object memory-backend-memfd,id=mem0,size=<Guest RAM size>  \ # size == -m size
-    -chardev socket,path=/tmp/console.sock0,id=con              \
+    -chardev socket,path=/tmp/console.sock0,id=con0             \
     -device vhost-user-console-pci,chardev=con0,id=console      \
     ...
 ```

@@ -1359,7 +1359,7 @@ mod tests {
                 VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ
             );
             assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
-            assert_eq!(backend.get_config(0, 0), vec![]);
+            assert_eq!(backend.get_config(0, 0), Vec::<u8>::new());
 
             assert!(backend.inner.lock().unwrap().gpu_backend.is_none());
             backend.set_gpu_socket(gpu_backend_pair().1).unwrap();

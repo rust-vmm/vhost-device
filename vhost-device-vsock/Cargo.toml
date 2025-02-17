@@ -23,7 +23,7 @@ log = "0.4"
 thiserror = "2.0"
 vhost = { version = "0.13", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"
-virtio-bindings = "0.2.2"
+virtio-bindings = "0.2.5"
 virtio-queue = "0.14"
 virtio-vsock = "0.8"
 vm-memory = "0.16.1"

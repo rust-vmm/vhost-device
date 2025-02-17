@@ -30,7 +30,7 @@ rutabaga_gfx = { version = "0.1.5", features = ["virgl_renderer"] }
 thiserror = "2.0.11"
 vhost = { version = "0.13.0", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"
-virtio-bindings = "0.2.2"
+virtio-bindings = "0.2.5"
 virtio-queue = "0.14.0"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"

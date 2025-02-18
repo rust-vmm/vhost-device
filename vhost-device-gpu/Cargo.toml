@@ -9,7 +9,6 @@ keywords = ["gpu", "vhost", "vhost-user", "virtio"]
 categories = ["multimedia::video", "virtualization"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
-publish = false
 # "Features enabled on platform-specific dependencies for target architectures not currently being built are ignored."
 # See <https://doc.rust-lang.org/cargo/reference/features.html#feature-resolver-version-2>
 resolver = "2"

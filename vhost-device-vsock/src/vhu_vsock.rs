@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, Result as IoResult},
+    path::PathBuf,
     sync::{Arc, Mutex, RwLock},
 };
 
@@ -156,7 +157,7 @@ pub(crate) struct VsockProxyInfo {
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) enum BackendType {
     /// unix domain socket path
-    UnixDomainSocket(String),
+    UnixDomainSocket(PathBuf),
     /// the vsock CID and ports
     #[cfg(feature = "backend_vsock")]
     Vsock(VsockProxyInfo),
@@ -167,7 +168,7 @@ pub(crate) enum BackendType {
 /// is allowed to configure the backend.
 pub(crate) struct VsockConfig {
     guest_cid: u64,
-    socket: String,
+    socket: PathBuf,
     backend_info: BackendType,
     tx_buffer_size: u32,
     queue_size: usize,
@@ -179,7 +180,7 @@ impl VsockConfig {
     /// parameters to be fed into the vsock-backend server.
     pub fn new(
         guest_cid: u64,
-        socket: String,
+        socket: PathBuf,
         backend_info: BackendType,
         tx_buffer_size: u32,
         queue_size: usize,
@@ -206,8 +207,8 @@ impl VsockConfig {
 
     /// Return the path of the unix domain socket which is listening to
     /// requests from the guest.
-    pub fn get_socket_path(&self) -> String {
-        String::from(&self.socket)
+    pub fn get_socket_path(&self) -> PathBuf {
+        self.socket.clone()
     }
 
     pub fn get_tx_buffer_size(&self) -> u32 {
@@ -466,21 +467,13 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend_unix.socket")
-            .display()
-            .to_string();
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend.vsock")
-            .display()
-            .to_string();
+        let vhost_socket_path = test_dir.path().join("test_vsock_backend_unix.socket");
+        let vsock_socket_path = test_dir.path().join("test_vsock_backend.vsock");
 
         let config = VsockConfig::new(
             CID,
-            vhost_socket_path.to_string(),
-            BackendType::UnixDomainSocket(vsock_socket_path.to_string()),
+            vhost_socket_path.clone(),
+            BackendType::UnixDomainSocket(vsock_socket_path.clone()),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             groups_list,
@@ -503,14 +496,10 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend.socket")
-            .display()
-            .to_string();
+        let vhost_socket_path = test_dir.path().join("test_vsock_backend.socket");
         let config = VsockConfig::new(
             CID,
-            vhost_socket_path.to_string(),
+            vhost_socket_path.clone(),
             BackendType::Vsock(VsockProxyInfo {
                 forward_cid: 1,
                 listen_ports: vec![9001, 9002],
@@ -535,21 +524,13 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend_failures.socket")
-            .display()
-            .to_string();
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_backend_failures.vsock")
-            .display()
-            .to_string();
+        let vhost_socket_path = test_dir.path().join("test_vsock_backend_failures.socket");
+        let vsock_socket_path = test_dir.path().join("test_vsock_backend_failures.vsock");
 
         let config = VsockConfig::new(
             CID,
-            "/sys/not_allowed.socket".to_string(),
-            BackendType::UnixDomainSocket("/sys/not_allowed.vsock".to_string()),
+            PathBuf::from("/sys/not_allowed.socket"),
+            BackendType::UnixDomainSocket(PathBuf::from("/sys/not_allowed.vsock")),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             groups.clone(),
@@ -562,8 +543,8 @@ mod tests {
 
         let config = VsockConfig::new(
             CID,
-            vhost_socket_path.to_string(),
-            BackendType::UnixDomainSocket(vsock_socket_path.to_string()),
+            vhost_socket_path.clone(),
+            BackendType::UnixDomainSocket(vsock_socket_path.clone()),
             CONN_TX_BUF_SIZE,
             QUEUE_SIZE,
             groups,
@@ -610,8 +591,8 @@ mod tests {
     fn test_vhu_vsock_structs() {
         let unix_config = VsockConfig::new(
             0,
-            String::new(),
-            BackendType::UnixDomainSocket(String::new()),
+            PathBuf::new(),
+            BackendType::UnixDomainSocket(PathBuf::new()),
             0,
             0,
             vec![String::new()],
@@ -621,7 +602,7 @@ mod tests {
         #[cfg(feature = "backend_vsock")]
         let vsock_config = VsockConfig::new(
             0,
-            String::new(),
+            PathBuf::new(),
             BackendType::Vsock(VsockProxyInfo {
                 forward_cid: 1,
                 listen_ports: vec![9001, 9002],

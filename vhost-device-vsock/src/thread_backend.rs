@@ -442,8 +442,7 @@ impl VsockThreadBackend {
     fn handle_new_guest_conn<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) {
         match &self.backend_info {
             BackendType::UnixDomainSocket(uds_path) => {
-                let port_path = format!("{}_{}", uds_path, pkt.dst_port());
-
+                let port_path = format!("{}_{}", uds_path.display(), pkt.dst_port());
                 UnixStream::connect(port_path)
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::UnixConnect)
@@ -590,7 +589,7 @@ mod tests {
         let vsock_peer_path = test_dir.path().join("test_vsock_thread_backend.vsock_1234");
 
         let _listener = UnixListener::bind(&vsock_peer_path).unwrap();
-        let backend_info = BackendType::UnixDomainSocket(vsock_socket_path.display().to_string());
+        let backend_info = BackendType::UnixDomainSocket(vsock_socket_path.clone());
 
         test_vsock_thread_backend(backend_info);
 
@@ -626,31 +625,19 @@ mod tests {
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_backend.vsock")
-            .display()
-            .to_string();
+        let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
         let sibling_vhost_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling.socket")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling.socket");
         let sibling_vsock_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling.vsock")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling.vsock");
         let sibling2_vhost_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling2.socket")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling2.socket");
         let sibling2_vsock_socket_path = test_dir
             .path()
-            .join("test_vsock_thread_backend_sibling2.vsock")
-            .display()
-            .to_string();
+            .join("test_vsock_thread_backend_sibling2.vsock");
 
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 

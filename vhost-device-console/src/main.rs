@@ -54,11 +54,21 @@ struct ConsoleArgs {
     #[clap(short = 's', long, value_name = "SOCKET")]
     socket_path: PathBuf,
 
+    /// Virtual machine communication endpoint.
+    /// Unix domain socket path (e.g., "/tmp/vm.sock").
+    #[clap(
+        short = 'v',
+        long,
+        value_name = "VM_SOCKET",
+        default_value = "/tmp/vm.sock"
+    )]
+    vm_sock: String,
+
     /// Number of guests (sockets) to connect to.
     #[clap(short = 'c', long, default_value_t = 1)]
     socket_count: u32,
 
-    /// Console backend (Network, Nested) to be used.
+    /// Console backend (Network, Nested, Uds) to be used.
     #[clap(short = 'b', long, value_enum, default_value = "nested")]
     backend: BackendType,
 
@@ -87,14 +97,30 @@ impl TryFrom<ConsoleArgs> for VuConsoleConfig {
 
         let ConsoleArgs {
             socket_path,
+            vm_sock,
             backend,
             tcp_port,
             socket_count,
             max_queue_size,
         } = args;
 
+        // check validation of vm_sock under Uds mode.
+        if backend == BackendType::Uds {
+            if vm_sock.is_empty() {
+                return Err(Error::InvalidUdsFile);
+            }
+
+            let parent = std::path::Path::new(&vm_sock).parent();
+            if let Some(dir) = parent {
+                if !dir.exists() {
+                    return Err(Error::InvalidUdsFile);
+                }
+            }
+        }
+
         Ok(Self {
             socket_path,
+            vm_sock,
             backend,
             tcp_port,
             socket_count,

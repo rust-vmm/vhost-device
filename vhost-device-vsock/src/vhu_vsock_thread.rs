@@ -819,6 +819,7 @@ mod tests {
     use std::collections::HashMap;
     use std::io::Read;
     use std::io::Write;
+    use std::path::PathBuf;
     use tempfile::tempdir;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
@@ -908,13 +909,8 @@ mod tests {
     #[test]
     fn test_vsock_thread_unix() {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let backend_info = BackendType::UnixDomainSocket(
-            test_dir
-                .path()
-                .join("test_vsock_thread.vsock")
-                .display()
-                .to_string(),
-        );
+        let backend_info =
+            BackendType::UnixDomainSocket(test_dir.path().join("test_vsock_thread.vsock"));
         test_vsock_thread(backend_info);
         test_dir.close().unwrap();
     }
@@ -938,7 +934,7 @@ mod tests {
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
         let t = VhostUserVsockThread::new(
-            BackendType::UnixDomainSocket("/sys/not_allowed.vsock".to_string()),
+            BackendType::UnixDomainSocket(PathBuf::from("/sys/not_allowed.vsock")),
             3,
             CONN_TX_BUF_SIZE,
             groups.clone(),
@@ -946,11 +942,7 @@ mod tests {
         );
         assert!(t.is_err());
 
-        let vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_failures.vsock")
-            .display()
-            .to_string();
+        let vsock_socket_path = test_dir.path().join("test_vsock_thread_failures.vsock");
         let mut t = VhostUserVsockThread::new(
             BackendType::UnixDomainSocket(vsock_socket_path),
             3,
@@ -981,11 +973,7 @@ mod tests {
         assert!(t.process_rx(&vring, true).is_err());
 
         // trying to use a CID that is already in use should fail
-        let vsock_socket_path2 = test_dir
-            .path()
-            .join("test_vsock_thread_failures2.vsock")
-            .display()
-            .to_string();
+        let vsock_socket_path2 = test_dir.path().join("test_vsock_thread_failures2.vsock");
         let t2 = VhostUserVsockThread::new(
             BackendType::UnixDomainSocket(vsock_socket_path2),
             3,
@@ -1004,11 +992,7 @@ mod tests {
         let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let vsock_path = test_dir
-            .path()
-            .join("test_vsock_thread.vsock")
-            .display()
-            .to_string();
+        let vsock_path = test_dir.path().join("test_vsock_thread.vsock");
 
         let t = VhostUserVsockThread::new(
             BackendType::UnixDomainSocket(vsock_path.clone()),

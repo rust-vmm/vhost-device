@@ -203,6 +203,7 @@ mod tests {
     fn test_console_valid_configuration_nested() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 1,
@@ -216,6 +217,7 @@ mod tests {
     fn test_console_invalid_configuration_nested_1() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 0,
@@ -232,6 +234,7 @@ mod tests {
     fn test_console_invalid_configuration_nested_2() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 2,
@@ -248,6 +251,7 @@ mod tests {
     fn test_console_valid_configuration_network_1() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
@@ -261,6 +265,7 @@ mod tests {
     fn test_console_valid_configuration_network_2() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 2,
@@ -291,6 +296,7 @@ mod tests {
     fn test_start_backend_server_success() {
         let args = ConsoleArgs {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
@@ -304,6 +310,7 @@ mod tests {
     fn test_start_backend_success() {
         let config = VuConsoleConfig {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            vm_sock: String::from("/tmp/vm.sock").into(),
             backend: BackendType::Network,
             tcp_port: String::from("12346"),
             socket_count: 1,
@@ -311,5 +318,52 @@ mod tests {
         };
 
         assert!(start_backend(config).is_err());
+    }
+
+    #[test]
+    fn test_console_invalid_uds_path() {
+        let args = ConsoleArgs {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            vm_sock: "/non_existing_dir/test.sock".to_string(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 1,
+            max_queue_size: 128,
+        };
+
+        assert_matches!(VuConsoleConfig::try_from(args), Err(Error::InvalidUdsFile));
+    }
+
+    #[test]
+    fn test_generate_vm_sock_addrs_uds() {
+        let config = VuConsoleConfig {
+            socket_path: PathBuf::new(),
+            vm_sock: "/tmp/vm.sock".to_string(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 3,
+            max_queue_size: 128,
+        };
+
+        let addrs = config.generate_vm_sock_addrs();
+        assert_eq!(
+            addrs,
+            vec!["/tmp/vm.sock0", "/tmp/vm.sock1", "/tmp/vm.sock2"]
+        );
+    }
+
+    #[test]
+    fn test_start_uds_backend_with_invalid_path() {
+        let config = VuConsoleConfig {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            vm_sock: "/invalid/path/uds.sock".to_string(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 1,
+            max_queue_size: 128,
+        };
+
+        let result = start_backend(config);
+        assert_matches!(result, Err(Error::CouldNotInitBackend(_)));
     }
 }

@@ -1822,6 +1822,7 @@ dependencies = [
  "epoll",
  "log",
  "queues",
+ "tempfile",
  "thiserror 2.0.11",
  "vhost",
  "vhost-user-backend",

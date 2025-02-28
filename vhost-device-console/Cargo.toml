@@ -34,3 +34,4 @@ vmm-sys-util = "0.12"
 assert_matches = "1.5"
 virtio-queue = { version = "0.14", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }
+tempfile = "3.3.0"

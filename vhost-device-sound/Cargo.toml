@@ -35,7 +35,7 @@ pw = { package = "pipewire", version = "0.8", optional = true }
 
 [dev-dependencies]
 rstest = "0.24.0"
-tempfile = "3.16"
+tempfile = "3.17"
 virtio-queue = { version = "0.14", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }
 

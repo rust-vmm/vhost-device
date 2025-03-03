@@ -46,6 +46,7 @@ use std::{
     convert::TryFrom,
     io::{Error as IoError, ErrorKind},
     mem::size_of,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -255,7 +256,7 @@ impl TryFrom<Le32> for ControlMessageKind {
 /// is allowed to configure the backend.
 pub struct SoundConfig {
     /// vhost-user Unix domain socket
-    socket: String,
+    socket: PathBuf,
     /// use multiple threads to hanlde the virtqueues
     multi_thread: bool,
     /// audio backend variant
@@ -265,7 +266,7 @@ pub struct SoundConfig {
 impl SoundConfig {
     /// Create a new instance of the SoundConfig struct, containing the
     /// parameters to be fed into the sound-backend server.
-    pub const fn new(socket: String, multi_thread: bool, audio_backend: BackendType) -> Self {
+    pub const fn new(socket: PathBuf, multi_thread: bool, audio_backend: BackendType) -> Self {
         Self {
             socket,
             multi_thread,
@@ -275,8 +276,8 @@ impl SoundConfig {
 
     /// Return the path of the unix domain socket which is listening to
     /// requests from the guest.
-    pub fn get_socket_path(&self) -> String {
-        String::from(&self.socket)
+    pub fn get_socket_path(&self) -> PathBuf {
+        self.socket.clone()
     }
 
     pub const fn get_audio_backend(&self) -> BackendType {
@@ -372,7 +373,7 @@ mod tests {
         const SOCKET_PATH: &str = "vsound.socket";
         crate::init_logger();
 
-        let config = SoundConfig::new(SOCKET_PATH.to_string(), false, BackendType::Null);
+        let config = SoundConfig::new(PathBuf::from(SOCKET_PATH), false, BackendType::Null);
 
         let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
         let daemon = VhostUserDaemon::new(

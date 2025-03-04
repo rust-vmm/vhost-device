@@ -6,6 +6,8 @@ This binary crate provides support for running useful tasks with `cargo xtask <.
 
 The `mangen` task which is enabled by the `mangen` cargo feature, builds ROFF manual pages for binary crates in this repository. It uses the [`clap_mangen`](https://crates.io/crates/clap_mangen) crate to generate ROFF from the crate's argument types which implement the `clap::CommandFactory` trait, through the `clap::Parser` derive macro.
 
+Furthmore, if the `README.md` of a crate contains an `Examples` heading, it includes it in the manual page.
+
 ```session
 $ cargo xtask mangen
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s

@@ -13,6 +13,7 @@ publish = false
 clap = { version = "4.5", features = ["derive"], optional = true }
 clap_mangen = { version = "0.2.24", optional = true }
 toml = { version = "0.8.19", optional = true }
+markdown = { version = "=1.0.0-alpha.23", optional = true }
 
 [build-dependencies]
 
@@ -22,7 +23,7 @@ vhost-device-scmi = []
 vhost-device-sound = ["vhost-device-sound-alsa", "vhost-device-sound-pipewire"]
 vhost-device-sound-alsa = ["mangen"]
 vhost-device-sound-pipewire = ["mangen"]
-mangen = ["dep:clap_mangen", "dep:clap", "dep:toml"]
+mangen = ["dep:clap_mangen", "dep:clap", "dep:toml", "dep:markdown"]
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("alsa-backend", "pw-backend"))'] }

@@ -40,22 +40,21 @@ messages on the standard error output.
 
 The daemon should be started first:
 
-::
-
-  host# vhost-device-scmi --socket-path=scmi.sock --device fake,name=foo
+```shell
+host# vhost-device-scmi --socket-path=scmi.sock --device fake,name=foo
+```
 
 The QEMU invocation needs to create a chardev socket the device can
 use to communicate as well as share the guests memory over a memfd:
 
-::
-
-  host# qemu-system \
-      -chardev socket,path=scmi.sock,id=scmi \
-      -device vhost-user-scmi-pci,chardev=vscmi,id=scmi \
-      -machine YOUR-MACHINE-OPTIONS,memory-backend=mem \
-      -m 4096 \
-      -object memory-backend-file,id=mem,size=4G,mem-path=/dev/shm,share=on \
-      ...
+```shell
+host# qemu-system \
+    -chardev socket,path=scmi.sock,id=scmi \
+    -device vhost-user-scmi-pci,chardev=vscmi,id=scmi \
+    -machine YOUR-MACHINE-OPTIONS,memory-backend=mem \
+    -m 4096 \
+    -object memory-backend-file,id=mem,size=4G,mem-path=/dev/shm,share=on \
+```
 
 ## Supported SCMI protocols
 

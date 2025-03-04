@@ -6,12 +6,15 @@ This program is a vhost-user backend that emulates a VirtIO Console device.
 The device's binary takes as parameters a socket path, a socket number which
 is the number of connections, commonly used across all vhost-devices to
 communicate with the vhost-user frontend devices, and the backend type
-"nested" or "network".
+"nested" or "network" or "uds".
 
 The "nested" backend allows input/output to the guest console through the
 current terminal.
 
 The "network" backend creates a local TCP port (specified on vhost-device-console
+arguments) and allows input/output to the guest console via that socket.
+
+The "uds" backend creates a unix domain socket (specified on vhost-device-console
 arguments) and allows input/output to the guest console via that socket.
 
 This program is tested with QEMU's `vhost-user-device-pci` device.
@@ -40,12 +43,17 @@ vhost-device-console --socket-path=<SOCKET_PATH>
  The localhost's port to be used for each guest, this part will be increased with
  0,1,2..socket_count-1.
 
--- option:: -b, --backend=nested|network
+-- option:: -b, --backend=nested|network|uds
 
   The backend type vhost-device-console to be used. The current implementation
-  supports two types of backends: "nested", "network" (described above).
+  supports 3 types of backends: "nested", "network", "uds".
   Note: The nested backend is selected by default and can be used only when
         socket_count equals 1.
+
+.. option:: -v, --vm-sock=uds-file-path
+
+  The unix domain socket to be used for each guest, this part will be increased with
+  0,1,2..socket_count-1.
 
 .. option:: -q, --max-queue-size=SIZE
 
@@ -62,10 +70,10 @@ VIRTIO_CONSOLE_F_SIZE features.
 ## Features
 
 The current device gives access to multiple QEMU guest by providing a login prompt
-either by connecting to a localhost server port (network backend) or by creating an
-nested command prompt in the current terminal (nested backend). This prompt appears
-as soon as the guest is fully booted and gives the ability to user run command as a
-in regular terminal.
+either by connecting to a localhost server port (network backend) or a unix socket
+file (uds backend) or by creating an nested command prompt in the current terminal
+(nested backend). This prompt appears as soon as the guest is fully booted and
+gives the ability to user run command as a in regular terminal.
 
 ## Examples
 

@@ -74,14 +74,19 @@ impl VuConsoleConfig {
     }
 
     pub fn generate_vm_socks(&self) -> Vec<String> {
-        let tcp_port_base = self.tcp_port.clone();
+        match self.backend {
+            // if type is Nested, result will be dropped.
+            BackendType::Nested => {
+                vec![String::new()]
+            }
 
-        let make_tcp_port = |i: u32| -> String {
-            let port_num: u32 = tcp_port_base.clone().parse().unwrap();
-            "127.0.0.1:".to_owned() + &(port_num + i).to_string()
-        };
-
-        (0..self.socket_count).map(make_tcp_port).collect()
+            BackendType::Network => {
+                let port_base: u32 = self.tcp_port.parse().unwrap();
+                let make_tcp_port =
+                    |i: u32| -> String { "127.0.0.1:".to_owned() + &(port_base + i).to_string() };
+                (0..self.socket_count).map(make_tcp_port).collect()
+            }
+        }
     }
 }
 

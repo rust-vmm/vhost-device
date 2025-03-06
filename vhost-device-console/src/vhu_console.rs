@@ -174,19 +174,22 @@ impl VhostUserConsoleBackend {
     }
 
     pub fn assign_input_method(&mut self, vm_sock: String) -> Result<()> {
-        if self.controller.read().unwrap().backend == BackendType::Nested {
-            // Enable raw mode for local terminal if backend is nested
-            enable_raw_mode().expect("Raw mode error");
+        let backend_type = self.controller.read().unwrap().backend;
+        match backend_type {
+            BackendType::Nested => {
+                // Enable raw mode for local terminal if backend is nested
+                enable_raw_mode().expect("Raw mode error");
+                let stdin_fd = io::stdin().as_raw_fd();
+                let stdin: Box<dyn Read + Send + Sync> = Box::new(io::stdin());
+                self.stdin = Some(stdin);
+                Self::epoll_register(self.epoll_fd.as_raw_fd(), stdin_fd, epoll::Events::EPOLLIN)
+                    .map_err(|_| Error::EpollAdd)?;
+            }
 
-            let stdin_fd = io::stdin().as_raw_fd();
-            let stdin: Box<dyn Read + Send + Sync> = Box::new(io::stdin());
-            self.stdin = Some(stdin);
-
-            Self::epoll_register(self.epoll_fd.as_raw_fd(), stdin_fd, epoll::Events::EPOLLIN)
-                .map_err(|_| Error::EpollAdd)?;
-        } else {
-            let listener = TcpListener::bind(vm_sock).expect("Failed bind tcp address");
-            self.listener = Some(listener);
+            BackendType::Network => {
+                let tcp_listener = TcpListener::bind(vm_sock).expect("Failed bind tcp address");
+                self.tcp_listener = Some(tcp_listener);
+            }
         }
         Ok(())
     }
@@ -264,14 +267,19 @@ impl VhostUserConsoleBackend {
             }
 
             let my_string = String::from_utf8(tx_data).unwrap();
-            if self.controller.read().unwrap().backend == BackendType::Nested {
-                print!("{}", my_string);
-                io::stdout().flush().unwrap();
-            } else {
-                self.output_queue
-                    .add(my_string)
-                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
-                self.write_tcp_stream();
+            let backend_type = self.controller.read().unwrap().backend;
+            match backend_type {
+                BackendType::Nested => {
+                    print!("{}", my_string);
+                    io::stdout().flush().unwrap();
+                }
+
+                BackendType::Network => {
+                    self.output_queue
+                        .add(my_string)
+                        .map_err(|_| Error::RxCtrlQueueAddFailed)?;
+                    self.write_stream();
+                }
             }
 
             vring
@@ -529,19 +537,24 @@ impl VhostUserConsoleBackend {
             .register_listener(epoll_fd, EventSet::IN, u64::from(QueueEvents::KEY_EFD))
             .unwrap();
 
-        if self.controller.read().unwrap().backend == BackendType::Network {
-            let listener_fd = self
-                .tcp_listener
-                .as_ref()
-                .expect("Failed get tcp listener ref")
-                .as_raw_fd();
-            vring_worker
-                .register_listener(
-                    listener_fd,
-                    EventSet::IN,
-                    u64::from(QueueEvents::LISTENER_EFD),
-                )
-                .unwrap();
+        let backend_type = self.controller.read().unwrap().backend;
+        match backend_type {
+            BackendType::Nested => {}
+
+            BackendType::Network => {
+                let listener_fd = self
+                    .tcp_listener
+                    .as_ref()
+                    .expect("Failed get tcp listener ref")
+                    .as_raw_fd();
+                vring_worker
+                    .register_listener(
+                        listener_fd,
+                        EventSet::IN,
+                        u64::from(QueueEvents::LISTENER_EFD),
+                    )
+                    .unwrap();
+            }
         }
     }
 
@@ -570,42 +583,50 @@ impl VhostUserConsoleBackend {
         Ok(())
     }
 
+    /// Sets up a new stream connection with proper epoll registration
+    fn handle_stream_connection<T>(&mut self, stream: T, addr_desc: String)
+    where
+        T: ReadWrite + Send + Sync + AsRawFd + 'static,
+    {
+        println!("New connection on: {}", addr_desc);
+        let stream_raw_fd = stream.as_raw_fd();
+        self.stream_fd = Some(stream_raw_fd);
+
+        if let Err(err) = Self::epoll_register(
+            self.epoll_fd.as_raw_fd(),
+            stream_raw_fd,
+            epoll::Events::EPOLLIN,
+        ) {
+            warn!("Failed to register with epoll: {:?}", err);
+        }
+
+        self.stream = Some(Box::new(stream));
+        self.write_stream();
+    }
+
     fn create_new_stream_thread(&mut self) {
         // Accept only one incoming connection
-        if let Some(stream) = self
-            .tcp_listener
-            .as_ref()
-            .expect("Failed get tcp listener ref")
-            .incoming()
-            .next()
-        {
-            match stream {
-                Ok(stream) => {
-                    let local_addr = self
-                        .tcp_listener
-                        .as_ref()
-                        .expect("No listener")
-                        .local_addr()
-                        .unwrap();
-                    println!("New connection on: {}", local_addr);
-                    let stream_raw_fd = stream.as_raw_fd();
-                    self.stream_fd = Some(stream_raw_fd);
-                    if let Err(err) = Self::epoll_register(
-                        self.epoll_fd.as_raw_fd(),
-                        stream_raw_fd,
-                        epoll::Events::EPOLLIN,
-                    ) {
-                        warn!("Failed to register with epoll: {:?}", err);
-                    }
+        let backend_type = self.controller.read().unwrap().backend;
+        match backend_type {
+            BackendType::Nested => {}
 
-                    let stream: Box<dyn ReadWrite + Send + Sync> = Box::new(stream);
-                    self.stream = Some(stream);
-                    self.write_stream();
+            BackendType::Network => match self
+                .tcp_listener
+                .as_ref()
+                .expect("No tcp listener")
+                .incoming()
+                .next()
+            {
+                Some(Ok(tcp_stream)) => {
+                    let addr_desc = tcp_stream
+                        .peer_addr()
+                        .map(|addr| format!("TCP {}", addr))
+                        .unwrap_or_else(|_| "unknown TCP peer".to_string());
+                    self.handle_stream_connection(tcp_stream, addr_desc);
                 }
-                Err(e) => {
-                    eprintln!("Stream error: {}", e);
-                }
-            }
+                Some(Err(e)) => eprintln!("TCP stream error: {}", e),
+                None => {}
+            },
         }
     }
 
@@ -635,13 +656,23 @@ impl VhostUserConsoleBackend {
         match self.stream.as_mut().expect("No stream").read(&mut buffer) {
             Ok(bytes_read) => {
                 if bytes_read == 0 {
-                    let local_addr = self
-                        .tcp_listener
-                        .as_ref()
-                        .expect("No listener")
-                        .local_addr()
-                        .unwrap();
-                    println!("Close connection on: {}", local_addr);
+                    let backend_type = self.controller.read().unwrap().backend;
+
+                    // Get connection address for logging
+                    let conn_addr = match backend_type {
+                        BackendType::Nested => String::new(),
+                        BackendType::Network => self
+                            .tcp_listener
+                            .as_ref()
+                            .and_then(|l| l.local_addr().ok())
+                            .map(|addr| addr.to_string())
+                            .unwrap_or_else(|| "unknown TCP address".to_string()),
+                    };
+
+                    if !conn_addr.is_empty() {
+                        println!("Close connection on: {}", conn_addr);
+                    }
+
                     if let Err(err) = Self::epoll_unregister(
                         self.epoll_fd.as_raw_fd(),
                         self.stream_fd.expect("No stream fd"),
@@ -692,9 +723,13 @@ impl VhostUserConsoleBackend {
     }
 
     pub fn prepare_exit(&self) {
-        /* For the nested backend */
-        if self.controller.read().unwrap().backend == BackendType::Nested {
-            disable_raw_mode().expect("Raw mode error");
+        let backend_type = self.controller.read().unwrap().backend;
+        match backend_type {
+            /* For the nested backend */
+            BackendType::Nested => {
+                disable_raw_mode().expect("Cannot reset terminal");
+            }
+            BackendType::Network => {}
         }
     }
 }
@@ -782,11 +817,15 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
         }
 
         if device_event == QueueEvents::KEY_EFD {
-            if self.controller.read().unwrap().backend == BackendType::Nested {
-                return self.read_char_thread();
-            } else {
-                self.read_stream();
-                return Ok(());
+            let backend_type = self.controller.read().unwrap().backend;
+            match backend_type {
+                BackendType::Nested => {
+                    return self.read_char_thread();
+                }
+                BackendType::Network => {
+                    self.read_stream();
+                    return Ok(());
+                }
             }
         }
 

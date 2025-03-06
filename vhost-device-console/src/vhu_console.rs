@@ -9,6 +9,7 @@ use std::{
     io::{self, Read, Result as IoResult, Write},
     net::TcpListener,
     os::fd::{AsRawFd, RawFd},
+    os::unix::net::UnixListener,
     slice::from_raw_parts,
     sync::{Arc, RwLock},
 };
@@ -137,6 +138,7 @@ pub struct VhostUserConsoleBackend {
     pub output_queue: Queue<String>,
     pub stdin: Option<Box<dyn Read + Send + Sync>>,
     pub tcp_listener: Option<TcpListener>,
+    pub uds_listener: Option<UnixListener>,
     pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
     pub rx_event: EventFd,
     pub rx_ctrl_event: EventFd,
@@ -166,6 +168,7 @@ impl VhostUserConsoleBackend {
             stdin: None,
             stream: None,
             tcp_listener: None,
+            uds_listener: None,
             rx_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             rx_ctrl_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
@@ -189,6 +192,11 @@ impl VhostUserConsoleBackend {
             BackendType::Network => {
                 let tcp_listener = TcpListener::bind(vm_sock).expect("Failed bind tcp address");
                 self.tcp_listener = Some(tcp_listener);
+            }
+
+            BackendType::Uds => {
+                let uds_listener = UnixListener::bind(vm_sock).expect("Failed bind uds address");
+                self.uds_listener = Some(uds_listener);
             }
         }
         Ok(())
@@ -274,7 +282,7 @@ impl VhostUserConsoleBackend {
                     io::stdout().flush().unwrap();
                 }
 
-                BackendType::Network => {
+                BackendType::Network | BackendType::Uds => {
                     self.output_queue
                         .add(my_string)
                         .map_err(|_| Error::RxCtrlQueueAddFailed)?;
@@ -555,6 +563,21 @@ impl VhostUserConsoleBackend {
                     )
                     .unwrap();
             }
+
+            BackendType::Uds => {
+                let listener_fd = self
+                    .uds_listener
+                    .as_ref()
+                    .expect("uds listener")
+                    .as_raw_fd();
+                vring_worker
+                    .register_listener(
+                        listener_fd,
+                        EventSet::IN,
+                        u64::from(QueueEvents::LISTENER_EFD),
+                    )
+                    .unwrap();
+            }
         }
     }
 
@@ -627,6 +650,28 @@ impl VhostUserConsoleBackend {
                 Some(Err(e)) => eprintln!("TCP stream error: {}", e),
                 None => {}
             },
+
+            BackendType::Uds => match self
+                .uds_listener
+                .as_ref()
+                .expect("uds connection")
+                .incoming()
+                .next()
+            {
+                Some(Ok(uds_stream)) => {
+                    let addr_desc = self
+                        .uds_listener
+                        .as_ref()
+                        .and_then(|l| l.local_addr().ok())
+                        .and_then(|addr| {
+                            addr.as_pathname().map(|p| p.to_string_lossy().into_owned())
+                        })
+                        .unwrap_or_else(|| "unknown UDS path".to_string());
+                    self.handle_stream_connection(uds_stream, addr_desc);
+                }
+                Some(Err(e)) => eprintln!("UDS stream error: {}", e),
+                None => {}
+            },
         }
     }
 
@@ -661,12 +706,22 @@ impl VhostUserConsoleBackend {
                     // Get connection address for logging
                     let conn_addr = match backend_type {
                         BackendType::Nested => String::new(),
+
                         BackendType::Network => self
                             .tcp_listener
                             .as_ref()
                             .and_then(|l| l.local_addr().ok())
                             .map(|addr| addr.to_string())
                             .unwrap_or_else(|| "unknown TCP address".to_string()),
+
+                        BackendType::Uds => self
+                            .uds_listener
+                            .as_ref()
+                            .and_then(|l| l.local_addr().ok())
+                            .and_then(|addr| {
+                                addr.as_pathname().map(|p| p.to_string_lossy().into_owned())
+                            })
+                            .unwrap_or_else(|| "unknown UDS path".to_string()),
                     };
 
                     if !conn_addr.is_empty() {
@@ -730,6 +785,17 @@ impl VhostUserConsoleBackend {
                 disable_raw_mode().expect("Cannot reset terminal");
             }
             BackendType::Network => {}
+            BackendType::Uds => {
+                // Clean up UDS socket file
+                if let Some(path) = self
+                    .uds_listener
+                    .as_ref()
+                    .and_then(|listener| listener.local_addr().ok())
+                    .and_then(|addr| addr.as_pathname().map(|p| p.to_owned()))
+                {
+                    std::fs::remove_file(&path).expect("Failed to remove UDS socket file");
+                }
+            }
         }
     }
 }
@@ -822,7 +888,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
                 BackendType::Nested => {
                     return self.read_char_thread();
                 }
-                BackendType::Network => {
+                BackendType::Network | BackendType::Uds => {
                     self.read_stream();
                     return Ok(());
                 }

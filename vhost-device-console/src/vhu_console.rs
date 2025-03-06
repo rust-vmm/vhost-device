@@ -136,7 +136,7 @@ pub struct VhostUserConsoleBackend {
     pub ready_to_write: bool,
     pub output_queue: Queue<String>,
     pub stdin: Option<Box<dyn Read + Send + Sync>>,
-    pub listener: Option<TcpListener>,
+    pub tcp_listener: Option<TcpListener>,
     pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
     pub rx_event: EventFd,
     pub rx_ctrl_event: EventFd,
@@ -165,7 +165,7 @@ impl VhostUserConsoleBackend {
             output_queue: Queue::new(),
             stdin: None,
             stream: None,
-            listener: None,
+            tcp_listener: None,
             rx_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             rx_ctrl_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
@@ -173,7 +173,7 @@ impl VhostUserConsoleBackend {
         })
     }
 
-    pub fn assign_input_method(&mut self, tcpaddr_str: String) -> Result<()> {
+    pub fn assign_input_method(&mut self, vm_sock: String) -> Result<()> {
         if self.controller.read().unwrap().backend == BackendType::Nested {
             // Enable raw mode for local terminal if backend is nested
             enable_raw_mode().expect("Raw mode error");
@@ -185,7 +185,7 @@ impl VhostUserConsoleBackend {
             Self::epoll_register(self.epoll_fd.as_raw_fd(), stdin_fd, epoll::Events::EPOLLIN)
                 .map_err(|_| Error::EpollAdd)?;
         } else {
-            let listener = TcpListener::bind(tcpaddr_str).expect("Failed bind tcp address");
+            let listener = TcpListener::bind(vm_sock).expect("Failed bind tcp address");
             self.listener = Some(listener);
         }
         Ok(())
@@ -531,7 +531,7 @@ impl VhostUserConsoleBackend {
 
         if self.controller.read().unwrap().backend == BackendType::Network {
             let listener_fd = self
-                .listener
+                .tcp_listener
                 .as_ref()
                 .expect("Failed get tcp listener ref")
                 .as_raw_fd();
@@ -573,7 +573,7 @@ impl VhostUserConsoleBackend {
     fn create_new_stream_thread(&mut self) {
         // Accept only one incoming connection
         if let Some(stream) = self
-            .listener
+            .tcp_listener
             .as_ref()
             .expect("Failed get tcp listener ref")
             .incoming()
@@ -582,7 +582,7 @@ impl VhostUserConsoleBackend {
             match stream {
                 Ok(stream) => {
                     let local_addr = self
-                        .listener
+                        .tcp_listener
                         .as_ref()
                         .expect("No listener")
                         .local_addr()
@@ -600,7 +600,7 @@ impl VhostUserConsoleBackend {
 
                     let stream: Box<dyn ReadWrite + Send + Sync> = Box::new(stream);
                     self.stream = Some(stream);
-                    self.write_tcp_stream();
+                    self.write_stream();
                 }
                 Err(e) => {
                     eprintln!("Stream error: {}", e);
@@ -609,7 +609,7 @@ impl VhostUserConsoleBackend {
         }
     }
 
-    fn write_tcp_stream(&mut self) {
+    fn write_stream(&mut self) {
         if self.stream.is_some() {
             while self.output_queue.size() > 0 {
                 let byte_stream = self
@@ -630,13 +630,13 @@ impl VhostUserConsoleBackend {
         }
     }
 
-    fn read_tcp_stream(&mut self) {
+    fn read_stream(&mut self) {
         let mut buffer = [0; 1024];
         match self.stream.as_mut().expect("No stream").read(&mut buffer) {
             Ok(bytes_read) => {
                 if bytes_read == 0 {
                     let local_addr = self
-                        .listener
+                        .tcp_listener
                         .as_ref()
                         .expect("No listener")
                         .local_addr()
@@ -785,7 +785,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
             if self.controller.read().unwrap().backend == BackendType::Nested {
                 return self.read_char_thread();
             } else {
-                self.read_tcp_stream();
+                self.read_stream();
                 return Ok(());
             }
         }
@@ -1428,7 +1428,7 @@ mod tests {
             .output_queue
             .add("Test".to_string())
             .unwrap();
-        vu_console_backend.write_tcp_stream();
+        vu_console_backend.write_stream();
 
         // All data has been consumed by the cursor
         assert_eq!(vu_console_backend.output_queue.size(), 0);

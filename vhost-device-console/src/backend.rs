@@ -73,7 +73,7 @@ impl VuConsoleConfig {
         (0..self.socket_count).map(make_socket_path).collect()
     }
 
-    pub fn generate_tcp_addrs(&self) -> Vec<String> {
+    pub fn generate_vm_socks(&self) -> Vec<String> {
         let tcp_port_base = self.tcp_port.clone();
 
         let make_tcp_port = |i: u32| -> String {
@@ -89,7 +89,7 @@ impl VuConsoleConfig {
 /// vhost-device-console backend server.
 pub fn start_backend_server(
     socket: PathBuf,
-    tcp_addr: String,
+    vm_sock: String,
     backend: BackendType,
     max_queue_size: usize,
 ) -> Result<()> {
@@ -104,7 +104,7 @@ pub fn start_backend_server(
         vu_console_backend
             .write()
             .unwrap()
-            .assign_input_method(tcp_addr.clone())
+            .assign_input_method(vm_sock.clone())
             .map_err(Error::CouldNotInitBackend)?;
 
         let mut daemon = VhostUserDaemon::new(
@@ -132,26 +132,26 @@ pub fn start_backend_server(
 pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
     let mut handles = HashMap::new();
     let (senders, receiver) = std::sync::mpsc::channel();
-    let tcp_addrs = config.generate_tcp_addrs();
+    let vm_socks = config.generate_vm_socks();
     let backend = config.backend;
     let max_queue_size = config.max_queue_size;
 
-    for (thread_id, (socket, tcp_addr)) in config
+    for (thread_id, (socket, vm_sock)) in config
         .generate_socket_paths()
         .into_iter()
-        .zip(tcp_addrs.iter())
+        .zip(vm_socks.iter())
         .enumerate()
     {
-        let tcp_addr = tcp_addr.clone();
+        let vm_sock = vm_sock.clone();
         info!("thread_id: {}, socket: {:?}", thread_id, socket);
 
-        let name = format!("vhu-console-{}", tcp_addr);
+        let name = format!("vhu-console-{}", vm_sock);
         let sender = senders.clone();
         let handle = Builder::new()
             .name(name.clone())
             .spawn(move || {
                 let result = std::panic::catch_unwind(move || {
-                    start_backend_server(socket, tcp_addr.to_string(), backend, max_queue_size)
+                    start_backend_server(socket, vm_sock.to_string(), backend, max_queue_size)
                 });
 
                 // Notify the main thread that we are done.
@@ -257,16 +257,16 @@ mod tests {
     fn test_backend_start_and_stop(args: ConsoleArgs) -> Result<()> {
         let config = VuConsoleConfig::try_from(args).expect("Wrong config");
 
-        let tcp_addrs = config.generate_tcp_addrs();
+        let vm_socks = config.generate_vm_socks();
         let backend = config.backend;
         let max_queue_size = config.max_queue_size;
 
-        for (socket, tcp_addr) in config
+        for (socket, vm_sock) in config
             .generate_socket_paths()
             .into_iter()
-            .zip(tcp_addrs.iter())
+            .zip(vm_socks.iter())
         {
-            start_backend_server(socket, tcp_addr.to_string(), backend, max_queue_size)?;
+            start_backend_server(socket, vm_sock.to_string(), backend, max_queue_size)?;
         }
         Ok(())
     }

@@ -185,7 +185,7 @@ impl VhostUserConsoleBackend {
             Self::epoll_register(self.epoll_fd.as_raw_fd(), stdin_fd, epoll::Events::EPOLLIN)
                 .map_err(|_| Error::EpollAdd)?;
         } else {
-            let listener = TcpListener::bind(tcpaddr_str).expect("asdasd");
+            let listener = TcpListener::bind(tcpaddr_str).expect("Failed bind tcp address");
             self.listener = Some(listener);
         }
         Ok(())
@@ -530,7 +530,11 @@ impl VhostUserConsoleBackend {
             .unwrap();
 
         if self.controller.read().unwrap().backend == BackendType::Network {
-            let listener_fd = self.listener.as_ref().expect("asd").as_raw_fd();
+            let listener_fd = self
+                .listener
+                .as_ref()
+                .expect("Failed get tcp listener ref")
+                .as_raw_fd();
             vring_worker
                 .register_listener(
                     listener_fd,
@@ -568,7 +572,13 @@ impl VhostUserConsoleBackend {
 
     fn create_new_stream_thread(&mut self) {
         // Accept only one incoming connection
-        if let Some(stream) = self.listener.as_ref().expect("asd").incoming().next() {
+        if let Some(stream) = self
+            .listener
+            .as_ref()
+            .expect("Failed get tcp listener ref")
+            .incoming()
+            .next()
+        {
             match stream {
                 Ok(stream) => {
                     let local_addr = self

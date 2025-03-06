@@ -331,4 +331,51 @@ mod tests {
 
         assert!(start_backend(config).is_err());
     }
+
+    #[test]
+    fn test_console_invalid_uds_path() {
+        let args = ConsoleArgs {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            uds_path: Some("/non_existing_dir/test.sock".to_string().into()),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 1,
+            max_queue_size: 128,
+        };
+
+        assert_matches!(VuConsoleConfig::try_from(args), Err(Error::InvalidUdsFile));
+    }
+
+    #[test]
+    fn test_generate_vm_sock_addrs_uds() {
+        let config = VuConsoleConfig {
+            socket_path: PathBuf::new(),
+            uds_path: "/tmp/vm.sock".to_string().into(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 3,
+            max_queue_size: 128,
+        };
+
+        let addrs = config.generate_vm_socks();
+        assert_eq!(
+            addrs,
+            vec!["/tmp/vm.sock0", "/tmp/vm.sock1", "/tmp/vm.sock2"]
+        );
+    }
+
+    #[test]
+    fn test_start_uds_backend_with_invalid_path() {
+        let config = VuConsoleConfig {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            uds_path: "/invalid/path/uds.sock".to_string().into(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 1,
+            max_queue_size: 128,
+        };
+
+        let result = start_backend(config);
+        assert!(result.is_err());
+    }
 }

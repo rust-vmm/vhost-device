@@ -42,11 +42,14 @@ pub enum Error {
     ThreadPanic(String, Box<dyn Any + Send>),
     #[error("Error using multiple sockets with Nested backend")]
     WrongBackendSocket,
+    #[error("Invalid uds file")]
+    InvalidUdsFile,
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct VuConsoleConfig {
     pub socket_path: PathBuf,
+    pub uds_path: PathBuf,
     pub backend: BackendType,
     pub tcp_port: String,
     pub socket_count: u32,
@@ -85,6 +88,26 @@ impl VuConsoleConfig {
                 let make_tcp_port =
                     |i: u32| -> String { "127.0.0.1:".to_owned() + &(port_base + i).to_string() };
                 (0..self.socket_count).map(make_tcp_port).collect()
+            }
+
+            BackendType::Uds => {
+                let uds_filename = self.uds_path.file_name().expect("uds has no filename.");
+                let uds_parent = self
+                    .uds_path
+                    .parent()
+                    .expect("uds has no parent directory.");
+
+                let make_uds_path = |i: u32| -> String {
+                    let mut filename = uds_filename.to_os_string();
+                    filename.push(std::ffi::OsStr::new(&i.to_string()));
+                    uds_parent
+                        .join(&filename)
+                        .to_str()
+                        .expect("Path contains invalid UTF-8 characters")
+                        .to_string()
+                };
+
+                (0..self.socket_count).map(make_uds_path).collect()
             }
         }
     }
@@ -192,6 +215,7 @@ mod tests {
     fn test_console_valid_configuration_nested() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 1,
@@ -205,6 +229,7 @@ mod tests {
     fn test_console_invalid_configuration_nested_1() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 0,
@@ -221,6 +246,7 @@ mod tests {
     fn test_console_invalid_configuration_nested_2() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Nested,
             tcp_port: String::from("12345"),
             socket_count: 2,
@@ -237,6 +263,7 @@ mod tests {
     fn test_console_valid_configuration_network_1() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
@@ -250,6 +277,7 @@ mod tests {
     fn test_console_valid_configuration_network_2() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 2,
@@ -280,6 +308,7 @@ mod tests {
     fn test_start_backend_server_success() {
         let args = ConsoleArgs {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Network,
             tcp_port: String::from("12345"),
             socket_count: 1,
@@ -293,6 +322,7 @@ mod tests {
     fn test_start_backend_success() {
         let config = VuConsoleConfig {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            uds_path: PathBuf::new(),
             backend: BackendType::Network,
             tcp_port: String::from("12346"),
             socket_count: 1,

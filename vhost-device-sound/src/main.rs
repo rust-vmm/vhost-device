@@ -1,35 +1,14 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // Stefano Garzarella <sgarzare@redhat.com>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
-use std::{convert::TryFrom, path::PathBuf};
 
 use clap::Parser;
-use vhost_device_sound::{start_backend_server, BackendType, Error, Result, SoundConfig};
-
-#[derive(Parser, Debug)]
-#[clap(version, about, long_about = None)]
-struct SoundArgs {
-    /// vhost-user Unix domain socket path.
-    #[clap(long)]
-    socket: PathBuf,
-    /// audio backend to be used
-    #[clap(long)]
-    #[clap(value_enum)]
-    backend: BackendType,
-}
-
-impl TryFrom<SoundArgs> for SoundConfig {
-    type Error = Error;
-
-    fn try_from(cmd_args: SoundArgs) -> Result<Self> {
-        Ok(SoundConfig::new(cmd_args.socket, false, cmd_args.backend))
-    }
-}
+use vhost_device_sound::{args::SoundArgs, start_backend_server, SoundConfig};
 
 fn main() {
     env_logger::init();
 
-    let config = SoundConfig::try_from(SoundArgs::parse()).unwrap();
+    let config = SoundConfig::from(SoundArgs::parse());
 
     loop {
         start_backend_server(config.clone());
@@ -38,18 +17,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
+    use clap::Parser;
     use rstest::*;
+    use vhost_device_sound::BackendType;
 
     use super::*;
-
-    impl SoundArgs {
-        fn from_args(socket: PathBuf) -> Self {
-            SoundArgs {
-                socket,
-                backend: BackendType::default(),
-            }
-        }
-    }
 
     fn init_logger() {
         std::env::set_var("RUST_LOG", "trace");
@@ -59,15 +33,15 @@ mod tests {
     #[test]
     fn test_sound_config_setup() {
         init_logger();
-        let args = SoundArgs::from_args(PathBuf::from("/tmp/vhost-sound.socket"));
+        let args = SoundArgs {
+            socket: PathBuf::from("/tmp/vhost-sound.socket"),
+            backend: BackendType::default(),
+        };
+        let config = SoundConfig::from(args);
 
-        let config = SoundConfig::try_from(args);
-        assert!(config.is_ok());
-
-        let config = config.unwrap();
         assert_eq!(
             config.get_socket_path(),
-            PathBuf::from("/tmp/vhost-sound.socket")
+            Path::new("/tmp/vhost-sound.socket")
         );
     }
 
@@ -90,10 +64,7 @@ mod tests {
             backend_name,
         ]);
 
-        let config = SoundConfig::try_from(args);
-        assert!(config.is_ok());
-
-        let config = config.unwrap();
+        let config = SoundConfig::from(args);
         assert_eq!(config.get_audio_backend(), backend);
     }
 }

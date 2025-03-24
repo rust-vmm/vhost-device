@@ -42,6 +42,8 @@ pub enum Error {
     ThreadPanic(String, Box<dyn Any + Send>),
     #[error("Error using multiple sockets with Nested backend")]
     WrongBackendSocket,
+    #[error("Invalid cmdline option")]
+    InvalidCmdlineOption,
     #[error("Invalid uds file")]
     InvalidUdsFile,
 }
@@ -217,7 +219,7 @@ mod tests {
             socket_path: String::from("/tmp/vhost.sock").into(),
             uds_path: None,
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: None,
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -231,7 +233,7 @@ mod tests {
             socket_path: String::from("/tmp/vhost.sock").into(),
             uds_path: None,
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: None,
             socket_count: 0,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -248,7 +250,7 @@ mod tests {
             socket_path: String::from("/tmp/vhost.sock").into(),
             uds_path: None,
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: None,
             socket_count: 2,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -265,7 +267,7 @@ mod tests {
             socket_path: String::from("/tmp/vhost.sock").into(),
             uds_path: None,
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: Some(String::from("12345")),
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -279,7 +281,7 @@ mod tests {
             socket_path: String::from("/tmp/vhost.sock").into(),
             uds_path: None,
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: Some(String::from("12345")),
             socket_count: 2,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -310,7 +312,7 @@ mod tests {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
             uds_path: None,
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: Some(String::from("12345")),
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -338,7 +340,7 @@ mod tests {
             socket_path: PathBuf::from("/tmp/vhost.sock"),
             uds_path: Some("/non_existing_dir/test.sock".to_string().into()),
             backend: BackendType::Uds,
-            tcp_port: String::new(),
+            tcp_port: Some(String::new()),
             socket_count: 1,
             max_queue_size: 128,
         };

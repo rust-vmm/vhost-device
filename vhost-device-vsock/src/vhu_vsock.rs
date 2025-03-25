@@ -2,17 +2,18 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    io::{self, Result as IoResult, BufReader, Read},
+    fs::File,
+    io::{self, BufReader, Read, Result as IoResult},
     path::PathBuf,
     sync::{Arc, Mutex, RwLock},
-    fs::File,
     thread::{self, JoinHandle},
 };
 
 use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{
-    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserProtocolFeatures, VhostUserVirtioFeatures
+    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures
 };
 use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
@@ -256,27 +257,13 @@ struct VirtioVsockConfig {
 // reading its content from byte array.
 unsafe impl ByteValued for VirtioVsockConfig {}
 
-pub(crate) struct HandlerThread {
-    pub handle: Option<JoinHandle<()>>,
-    pub created: bool,
-}
-
-impl HandlerThread {
-    pub fn new(handle: Option<JoinHandle<()>>, created: bool) -> Result<Self> {
-        Ok(Self {
-            handle: handle,
-            created: created,
-        })
-    }
-}
-
 pub(crate) struct VhostUserVsockBackend {
     config: VirtioVsockConfig,
     queue_size: usize,
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
     pub exit_event: EventFd,
-    pub handler_thread: Mutex<HandlerThread>,
+    pub handler_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl VhostUserVsockBackend {
@@ -298,7 +285,7 @@ impl VhostUserVsockBackend {
             threads: vec![thread],
             queues_per_thread,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
-            handler_thread: Mutex::new(HandlerThread::new(None, false)?),
+            handler_thread: Mutex::new(None),
         })
     }
 }
@@ -323,24 +310,26 @@ impl VhostUserBackend for VhostUserVsockBackend {
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::DEVICE_STATE
+        VhostUserProtocolFeatures::MQ
+	    | VhostUserProtocolFeatures::CONFIG
+	    | VhostUserProtocolFeatures::DEVICE_STATE
     }
 
+    #[allow(unused_variables)]
     fn set_device_state_fd(
         &self,
         direction: VhostTransferStateDirection,
         phase: VhostTransferStatePhase,
         file: File,
     ) -> IoResult<Option<File>> {
-        self.handler_thread.lock().unwrap().created = true;
         let handle = thread::spawn(move || {
             match direction {
-                SAVE => {
+                VhostTransferStateDirection::SAVE => {
                     // save
                     // No device state to save yet, just close the FD.
                     drop(file);
                 }
-                LOAD => {
+                VhostTransferStateDirection::LOAD => {
                     // load
                     // No device state to load yet, just verify it is empty.
                     let mut data = Vec::new();
@@ -361,16 +350,22 @@ impl VhostUserBackend for VhostUserVsockBackend {
                 }
             }
         });
-        self.handler_thread.lock().unwrap().handle = Some(handle);
-        return Ok(None);
+        *self.handler_thread.lock().unwrap() = Some(handle);
+        Ok(None)
     }
 
     fn check_device_state(&self) -> IoResult<()> {
-        if (self.handler_thread.lock().unwrap().created) {
-            self.handler_thread.lock().unwrap().created = false;
-            self.handler_thread.lock().unwrap().handle.take().unwrap().join().unwrap();
+        if !self.handler_thread.lock().unwrap().is_none() {
+            self.handler_thread
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .join()
+                .unwrap();
+            *self.handler_thread.lock().unwrap() = None;
         }
-        return Ok(());
+        Ok(())
     }
 
     fn set_event_idx(&self, enabled: bool) {

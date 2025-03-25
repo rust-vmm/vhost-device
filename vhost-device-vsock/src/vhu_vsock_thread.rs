@@ -587,7 +587,7 @@ impl VhostUserVsockThread {
         let mut vring_mut = vring.get_mut();
 
         if !vring_mut.get_enabled() {
-            return Ok(true);
+            return Ok(());
         }
 
         let queue = vring_mut.get_queue_mut();
@@ -732,7 +732,7 @@ impl VhostUserVsockThread {
 
         let mut vring_mut = vring.get_mut();
         if !vring_mut.get_enabled() {
-            return Ok(true);
+            return Ok(());
         }
 
         while let Some(mut avail_desc) = vring_mut

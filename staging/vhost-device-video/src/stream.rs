@@ -105,7 +105,7 @@ impl Future for Resource {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.is_ready() {
-            return Poll::Ready(self.buffer_data.read().unwrap().clone());
+            Poll::Ready(self.buffer_data.read().unwrap().clone())
         } else {
             self.state.write().unwrap().waker = Some(cx.waker().clone());
             Poll::Pending

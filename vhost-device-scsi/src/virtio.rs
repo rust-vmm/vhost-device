@@ -181,7 +181,7 @@ where
         self.add_written(bytes);
         while self
             .current
-            .map_or(false, |current| self.offset >= current.len())
+            .is_some_and(|current| self.offset >= current.len())
         {
             let current = self.current.expect("loop condition ensures existance");
             self.offset -= current.len();

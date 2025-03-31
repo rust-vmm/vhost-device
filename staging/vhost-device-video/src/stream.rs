@@ -63,6 +63,9 @@ impl SharedResourceState {
 
     pub fn set_ready(&mut self) {
         self.set_state(ResourceState::Ready);
+        if let Some(waker) = self.waker.take() {
+            waker.wake();
+        }
     }
 
     fn set_state(&mut self, state: ResourceState) {
@@ -122,9 +125,6 @@ impl Resource {
 
     pub fn set_ready(&mut self) {
         self.state.write().unwrap().set_ready();
-        if let Some(waker) = self.waker().take() {
-            waker.wake();
-        }
     }
 
     pub fn is_ready(&self) -> bool {
@@ -137,10 +137,6 @@ impl Resource {
 
     pub fn set_queued(&mut self) {
         self.state.write().unwrap().set_queued();
-    }
-
-    pub fn waker(&self) -> Option<Waker> {
-        self.state.read().unwrap().waker.clone()
     }
 }
 

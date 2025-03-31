@@ -910,8 +910,8 @@ pub(crate) mod tests {
 
         // rdwr failure
         let mut reqs = [SpiIocTransfer {
-            tx_buf: vec![7, 4].as_ptr() as u64,
-            rx_buf: vec![7, 4].as_ptr() as u64,
+            tx_buf: [7, 4].as_ptr() as u64,
+            rx_buf: [7, 4].as_ptr() as u64,
             len: 2,
             speed_hz: 10000,
             delay_usecs: 0,

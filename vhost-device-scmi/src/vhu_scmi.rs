@@ -427,11 +427,11 @@ impl VhostUserBackendMut for VuScmiBackend {
 
     fn features(&self) -> u64 {
         debug!("Features called");
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_SCMI_F_P2A_CHANNELS
+        (1 << VIRTIO_F_VERSION_1)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_RING_F_INDIRECT_DESC)
+            | (1 << VIRTIO_RING_F_EVENT_IDX)
+            | (1 << VIRTIO_SCMI_F_P2A_CHANNELS)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
@@ -540,7 +540,7 @@ mod tests {
     use super::*;
 
     fn scmi_header(message_id: u8, protocol_id: u8) -> u32 {
-        u32::from(message_id) | u32::from(protocol_id) << 10
+        u32::from(message_id) | (u32::from(protocol_id) << 10)
     }
 
     fn build_cmd_desc_chain(

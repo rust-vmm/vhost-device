@@ -216,10 +216,10 @@ impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBacke
 
     fn features(&self) -> u64 {
         // this matches the current libvhost defaults except VHOST_F_LOG_ALL
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
+        (1 << VIRTIO_F_VERSION_1)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_RING_F_INDIRECT_DESC)
+            | (1 << VIRTIO_RING_F_EVENT_IDX)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 

@@ -210,10 +210,10 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_SCSI_F_HOTPLUG
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
+        (1 << VIRTIO_F_VERSION_1)
+            | (1 << VIRTIO_SCSI_F_HOTPLUG)
+            | (1 << VIRTIO_RING_F_INDIRECT_DESC)
+            | (1 << VIRTIO_RING_F_EVENT_IDX)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
@@ -287,7 +287,7 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
             cdb_size: CDB_SIZE.try_into().expect("CDB_SIZE should fit 32bit"),
             max_channel: 0,
             max_target: 255,
-            max_lun: u32::from(!u16::from(VirtioScsiLun::ADDRESS_METHOD_PATTERN) << 8 | 0xff),
+            max_lun: u32::from((!u16::from(VirtioScsiLun::ADDRESS_METHOD_PATTERN) << 8) | 0xff),
         };
 
         // SAFETY:

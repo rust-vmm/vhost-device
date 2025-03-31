@@ -603,12 +603,12 @@ impl VhostUserBackendMut for VhostUserCanBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_CAN_F_CAN_CLASSIC
-            | 1 << VIRTIO_CAN_F_CAN_FD
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
+        (1 << VIRTIO_F_VERSION_1)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_RING_F_EVENT_IDX)
+            | (1 << VIRTIO_CAN_F_CAN_CLASSIC)
+            | (1 << VIRTIO_CAN_F_CAN_FD)
+            | (1 << VIRTIO_RING_F_INDIRECT_DESC)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 

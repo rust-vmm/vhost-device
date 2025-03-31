@@ -624,15 +624,15 @@ impl VhostUserBackend for VhostUserGpuBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_F_RING_RESET
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_GPU_F_VIRGL
-            | 1 << VIRTIO_GPU_F_EDID
-            | 1 << VIRTIO_GPU_F_RESOURCE_BLOB
-            | 1 << VIRTIO_GPU_F_CONTEXT_INIT
+        (1 << VIRTIO_F_VERSION_1)
+            | (1 << VIRTIO_F_RING_RESET)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_RING_F_INDIRECT_DESC)
+            | (1 << VIRTIO_RING_F_EVENT_IDX)
+            | (1 << VIRTIO_GPU_F_VIRGL)
+            | (1 << VIRTIO_GPU_F_EDID)
+            | (1 << VIRTIO_GPU_F_RESOURCE_BLOB)
+            | (1 << VIRTIO_GPU_F_CONTEXT_INIT)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 

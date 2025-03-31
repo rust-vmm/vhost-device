@@ -321,7 +321,7 @@ pub trait SensorT: Send {
     ///
     /// Usually no need to redefine this.
     fn format_unit(&self, axis: u32) -> u32 {
-        (self.unit_exponent(axis) as u32 & 0x1F) << 11 | u32::from(self.unit())
+        ((self.unit_exponent(axis) as u32 & 0x1F) << 11) | u32::from(self.unit())
     }
 
     /// Returns SCMI description of the sensor.
@@ -332,7 +332,7 @@ pub trait SensorT: Send {
         let low = 1 << 30;
         let n_axes = self.number_of_axes();
         let high = if n_axes > 0 {
-            n_axes << 16 | 1 << 8
+            (n_axes << 16) | (1 << 8)
         } else {
             self.format_unit(0)
         };

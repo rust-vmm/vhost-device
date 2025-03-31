@@ -59,18 +59,18 @@ use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemory
 
 use crate::device::VhostUserSoundBackend;
 
-pub const SUPPORTED_FORMATS: u64 = 1 << VIRTIO_SND_PCM_FMT_U8
-    | 1 << VIRTIO_SND_PCM_FMT_S16
-    | 1 << VIRTIO_SND_PCM_FMT_S24
-    | 1 << VIRTIO_SND_PCM_FMT_S32;
+pub const SUPPORTED_FORMATS: u64 = (1 << VIRTIO_SND_PCM_FMT_U8)
+    | (1 << VIRTIO_SND_PCM_FMT_S16)
+    | (1 << VIRTIO_SND_PCM_FMT_S24)
+    | (1 << VIRTIO_SND_PCM_FMT_S32);
 
-pub const SUPPORTED_RATES: u64 = 1 << VIRTIO_SND_PCM_RATE_8000
-    | 1 << VIRTIO_SND_PCM_RATE_11025
-    | 1 << VIRTIO_SND_PCM_RATE_16000
-    | 1 << VIRTIO_SND_PCM_RATE_22050
-    | 1 << VIRTIO_SND_PCM_RATE_32000
-    | 1 << VIRTIO_SND_PCM_RATE_44100
-    | 1 << VIRTIO_SND_PCM_RATE_48000;
+pub const SUPPORTED_RATES: u64 = (1 << VIRTIO_SND_PCM_RATE_8000)
+    | (1 << VIRTIO_SND_PCM_RATE_11025)
+    | (1 << VIRTIO_SND_PCM_RATE_16000)
+    | (1 << VIRTIO_SND_PCM_RATE_22050)
+    | (1 << VIRTIO_SND_PCM_RATE_32000)
+    | (1 << VIRTIO_SND_PCM_RATE_44100)
+    | (1 << VIRTIO_SND_PCM_RATE_48000);
 
 use virtio_queue::DescriptorChain;
 pub type SoundDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;

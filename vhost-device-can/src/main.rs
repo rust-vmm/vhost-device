@@ -74,10 +74,7 @@ impl TryFrom<CanArgs> for VuCanConfig {
             return Err(Self::Error::SocketCountInvalid(0));
         }
 
-        let can_devices = match parse_can_devices(&args) {
-            Ok(can_devs) => can_devs,
-            Err(e) => return Err(e),
-        };
+        let can_devices = parse_can_devices(&args)?;
 
         Ok(VuCanConfig {
             socket_path: args.socket_path,

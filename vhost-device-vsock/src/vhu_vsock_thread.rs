@@ -586,6 +586,10 @@ impl VhostUserVsockThread {
 
         let mut vring_mut = vring.get_mut();
 
+        if !vring_mut.get_enabled() {
+            return Ok(());
+        }
+
         let queue = vring_mut.get_queue_mut();
 
         while let Some(mut avail_desc) = queue
@@ -657,6 +661,8 @@ impl VhostUserVsockThread {
             loop {
                 if !self.thread_backend.pending_rx() {
                     break;
+                } else if !vring.get_enabled() {
+                    break;
                 }
                 vring.disable_notification().unwrap();
 
@@ -676,6 +682,8 @@ impl VhostUserVsockThread {
         if event_idx {
             loop {
                 if !self.thread_backend.pending_raw_pkts() {
+                    break;
+                } else if !vring.get_enabled() {
                     break;
                 }
                 vring.disable_notification().unwrap();
@@ -722,8 +730,12 @@ impl VhostUserVsockThread {
             None => return Err(Error::NoMemoryConfigured),
         };
 
-        while let Some(mut avail_desc) = vring
-            .get_mut()
+        let mut vring_mut = vring.get_mut();
+        if !vring_mut.get_enabled() {
+            return Ok(());
+        }
+
+        while let Some(mut avail_desc) = vring_mut
             .get_queue_mut()
             .iter(atomic_mem.memory())
             .map_err(|_| Error::IterateQueue)?

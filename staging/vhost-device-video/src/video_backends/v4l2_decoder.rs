@@ -346,7 +346,7 @@ impl VideoBackend for V4L2Decoder {
             if format.to_virtio() == 0 {
                 debug!(
                     "Unsupported format for virtio-video ({}), skipping.",
-                    format.to_string()
+                    format
                 );
                 index += 1;
                 continue;

@@ -32,6 +32,7 @@
 //!   --device iio,path=/sys/bus/iio/devices/iio:device0,channel=in_accel
 //! ```
 
+pub mod args;
 mod devices;
 mod scmi;
 mod vhu_scmi;
@@ -54,39 +55,15 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 type Result<T> = std::result::Result<T, String>;
 
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct ScmiArgs {
-    // Location of vhost-user Unix domain socket.
-    // Required, unless one of the --help options is used.
-    #[clap(
-        short,
-        long,
-        default_value_if(
-            "help_devices",
-            clap::builder::ArgPredicate::IsPresent,
-            "PathBuf::new()"
-        ),
-        help = "vhost-user socket to use"
-    )]
-    socket_path: PathBuf,
-    // Specification of SCMI devices to create.
-    #[clap(short, long, help = "Devices to expose")]
-    #[arg(num_args(1..))]
-    device: Vec<String>,
-    #[clap(long, exclusive = true, help = "Print help on available devices")]
-    help_devices: bool,
-}
-
 pub struct VuScmiConfig {
     socket_path: PathBuf,
     devices: DeviceDescription,
 }
 
-impl TryFrom<ScmiArgs> for VuScmiConfig {
+impl TryFrom<args::ScmiArgs> for VuScmiConfig {
     type Error = String;
 
-    fn try_from(cmd_args: ScmiArgs) -> Result<Self> {
+    fn try_from(cmd_args: args::ScmiArgs) -> Result<Self> {
         let socket_path = cmd_args.socket_path;
         let mut devices: DeviceDescription = vec![];
         let device_iterator = cmd_args.device.iter();
@@ -140,13 +117,13 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
 
 fn print_help(message: &String) {
     println!("{message}\n");
-    let mut command = ScmiArgs::command();
+    let mut command = args::ScmiArgs::command();
     command.print_help().unwrap();
 }
 
 fn main() {
     env_logger::init();
-    let args = ScmiArgs::parse();
+    let args = args::ScmiArgs::parse();
     if args.help_devices {
         println!("{}", devices_help());
         return;
@@ -179,7 +156,7 @@ mod tests {
                      -d fake,name=bar"
         );
         let params: Vec<&str> = params_string.split_whitespace().collect();
-        let args: ScmiArgs = Parser::parse_from(params);
+        let args: args::ScmiArgs = Parser::parse_from(params);
         let config = VuScmiConfig::try_from(args).unwrap();
         assert_eq!(&config.socket_path, Path::new(&path));
         let devices = vec![

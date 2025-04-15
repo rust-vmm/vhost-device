@@ -37,6 +37,7 @@ pub fn init_logger() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
+pub mod args;
 pub mod audio_backends;
 pub mod device;
 pub mod stream;
@@ -50,7 +51,7 @@ use std::{
     sync::Arc,
 };
 
-use clap::ValueEnum;
+pub use args::BackendType;
 pub use stream::Stream;
 use thiserror::Error as ThisError;
 use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
@@ -59,18 +60,18 @@ use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemory
 
 use crate::device::VhostUserSoundBackend;
 
-pub const SUPPORTED_FORMATS: u64 = 1 << VIRTIO_SND_PCM_FMT_U8
-    | 1 << VIRTIO_SND_PCM_FMT_S16
-    | 1 << VIRTIO_SND_PCM_FMT_S24
-    | 1 << VIRTIO_SND_PCM_FMT_S32;
+pub const SUPPORTED_FORMATS: u64 = (1 << VIRTIO_SND_PCM_FMT_U8)
+    | (1 << VIRTIO_SND_PCM_FMT_S16)
+    | (1 << VIRTIO_SND_PCM_FMT_S24)
+    | (1 << VIRTIO_SND_PCM_FMT_S32);
 
-pub const SUPPORTED_RATES: u64 = 1 << VIRTIO_SND_PCM_RATE_8000
-    | 1 << VIRTIO_SND_PCM_RATE_11025
-    | 1 << VIRTIO_SND_PCM_RATE_16000
-    | 1 << VIRTIO_SND_PCM_RATE_22050
-    | 1 << VIRTIO_SND_PCM_RATE_32000
-    | 1 << VIRTIO_SND_PCM_RATE_44100
-    | 1 << VIRTIO_SND_PCM_RATE_48000;
+pub const SUPPORTED_RATES: u64 = (1 << VIRTIO_SND_PCM_RATE_8000)
+    | (1 << VIRTIO_SND_PCM_RATE_11025)
+    | (1 << VIRTIO_SND_PCM_RATE_16000)
+    | (1 << VIRTIO_SND_PCM_RATE_22050)
+    | (1 << VIRTIO_SND_PCM_RATE_32000)
+    | (1 << VIRTIO_SND_PCM_RATE_44100)
+    | (1 << VIRTIO_SND_PCM_RATE_48000);
 
 use virtio_queue::DescriptorChain;
 pub type SoundDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<()>>>;
@@ -191,16 +192,6 @@ impl From<stream::Error> for Error {
     }
 }
 
-#[derive(ValueEnum, Clone, Copy, Default, Debug, Eq, PartialEq)]
-pub enum BackendType {
-    #[default]
-    Null,
-    #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
-    Pipewire,
-    #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
-    Alsa,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidControlMessage(u32);
 
@@ -261,6 +252,14 @@ pub struct SoundConfig {
     multi_thread: bool,
     /// audio backend variant
     audio_backend: BackendType,
+}
+
+impl From<args::SoundArgs> for SoundConfig {
+    fn from(cmd_args: args::SoundArgs) -> Self {
+        let args::SoundArgs { socket, backend } = cmd_args;
+
+        Self::new(socket, false, backend)
+    }
 }
 
 impl SoundConfig {

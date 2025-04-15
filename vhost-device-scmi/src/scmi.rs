@@ -470,7 +470,7 @@ impl HandlerMap {
                 let last_non_returned_sensor = first_index + sensors_to_return;
                 let remaining_sensors = n_sensors.saturating_sub(last_non_returned_sensor);
                 let mut values = vec![MessageValue::Unsigned(
-                    sensors_to_return as u32 | (remaining_sensors as u32) << 16,
+                    sensors_to_return as u32 | ((remaining_sensors as u32) << 16),
                 )];
                 for index in first_index..last_non_returned_sensor {
                     values.push(MessageValue::Unsigned(index as u32));
@@ -1339,7 +1339,7 @@ mod tests {
             let mut description = vec![
                 MessageValue::Unsigned(i),
                 MessageValue::Unsigned(1 << 30),
-                MessageValue::Unsigned(3 << 16 | 1 << 8),
+                MessageValue::Unsigned((3 << 16) | (1 << 8)),
                 MessageValue::String(format!("fake{i}"), MAX_SIMPLE_STRING_LENGTH),
             ];
             result.append(&mut description);
@@ -1379,7 +1379,7 @@ mod tests {
         ];
         // Each call will return only one descriptor to avoid exceeding the maximum length of the message
         // and to inform about the number of the remaining sensor axis descriptions.
-        let num_axis_flags = 1 | (n_axes - axis_index - 1) << 26;
+        let num_axis_flags = 1 | ((n_axes - axis_index - 1) << 26);
         let mut result = vec![MessageValue::Unsigned(num_axis_flags)];
         let name = format!("acc_{}", char::from_u32('X' as u32 + axis_index).unwrap()).to_string();
         let mut description = vec![

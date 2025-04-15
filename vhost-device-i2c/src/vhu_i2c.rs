@@ -291,11 +291,11 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cB
 
     fn features(&self) -> u64 {
         // this matches the current libvhost defaults except VHOST_F_LOG_ALL
-        1 << VIRTIO_F_VERSION_1
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_RING_F_INDIRECT_DESC
-            | 1 << VIRTIO_RING_F_EVENT_IDX
-            | 1 << VIRTIO_I2C_F_ZERO_LENGTH_REQUEST
+        (1 << VIRTIO_F_VERSION_1)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_RING_F_INDIRECT_DESC)
+            | (1 << VIRTIO_RING_F_EVENT_IDX)
+            | (1 << VIRTIO_I2C_F_ZERO_LENGTH_REQUEST)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 

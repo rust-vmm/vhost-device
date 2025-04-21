@@ -291,7 +291,11 @@ mod tests {
     use std::io::ErrorKind;
 
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue,
+    };
     use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     // Add VuRngBackend accessor to artificially manipulate internal fields
@@ -359,7 +363,12 @@ mod tests {
                 flags & !VRING_DESC_F_NEXT as u16
             };
 
-            let desc = Descriptor::new((0x100 * (i + 1)) as u64, 0x200, desc_flags, i + 1);
+            let desc = RawDescriptor::from(SplitDescriptor::new(
+                (0x100 * (i + 1)) as u64,
+                0x200,
+                desc_flags,
+                i + 1,
+            ));
             vq.desc_table().store(i, desc).unwrap();
         }
 

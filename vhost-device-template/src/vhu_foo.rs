@@ -223,7 +223,11 @@ mod tests {
     use std::mem::size_of;
     use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue,
+    };
     use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
@@ -267,7 +271,7 @@ mod tests {
         mut next_addr: u64,
         mem: &GuestMemoryLoadGuard<GuestMemoryMmap<()>>,
         buf: &mut [u8],
-    ) -> Vec<Descriptor> {
+    ) -> Vec<SplitDescriptor> {
         let mut descriptors = Vec::new();
         let mut index = 0;
 
@@ -278,7 +282,7 @@ mod tests {
             c: 0x20,
         };
 
-        let desc_out = Descriptor::new(
+        let desc_out = SplitDescriptor::new(
             next_addr,
             size_of::<VirtioFooOutHdr>() as u32,
             VRING_DESC_F_NEXT as u16,
@@ -293,7 +297,7 @@ mod tests {
 
         // Buf descriptor: optional
         if !buf.is_empty() {
-            let desc_buf = Descriptor::new(
+            let desc_buf = SplitDescriptor::new(
                 next_addr,
                 buf.len() as u32,
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
@@ -306,7 +310,7 @@ mod tests {
         }
 
         // In response descriptor
-        let desc_in = Descriptor::new(
+        let desc_in = SplitDescriptor::new(
             next_addr,
             size_of::<VirtioFooInHdr>() as u32,
             VRING_DESC_F_WRITE as u16,
@@ -325,7 +329,13 @@ mod tests {
 
         let descriptors = prepare_descriptors(next_addr, &mem_handle, buf);
 
-        vq.build_desc_chain(&descriptors).unwrap();
+        vq.build_desc_chain(
+            &descriptors
+                .into_iter()
+                .map(RawDescriptor::from)
+                .collect::<Vec<RawDescriptor>>(),
+        )
+        .unwrap();
 
         // Put the descriptor index 0 in the first available ring position.
         mem_handle
@@ -360,7 +370,9 @@ mod tests {
         let descriptors = prepare_descriptors(next_addr, &mem_handle, buf);
 
         for (idx, desc) in descriptors.iter().enumerate() {
-            vq.desc_table().store(idx as u16, *desc).unwrap();
+            vq.desc_table()
+                .store(idx as u16, RawDescriptor::from(*desc))
+                .unwrap();
         }
 
         // Put the descriptor index 0 in the first available ring position.

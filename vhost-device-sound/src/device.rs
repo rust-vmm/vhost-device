@@ -678,7 +678,10 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+    };
     use vm_memory::{
         Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     };
@@ -688,7 +691,7 @@ mod tests {
 
     const SOCKET_PATH: &str = "vsound.socket";
 
-    fn setup_descs(descs: &[Descriptor]) -> (VringRwLock, GuestMemoryAtomic<GuestMemoryMmap>) {
+    fn setup_descs(descs: &[RawDescriptor]) -> (VringRwLock, GuestMemoryAtomic<GuestMemoryMmap>) {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap(),
         );
@@ -774,9 +777,19 @@ mod tests {
             };
             let addr_req = 0x10_0000;
             let descs = [
-                Descriptor::new(addr_req, 0x100, 0, 0), // request
-                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0),
-                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0), // response
+                RawDescriptor::from(SplitDescriptor::new(addr_req, 0x100, 0, 0)), // request
+                RawDescriptor::from(SplitDescriptor::new(
+                    0x20_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
+                RawDescriptor::from(SplitDescriptor::new(
+                    0x20_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )), // response
             ];
 
             let (vring, mem) = setup_descs(&descs);
@@ -802,8 +815,13 @@ mod tests {
             };
             let addr_req = 0x10_0000;
             let descs = [
-                Descriptor::new(addr_req, 0x100, 0, 0), // request
-                Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0),
+                RawDescriptor::from(SplitDescriptor::new(addr_req, 0x100, 0, 0)), // request
+                RawDescriptor::from(SplitDescriptor::new(
+                    0x20_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
             ];
 
             let (vring, mem) = setup_descs(&descs);
@@ -850,7 +868,7 @@ mod tests {
 
         // single descriptor request shall fail
         let descs = [
-            Descriptor::new(0, 0, 0, 0), // request
+            RawDescriptor::from(SplitDescriptor::new(0, 0, 0, 0)), // request
         ];
         let (vring, mem) = setup_descs(&descs);
         t.mem = Some(mem);
@@ -858,15 +876,18 @@ mod tests {
 
         // a request with the first descriptor write-only shall fail
         let descs = [
-            Descriptor::new(0, 0, VRING_DESC_F_WRITE as u16, 0),
-            Descriptor::new(0, 0, VRING_DESC_F_WRITE as u16, 0),
+            RawDescriptor::from(SplitDescriptor::new(0, 0, VRING_DESC_F_WRITE as u16, 0)),
+            RawDescriptor::from(SplitDescriptor::new(0, 0, VRING_DESC_F_WRITE as u16, 0)),
         ];
         let (vring, mem) = setup_descs(&descs);
         t.mem = Some(mem);
         t.process_control(&vring, &audio_backend).unwrap_err();
 
         // a request with the second descriptor read-only shall fail
-        let descs = [Descriptor::new(0, 0, 0, 0), Descriptor::new(0, 0, 0, 0)];
+        let descs = [
+            RawDescriptor::from(SplitDescriptor::new(0, 0, 0, 0)),
+            RawDescriptor::from(SplitDescriptor::new(0, 0, 0, 0)),
+        ];
         let (vring, mem) = setup_descs(&descs);
         t.mem = Some(mem);
         t.process_control(&vring, &audio_backend).unwrap_err();
@@ -883,13 +904,18 @@ mod tests {
             };
             let addr_req = 0x10_0000;
             let descs = [
-                Descriptor::new(addr_req, size_of::<VirtioSoundHeader>() as u32, 0, 0), // request
-                Descriptor::new(
+                RawDescriptor::from(SplitDescriptor::new(
+                    addr_req,
+                    size_of::<VirtioSoundHeader>() as u32,
+                    0,
+                    0,
+                )), // request
+                RawDescriptor::from(SplitDescriptor::new(
                     0x20_0000,
                     size_of::<VirtioSoundHeader>() as u32,
                     VRING_DESC_F_WRITE as u16,
                     0,
-                ), // response
+                )), // response
             ];
             let (vring, mem) = setup_descs(&descs);
             mem.memory()

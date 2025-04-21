@@ -502,7 +502,11 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut for VhostUserGpi
 #[cfg(test)]
 mod tests {
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue,
+    };
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::Error;
@@ -523,7 +527,7 @@ mod tests {
         let mut next_addr = vq.desc_table().total_size() + 0x100;
         let mut index = 0;
 
-        let desc_out = Descriptor::new(
+        let desc_out = SplitDescriptor::new(
             next_addr,
             size_of::<R>() as u32,
             VRING_DESC_F_NEXT as u16,
@@ -531,12 +535,19 @@ mod tests {
         );
 
         mem.write_obj::<R>(out_hdr, desc_out.addr()).unwrap();
-        vq.desc_table().store(index, desc_out).unwrap();
+        vq.desc_table()
+            .store(index, RawDescriptor::from(desc_out))
+            .unwrap();
         next_addr += desc_out.len() as u64;
         index += 1;
 
         // In response descriptor
-        let desc_in = Descriptor::new(next_addr, response_len, VRING_DESC_F_WRITE as u16, 0);
+        let desc_in = RawDescriptor::from(SplitDescriptor::new(
+            next_addr,
+            response_len,
+            VRING_DESC_F_WRITE as u16,
+            0,
+        ));
         vq.desc_table().store(index, desc_in).unwrap();
 
         // Put the descriptor index 0 in the first available ring position.
@@ -610,7 +621,7 @@ mod tests {
                 _ => 0x100,
             };
 
-            let desc = Descriptor::new(offset, len[i], f, (i + 1) as u16);
+            let desc = RawDescriptor::from(SplitDescriptor::new(offset, len[i], f, (i + 1) as u16));
             vq.desc_table().store(i as u16, desc).unwrap();
         }
 

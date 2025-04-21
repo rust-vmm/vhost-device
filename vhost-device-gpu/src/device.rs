@@ -724,7 +724,11 @@ mod tests {
     use vhost::vhost_user::gpu_message::{VhostUserGpuScanout, VhostUserGpuUpdate};
     use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueT};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue, QueueT,
+    };
     use vm_memory::{
         ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
     };
@@ -972,7 +976,7 @@ mod tests {
         assert_matches!(result, Ok(OkNoData));
     }
 
-    fn make_descriptors_into_a_chain(start_idx: u16, descriptors: &mut [Descriptor]) {
+    fn make_descriptors_into_a_chain(start_idx: u16, descriptors: &mut [SplitDescriptor]) {
         let last_idx = start_idx + descriptors.len() as u16 - 1;
         for (idx, desc) in zip(start_idx.., descriptors.iter_mut()) {
             if idx == last_idx {
@@ -1011,7 +1015,7 @@ mod tests {
                 mem.memory()
                     .check_address(GuestAddress(next_addr))
                     .expect("Readable descriptor's buffer address is not valid!");
-                let desc = Descriptor::new(
+                let desc = SplitDescriptor::new(
                     next_addr,
                     buf.len()
                         .try_into()
@@ -1028,7 +1032,7 @@ mod tests {
                 mem.memory()
                     .check_address(GuestAddress(next_addr))
                     .expect("Writable descriptor's buffer address is not valid!");
-                let desc = Descriptor::new(next_addr, desc_len, VRING_DESC_F_WRITE as u16, 0);
+                let desc = SplitDescriptor::new(next_addr, desc_len, VRING_DESC_F_WRITE as u16, 0);
                 writable_descriptor_adresses.push(desc.addr());
                 descriptors.push(desc);
                 next_addr += u64::from(desc_len);
@@ -1043,7 +1047,11 @@ mod tests {
 
         assert!(descriptors.len() < queue_size as usize);
         if !descriptors.is_empty() {
-            vq.build_multiple_desc_chains(&descriptors)
+            let descs_raw = descriptors
+                .into_iter()
+                .map(RawDescriptor::from)
+                .collect::<Vec<RawDescriptor>>();
+            vq.build_multiple_desc_chains(&descs_raw)
                 .expect("Failed to build descriptor chain");
         }
 

@@ -1151,7 +1151,10 @@ impl GpuResponse {
 #[cfg(test)]
 mod tests {
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+    };
     use vm_memory::GuestMemoryMmap;
 
     use super::*;
@@ -1337,7 +1340,12 @@ mod tests {
 
         let vq = MockSplitQueue::new(&mem, 8);
         let desc_chain = vq
-            .build_desc_chain(&[Descriptor::new(0x1000, 8192, VRING_DESC_F_WRITE as u16, 0)])
+            .build_desc_chain(&[RawDescriptor::from(SplitDescriptor::new(
+                0x1000,
+                8192,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            ))])
             .unwrap();
 
         let mut writer = desc_chain

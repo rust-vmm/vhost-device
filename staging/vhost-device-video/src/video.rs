@@ -946,7 +946,11 @@ impl ToBytes for virtio_video_event {
 pub mod tests {
     use assert_matches::assert_matches;
     use rstest::*;
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue, QueueOwnedT};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue, QueueOwnedT,
+    };
     use vm_memory::{
         Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
     };
@@ -961,9 +965,12 @@ pub mod tests {
         let flags = 0;
 
         let request = request.as_slice();
-        let desc = Descriptor::new(addr, request.len() as u32, flags as u16, 1);
+        let desc = SplitDescriptor::new(addr, request.len() as u32, flags as u16, 1);
         mem.write(request, desc.addr()).unwrap();
-        assert!(virt_queue.desc_table().store(0, desc).is_ok());
+        assert!(virt_queue
+            .desc_table()
+            .store(0, RawDescriptor::from(desc))
+            .is_ok());
 
         // Put the descriptor index 0 in the first available ring position.
         mem.write_obj(0u16, virt_queue.avail_addr().unchecked_add(4))

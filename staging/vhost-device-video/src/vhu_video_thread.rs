@@ -11,7 +11,7 @@ use std::{
 use futures_executor::{ThreadPool, ThreadPoolBuilder};
 use log::{debug, warn};
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
-use virtio_queue::{Descriptor, QueueOwnedT};
+use virtio_queue::{desc::split::Descriptor as SplitDescriptor, QueueOwnedT};
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryMmap,
@@ -198,7 +198,7 @@ pub(crate) struct VhostUserVideoThread {
 
 fn write_descriptor_data<T: ToBytes>(
     resp: T,
-    desc_response: &Descriptor,
+    desc_response: &SplitDescriptor,
     desc_chain: &VideoDescriptorChain,
     vring: &VringRwLock,
 ) {
@@ -577,7 +577,7 @@ mod tests {
     use rstest::*;
     use tempfile::TempDir;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Queue};
+    use virtio_queue::{desc::RawDescriptor, mock::MockSplitQueue, Queue};
     use vm_memory::{Address, GuestAddress};
     use vmm_sys_util::eventfd::EventFd;
 
@@ -605,14 +605,18 @@ mod tests {
 
         // Descriptor for the video request
         let desc_request =
-            Descriptor::new(next_addr, request_size, VRING_DESC_F_NEXT as u16, index + 1);
+            SplitDescriptor::new(next_addr, request_size, VRING_DESC_F_NEXT as u16, index + 1);
         mem.write_slice(request, desc_request.addr()).unwrap();
-        vq.desc_table().store(index, desc_request).unwrap();
+        vq.desc_table()
+            .store(index, RawDescriptor::from(desc_request))
+            .unwrap();
         next_addr += u64::from(desc_request.len());
         index += 1;
         // Descriptor for the video response
-        let desc_response = Descriptor::new(next_addr, 0x100, VRING_DESC_F_WRITE as u16, 0);
-        vq.desc_table().store(index, desc_response).unwrap();
+        let desc_response = SplitDescriptor::new(next_addr, 0x100, VRING_DESC_F_WRITE as u16, 0);
+        vq.desc_table()
+            .store(index, RawDescriptor::from(desc_response))
+            .unwrap();
 
         // Put the descriptor index 0 in the first available ring position.
         mem.write_obj(0u16, vq.avail_addr().unchecked_add(4))

@@ -724,7 +724,11 @@ mod tests {
     use crate::virtio_can::{VirtioCanCtrlResponse, VirtioCanTxResponse};
     use std::mem::size_of;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue,
+    };
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
 
     #[test]
@@ -831,7 +835,12 @@ mod tests {
                 flags[i as usize] & !VRING_DESC_F_NEXT as u16
             };
 
-            let desc = Descriptor::new((0x100 * (i + 1)) as u64, len, desc_flags, i + 1);
+            let desc = RawDescriptor::from(SplitDescriptor::new(
+                (0x100 * (i + 1)) as u64,
+                len,
+                desc_flags,
+                i + 1,
+            ));
             desc_vec.push(desc);
         }
 

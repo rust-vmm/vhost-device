@@ -860,7 +860,11 @@ mod tests {
     use std::io::Cursor;
 
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor, Queue};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+        Queue,
+    };
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
@@ -972,7 +976,12 @@ mod tests {
                 flags[i as usize] & !VRING_DESC_F_NEXT as u16
             };
 
-            let desc = Descriptor::new(u64::from(0x100 * (i + 1)), len, desc_flags, i + 1);
+            let desc = RawDescriptor::from(SplitDescriptor::new(
+                u64::from(0x100 * (i + 1)),
+                len,
+                desc_flags,
+                i + 1,
+            ));
             desc_vec.push(desc);
         }
 

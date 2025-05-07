@@ -21,11 +21,13 @@ env_logger = "0.11"
 epoll = "4.3.2"
 log = "0.4"
 thiserror = "2.0"
-vhost = { version = "0.13", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.17"
+# vhost = { version = "0.13", features = ["vhost-user-backend"] }
+vhost = { git = "https://github.com/uran0sh/vhost.git", branch = "test-change-api", features = ["vhost-user-backend"] }
+# vhost-user-backend = "0.17"
+vhost-user-backend = { git = "https://github.com/uran0sh/vhost.git", branch = "test-change-api" }
 virtio-bindings = "0.2.5"
-virtio-queue = "0.14"
-virtio-vsock = "0.8"
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main" }
+virtio-vsock = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main" }
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12"
 figment = { version = "0.10.19", features = ["yaml"] }
@@ -35,5 +37,5 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.14", features = ["test-utils"] }
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main", features = ["test-utils"] }
 tempfile = "3.19.1"

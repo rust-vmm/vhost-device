@@ -27,10 +27,10 @@ log = "0.4"
 [target.'cfg(not(target_env = "musl"))'.dependencies]
 rutabaga_gfx = { version = "0.1.5", features = ["virgl_renderer"] }
 thiserror = "2.0.12"
-vhost = { version = "0.13.0", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.17"
+vhost = { git = "https://github.com/uran0sh/vhost.git", branch = "test-change-api", features = ["vhost-user-backend"] }
+vhost-user-backend = { git = "https://github.com/uran0sh/vhost.git", branch = "test-change-api" }
 virtio-bindings = "0.2.5"
-virtio-queue = "0.14.0"
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main" }
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
 bitflags = "2.9.0"
@@ -40,5 +40,5 @@ assert_matches = "1.5"
 mockall = "0.13.0"
 rusty-fork = "0.3.0"
 tempfile = "3.19"
-virtio-queue = { version = "0.14", features = ["test-utils"] }
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }

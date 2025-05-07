@@ -20,14 +20,14 @@ env_logger = "0.11"
 libc = "0.2"
 log = "0.4"
 thiserror = "2.0"
-vhost = { version = "0.13", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.17"
+vhost = { git = "https://github.com/uran0sh/vhost.git", branch = "test-change-api", features = ["vhost-user-backend"] }
+vhost-user-backend = { git = "https://github.com/uran0sh/vhost.git", branch = "test-change-api" }
 virtio-bindings = "0.2.5"
-virtio-queue = "0.14"
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main" }
 vm-memory = "0.16.1"
 vmm-sys-util = "0.12"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.14", features = ["test-utils"] }
+virtio-queue = { git = "https://github.com/rust-vmm/vm-virtio.git", branch = "main", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }

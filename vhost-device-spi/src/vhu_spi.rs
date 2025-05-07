@@ -491,7 +491,10 @@ mod tests {
     use std::path::PathBuf;
     use std::slice::from_raw_parts;
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_queue::{
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
+    };
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::Error;
@@ -499,7 +502,7 @@ mod tests {
     use crate::spi::tests::{verify_rdwr_buf, DummyDevice};
 
     // Prepares descriptor chains
-    fn setup_descs(descs: &[Descriptor]) -> (VringRwLock, GuestMemoryAtomic<GuestMemoryMmap>) {
+    fn setup_descs(descs: &[SplitDescriptor]) -> (VringRwLock, GuestMemoryAtomic<GuestMemoryMmap>) {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap(),
         );
@@ -507,7 +510,7 @@ mod tests {
 
         let queue = MockSplitQueue::new(&*mem_handle, 16);
 
-        let mut modified_descs: Vec<Descriptor> = Vec::with_capacity(descs.len());
+        let mut modified_descs: Vec<RawDescriptor> = Vec::with_capacity(descs.len());
 
         // Use this tag to indicate the start of request
         let mut request_head: bool = true;
@@ -533,12 +536,12 @@ mod tests {
                 idx as u16 + 1
             };
 
-            modified_descs.push(Descriptor::new(
+            modified_descs.push(RawDescriptor::from(SplitDescriptor::new(
                 desc.addr().0,
                 desc.len(),
                 desc.flags(),
                 next,
-            ));
+            )));
         }
 
         queue
@@ -604,14 +607,14 @@ mod tests {
 
         // Valid single write request
         let to_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -653,19 +656,19 @@ mod tests {
 
         // Valid single read request
         let ro_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 30,
                 (VRING_DESC_F_NEXT | VRING_DESC_F_WRITE) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -709,20 +712,20 @@ mod tests {
 
         // Valid mixed read-write request
         let tx_rx_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 30,
                 (VRING_DESC_F_NEXT | VRING_DESC_F_WRITE) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -766,39 +769,39 @@ mod tests {
 
         // Valid multiple requests
         let multi_reqs_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 30,
                 (VRING_DESC_F_NEXT | VRING_DESC_F_WRITE) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr2,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr2, 16, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr2, 16, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr2,
                 16,
                 (VRING_DESC_F_NEXT | VRING_DESC_F_WRITE) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr2,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -854,14 +857,14 @@ mod tests {
 
         // unsupported LOOP mode, should filter by parameter check
         let mode_invalid_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -903,14 +906,14 @@ mod tests {
 
         // unsupported tx_nbits, should filter by parameter check
         let mode_invalid_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -952,39 +955,39 @@ mod tests {
 
         // Valid multiple requests which contains invalid request header
         let multi_reqs_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 30,
                 (VRING_DESC_F_NEXT | VRING_DESC_F_WRITE) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr2,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr2, 16, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr2, 16, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr2,
                 16,
                 (VRING_DESC_F_NEXT | VRING_DESC_F_WRITE) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr2,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -1066,14 +1069,14 @@ mod tests {
 
         // Backend mem must be set properly before transmit.
         let writable_head_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -1111,14 +1114,14 @@ mod tests {
 
         // Set request head descriptor as writable, which is invalid.
         let writable_head_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -1157,14 +1160,14 @@ mod tests {
 
         // Set request result descriptor as readable, which is invalid.
         let readable_result_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 0,
@@ -1203,20 +1206,20 @@ mod tests {
 
         // Set tx_buf len and rx_buf len different, which is invalid.
         let tx_rx_len_diff_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 20,
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -1255,13 +1258,13 @@ mod tests {
 
         // At lease one buf needed, either tx_buf or rx_buf.
         let no_buf_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -1300,20 +1303,20 @@ mod tests {
 
         // The address range is from 0 to 0x1000_1000, set head address out of range.
         let head_addr_invalid_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 0x2000_0000,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 30,
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_result_addr1,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,
@@ -1331,20 +1334,20 @@ mod tests {
 
         // The address range is from 0 to 0x1000_1000, set result address out of range.
         let result_addr_invalid_descs = [
-            Descriptor::new(
+            SplitDescriptor::new(
                 trans_header_addr1,
                 size_of::<VirtioSpiTransferHead>() as u32,
                 VRING_DESC_F_NEXT as u16,
                 0,
             ),
-            Descriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
-            Descriptor::new(
+            SplitDescriptor::new(tx_buf_addr1, 30, VRING_DESC_F_NEXT as u16, 0),
+            SplitDescriptor::new(
                 rx_buf_addr1,
                 30,
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 0,
             ),
-            Descriptor::new(
+            SplitDescriptor::new(
                 0x2000_0000,
                 size_of::<VirtioSpiTransferResult>() as u32,
                 VRING_DESC_F_WRITE as u16,

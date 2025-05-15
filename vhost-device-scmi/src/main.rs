@@ -101,19 +101,19 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
             backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )
-        .map_err(|e| format!("{e}"))?;
+        .map_err(|e| e.to_string())?;
 
         // Register devices such as "/dev/iio:deviceX" which can actively notify the frontend to epoll the handler.
         // Then once there is data coming from these devices, an event will be created. (device_event=3)
         let handlers = daemon.get_epoll_handlers();
         backend
             .read()
-            .map_err(|e| format!("{e}"))?
+            .map_err(|e| e.to_string())?
             .register_device_event_fd(handlers);
 
         daemon
             .serve(&config.socket_path)
-            .map_err(|e| format!("{e}"))?;
+            .map_err(|e| e.to_string())?;
         debug!("Finishing backend");
     }
 }

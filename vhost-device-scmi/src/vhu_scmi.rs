@@ -512,9 +512,13 @@ impl VhostUserBackendMut for VuScmiBackend {
             _ => {
                 if device_event >= NOTIFY_ALLOW_START_FD && device_event <= max_device_event {
                     let vring = &vrings[EVENT_QUEUE as usize];
-                    vring.disable_notification().unwrap();
+                    vring
+                        .disable_notification()
+                        .map_err(|error: virtio_queue::Error| std::io::Error::other(error))?;
                     self.notify_event_queue(vring, device_event)?;
-                    vring.enable_notification().unwrap();
+                    vring
+                        .enable_notification()
+                        .map_err(|error: virtio_queue::Error| std::io::Error::other(error))?;
                 } else {
                     warn!("unhandled device_event: {}", device_event);
                     return Err(VuScmiError::HandleEventUnknownEvent.into());

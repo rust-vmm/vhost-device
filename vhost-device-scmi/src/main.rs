@@ -93,12 +93,9 @@ impl TryFrom<args::ScmiArgs> for VuScmiConfig {
 fn start_backend(config: VuScmiConfig) -> Result<()> {
     loop {
         debug!("Starting backend");
-        let backend_instance = VuScmiBackend::new(&config);
-        if let Err(error) = backend_instance {
-            return Err(error.to_string());
-        }
-
-        let backend = Arc::new(RwLock::new(backend_instance.map_err(|e| format!("{e}"))?));
+        let backend = Arc::new(RwLock::new(
+            VuScmiBackend::new(&config).map_err(|e| e.to_string())?,
+        ));
         let mut daemon = VhostUserDaemon::new(
             "vhost-device-scmi".to_owned(),
             backend.clone(),

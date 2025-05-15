@@ -69,7 +69,10 @@ impl TryFrom<args::ScmiArgs> for VuScmiConfig {
         let device_iterator = cmd_args.device.iter();
         for d in device_iterator {
             let mut split = d.split(',');
-            let name = split.next().unwrap().to_owned();
+            let name = split
+                .next()
+                .ok_or("String split failed with None")?
+                .to_owned();
             let mut properties = vec![];
             for s in split {
                 if let Some((key, value)) = s.split('=').collect_tuple() {
@@ -95,18 +98,21 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
             return Err(error.to_string());
         }
 
-        let backend = Arc::new(RwLock::new(backend_instance.unwrap()));
+        let backend = Arc::new(RwLock::new(backend_instance.map_err(|e| format!("{e}"))?));
         let mut daemon = VhostUserDaemon::new(
             "vhost-device-scmi".to_owned(),
             backend.clone(),
             GuestMemoryAtomic::new(GuestMemoryMmap::new()),
         )
-        .unwrap();
+        .map_err(|e| format!("{e}"))?;
 
         // Register devices such as "/dev/iio:deviceX" which can actively notify the frontend to epoll the handler.
         // Then once there is data coming from these devices, an event will be created. (device_event=3)
         let handlers = daemon.get_epoll_handlers();
-        backend.read().unwrap().register_device_event_fd(handlers);
+        backend
+            .read()
+            .map_err(|e| format!("{e}"))?
+            .register_device_event_fd(handlers);
 
         daemon
             .serve(&config.socket_path)

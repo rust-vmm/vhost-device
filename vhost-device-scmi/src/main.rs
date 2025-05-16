@@ -71,7 +71,7 @@ impl TryFrom<args::ScmiArgs> for VuScmiConfig {
             let mut split = d.split(',');
             let name = split
                 .next()
-                .expect("split should never return a completed itterator")
+                .expect("split should never return a completed iterator")
                 .to_owned();
             let mut properties = vec![];
             for s in split {

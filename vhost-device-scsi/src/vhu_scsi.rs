@@ -334,7 +334,10 @@ mod tests {
             VIRTIO_SCSI_S_FAILURE, VIRTIO_SCSI_S_OK,
         },
     };
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_queue::{
+        desc::{split::Descriptor, RawDescriptor},
+        mock::MockSplitQueue,
+    };
     use vm_memory::{
         Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
         GuestMemoryMmap,
@@ -426,8 +429,13 @@ mod tests {
         );
         // The `build_desc_chain` function will populate the `NEXT` related flags and field.
         let v = vec![
-            Descriptor::new(0x10_0000, 0x100, 0, 0), // request
-            Descriptor::new(0x20_0000, 0x100, VRING_DESC_F_WRITE as u16, 0), // response
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)), // request
+            RawDescriptor::from(Descriptor::new(
+                0x20_0000,
+                0x100,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            )), // response
         ];
 
         mem.memory()

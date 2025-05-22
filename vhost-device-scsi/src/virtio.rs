@@ -14,7 +14,7 @@ use std::{
 
 use log::error;
 use virtio_bindings::virtio_scsi::virtio_scsi_cmd_req;
-use virtio_queue::{Descriptor, DescriptorChain, DescriptorChainRwIter};
+use virtio_queue::{desc::split::Descriptor, DescriptorChain, DescriptorChainRwIter};
 use vm_memory::{Bytes, GuestAddress, GuestMemory};
 
 /// virtio-scsi has its own format for LUNs, documented in 5.6.6.1 of virtio
@@ -315,7 +315,7 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use virtio_bindings::virtio_scsi::{virtio_scsi_cmd_req, virtio_scsi_cmd_resp};
-    use virtio_queue::{mock::MockSplitQueue, Descriptor};
+    use virtio_queue::{desc::RawDescriptor, mock::MockSplitQueue};
     use vm_memory::{ByteValued, GuestAddress, GuestMemoryMmap};
 
     use super::*;
@@ -353,7 +353,7 @@ pub(crate) mod tests {
         // The `build_desc_chain` function will populate the `NEXT` related flags and field.
         let v = vec![
             // A device-writable request header descriptor.
-            Descriptor::new(0x10_0000, 0x100, 0, 0),
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
         ];
 
         let req = report_luns_command();

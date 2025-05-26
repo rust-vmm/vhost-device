@@ -27,7 +27,7 @@ virtio-bindings = "0.2.5"
 virtio-queue = "0.14"
 virtio-vsock = "0.8"
 vm-memory = "0.16.1"
-vmm-sys-util = "0.12"
+vmm-sys-util = "0.14"
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.0", optional = true }
 libc = { version = "0.2.172", optional = true }

@@ -10,6 +10,7 @@
 
 ### Fixed
 - [#800](https://github.com/rust-vmm/vhost-device/pull/800) Disable EPOLLOUT if triggered while txbuf is empty
+- [#838](https://github.com/rust-vmm/vhost-device/pull/838) Fix handling of data in the tx queue
 
 ### Deprecated
 

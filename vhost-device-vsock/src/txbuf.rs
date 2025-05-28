@@ -2,7 +2,7 @@
 
 use std::{io::Write, num::Wrapping};
 
-use vm_memory::{bitmap::BitmapSlice, VolatileSlice};
+use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
 
 use crate::vhu_vsock::{Error, Result};
 
@@ -55,7 +55,9 @@ impl LocalTxBuf {
         // Check if there is more data to be wrapped around
         if len < data_buf.len() {
             let remain_txbuf = &mut self.buf[..(data_buf.len() - len)];
-            data_buf.copy_to(remain_txbuf);
+            data_buf
+                .read_slice(remain_txbuf, len)
+                .expect("shouldn't faile because remain_txbuf's len is data_buf.len() - len");
         }
 
         // Increment tail by the amount of data that has been added to the buffer
@@ -159,18 +161,20 @@ mod tests {
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE * 2));
 
         // only tail wraps at full
-        let mut buf = vec![1; 4];
+        let mut buf = vec![1, 1, 3, 3];
         // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
-        let mut cmp_data = vec![1; 4];
-        cmp_data.append(&mut vec![0; (CONN_TX_BUF_SIZE - 4) as usize]);
-        loc_tx_buf.head = Wrapping(4);
-        loc_tx_buf.tail = Wrapping(CONN_TX_BUF_SIZE);
+        loc_tx_buf.head = Wrapping(2);
+        loc_tx_buf.tail = Wrapping(CONN_TX_BUF_SIZE - 2);
         let res_push = loc_tx_buf.push(&data);
         assert!(res_push.is_ok());
-        assert_eq!(loc_tx_buf.head, Wrapping(4));
-        assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE + 4));
-        assert_eq!(loc_tx_buf.buf, cmp_data);
+        assert_eq!(loc_tx_buf.head, Wrapping(2));
+        assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE + 2));
+        assert_eq!(loc_tx_buf.buf[0..2], buf[2..4]);
+        assert_eq!(
+            loc_tx_buf.buf[CONN_TX_BUF_SIZE as usize - 2..CONN_TX_BUF_SIZE as usize],
+            buf[0..2]
+        );
     }
 
     #[test]

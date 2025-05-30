@@ -430,7 +430,7 @@ mod tests {
     use std::mem;
     use std::os::fd::RawFd;
     use std::path::PathBuf;
-    use virtio_queue::Descriptor;
+    use virtio_queue::desc::{split::Descriptor as SplitDescriptor, RawDescriptor};
     use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
@@ -588,10 +588,10 @@ mod tests {
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
 
         // Create a descriptor chain with two descriptors.
-        let desc = Descriptor::new(0x400_u64, 0x100, 0, 0);
+        let desc = RawDescriptor::from(SplitDescriptor::new(0x400_u64, 0x100, 0, 0));
         mem_map.write_obj(desc, GuestAddress(0x100)).unwrap();
 
-        let desc = Descriptor::new(0x500_u64, 0x100, 0, 0);
+        let desc = RawDescriptor::from(SplitDescriptor::new(0x500_u64, 0x100, 0, 0));
         mem_map.write_obj(desc, GuestAddress(0x100 + 16)).unwrap();
 
         // Put the descriptor index 0 in the first available ring position.

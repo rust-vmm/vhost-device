@@ -2,14 +2,19 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    io::{self, Result as IoResult},
+    fs::File,
+    io::{self, BufReader, Read, Result as IoResult},
     path::PathBuf,
     sync::{Arc, Mutex, RwLock},
+    thread::{self, JoinHandle},
 };
 
 use log::warn;
 use thiserror::Error as ThisError;
-use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost::vhost_user::message::{
+    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures
+};
 use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
     virtio_config::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_config::VIRTIO_F_VERSION_1,
@@ -258,6 +263,7 @@ pub(crate) struct VhostUserVsockBackend {
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
     pub exit_event: EventFd,
+    pub handler_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl VhostUserVsockBackend {
@@ -279,6 +285,7 @@ impl VhostUserVsockBackend {
             threads: vec![thread],
             queues_per_thread,
             exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
+            handler_thread: Mutex::new(None),
         })
     }
 }
@@ -303,7 +310,62 @@ impl VhostUserBackend for VhostUserVsockBackend {
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
-        VhostUserProtocolFeatures::MQ | VhostUserProtocolFeatures::CONFIG
+        VhostUserProtocolFeatures::MQ
+	    | VhostUserProtocolFeatures::CONFIG
+	    | VhostUserProtocolFeatures::DEVICE_STATE
+    }
+
+    #[allow(unused_variables)]
+    fn set_device_state_fd(
+        &self,
+        direction: VhostTransferStateDirection,
+        phase: VhostTransferStatePhase,
+        file: File,
+    ) -> IoResult<Option<File>> {
+        let handle = thread::spawn(move || {
+            match direction {
+                VhostTransferStateDirection::SAVE => {
+                    // save
+                    // No device state to save yet, just close the FD.
+                    drop(file);
+                }
+                VhostTransferStateDirection::LOAD => {
+                    // load
+                    // No device state to load yet, just verify it is empty.
+                    let mut data = Vec::new();
+                    let mut reader = BufReader::new(file);
+                    if reader.read_to_end(&mut data).is_err() {
+                        println!("vhost-device-vsock loaded device state read failed");
+                        return;
+                    }
+
+                    if data.len() > 0 {
+                        println!("vhost-device-vsock loaded device state is non-empty. BUG!");
+                        return;
+                    }
+                }
+                _ => {
+                    println!("invalid transfer_direction");
+                    return;
+                }
+            }
+        });
+        *self.handler_thread.lock().unwrap() = Some(handle);
+        Ok(None)
+    }
+
+    fn check_device_state(&self) -> IoResult<()> {
+        if !self.handler_thread.lock().unwrap().is_none() {
+            self.handler_thread
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .join()
+                .unwrap();
+            *self.handler_thread.lock().unwrap() = None;
+        }
+        Ok(())
     }
 
     fn set_event_idx(&self, enabled: bool) {

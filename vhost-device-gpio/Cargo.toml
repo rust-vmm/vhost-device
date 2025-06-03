@@ -25,8 +25,8 @@ vhost = { version = "0.13", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.14"
-vm-memory = "0.16.1"
-vmm-sys-util = "0.12"
+vm-memory = "0.16.2"
+vmm-sys-util = "0.14"
 
 [target.'cfg(target_env = "gnu")'.dependencies]
 libgpiod = "0.2"
@@ -34,4 +34,4 @@ libgpiod = "0.2"
 [dev-dependencies]
 assert_matches = "1.5"
 virtio-queue = { version = "0.14", features = ["test-utils"] }
-vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.16.2", features = ["backend-mmap", "backend-atomic"] }

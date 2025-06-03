@@ -25,8 +25,8 @@ vhost = { version = "0.13", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.17"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.14"
-vm-memory = "0.16.1"
-vmm-sys-util = "0.12"
+vm-memory = "0.16.2"
+vmm-sys-util = "0.14"
 
 # Make alsa and pipewire backends available only on gnu
 [target.'cfg(target_env = "gnu")'.dependencies]
@@ -37,7 +37,7 @@ pw = { package = "pipewire", version = "0.8", optional = true }
 rstest = "0.25.0"
 tempfile = "3.20"
 virtio-queue = { version = "0.14", features = ["test-utils"] }
-vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.16.2", features = ["backend-mmap", "backend-atomic"] }
 
 [target.'cfg(target_env = "gnu")'.dev-dependencies]
 rand = { version = "0.9.1" }

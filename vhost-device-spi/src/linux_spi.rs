@@ -6,7 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use bitflags::bitflags;
-use vmm_sys_util::{ioctl_ioc_nr, ioctl_ior_nr, ioctl_iow_nr};
+use vmm_sys_util::{ioctl_ior_nr, ioctl_iow_nr};
 
 /// Describes a single SPI transfer
 #[derive(Debug)]

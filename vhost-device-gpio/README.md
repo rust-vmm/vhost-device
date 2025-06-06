@@ -52,7 +52,7 @@ asking for trouble you can enable the "mock_gpio" feature in your build:
 
 You can then enable simulated GPIOs using the 's' prefix:
 
-    --device-list s4,s8
+    --device-list s4:s8
 
 Which will create two gpio devices, the first with 4 pins and the
 second with 8. By default updates are display via env logger:
@@ -71,7 +71,7 @@ The daemon should be started first:
 
 ::
 
-  host# vhost-device-gpio --socket-path=gpio.sock --socket-count=1 --device-list 0:3
+  host# vhost-device-gpio --socket-path=gpio.sock --socket-count=2 --device-list 0:3
 
 The QEMU invocation needs to create a chardev socket the device can
 use to communicate as well as share the guests memory over a memfd.

@@ -15,6 +15,7 @@ pub enum BackendType {
     #[default]
     Nested,
     Network,
+    Uds,
 }
 
 #[derive(Debug)]

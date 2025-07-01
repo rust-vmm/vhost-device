@@ -23,8 +23,8 @@ num_enum = "0.7"
 thiserror = "2.0"
 vhost = { version = "0.14", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.19"
-virtio-bindings = "0.2.5"
-virtio-queue = "0.15"
+virtio-bindings = "0.2.6"
+virtio-queue = "0.16"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.14"
 

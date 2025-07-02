@@ -186,7 +186,7 @@ impl<T: InputDevice> VuInputBackend<T> {
             } else {
                 // Now cannot get available descriptor, which means the host cannot process
                 // event data in time and overrun happens in the backend. In this case,
-                // we simply drop the incomping input event and notify guest for handling
+                // we simply drop the incoming input event and notify guest for handling
                 // events. At the end, it returns Ok(false) so can avoid exiting the thread loop.
                 self.ev_list.clear();
 

@@ -448,7 +448,7 @@ mod tests {
         );
 
         // Artificially set the period start time to 10 second.  This will simulate a
-        // condition where the the period has been exeeded and for the quota to be reset
+        // condition where the the period has been exceeded and for the quota to be reset
         // to its maximum value.
         backend.time_sub(Duration::from_secs(10));
         assert!(backend
@@ -457,7 +457,7 @@ mod tests {
 
         // Reset time to right now and set remaining quota to 0.  This will simulate a
         // condition where the quota for a period has been exceeded and force the execution
-        // thread to wait for the start of the next period before serving requets.
+        // thread to wait for the start of the next period before serving requests.
         backend.time_now();
         backend.set_quota(0);
         assert!(backend

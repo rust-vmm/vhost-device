@@ -68,7 +68,7 @@ crate has been built with the `gfxstream` feature, which is the default.
 
 ## Limitations
 
-This device links native libaries (because of the usage of Rutabaga) compiled
+This device links native libraries (because of the usage of Rutabaga) compiled
 with GNU libc, so the CI is setup to not build this device for musl targets. 
 It might be possible to build those libraries using musl and then build the gpu
 device, but this is not tested.

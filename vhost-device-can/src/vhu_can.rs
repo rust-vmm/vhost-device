@@ -775,13 +775,13 @@ mod tests {
         // Empty descriptor chain should be ignored
         assert!(vu_can_backend
             .process_rx_requests(Vec::<CanDescriptorChain>::new(), &vring)
-            .expect("Fail to examin empty rx vring"));
+            .expect("Fail to examine empty rx vring"));
         assert!(vu_can_backend
             .process_tx_requests(Vec::<CanDescriptorChain>::new(), &vring)
-            .expect("Fail to examin empty tx vring"));
+            .expect("Fail to examine empty tx vring"));
         assert!(vu_can_backend
             .process_ctrl_requests(Vec::<CanDescriptorChain>::new(), &vring)
-            .expect("Fail to examin empty ctrl vring"));
+            .expect("Fail to examine empty ctrl vring"));
     }
 
     #[test]
@@ -930,7 +930,7 @@ mod tests {
 
         assert_eq!(VIRTIO_CAN_RESULT_NOT_OK, can_frame_res);
 
-        // Test 4: Successfull test for VIRTIO_CAN_SET_CTRL_MODE_START
+        // Test 4: Successful test for VIRTIO_CAN_SET_CTRL_MODE_START
         let can_mes_len = size_of::<VirtioCanCtrlRequest>();
         let desc_chain = build_desc_chain_mem(
             &mem,
@@ -966,7 +966,7 @@ mod tests {
 
         assert_eq!(VIRTIO_CAN_RESULT_OK, can_frame_res);
 
-        // Test 5: Successfull test for VIRTIO_CAN_SET_CTRL_MODE_STOP
+        // Test 5: Successful test for VIRTIO_CAN_SET_CTRL_MODE_STOP
         let can_mes_len = size_of::<VirtioCanCtrlRequest>();
         let desc_chain = build_desc_chain_mem(
             &mem,

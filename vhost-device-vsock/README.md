@@ -177,7 +177,7 @@ guest$ nc --vsock 2 1234
 If you add multiple VMs with their devices configured with at least one common group name, they can communicate with
 each other. If you don't explicitly specify a group name, a default group will be assigned to the device with name
 `default`, and all such devices will be able to communicate with each other. Or you can choose a different list of
-group names for each device, and only devices with the at least one group in commmon will be able to communicate with
+group names for each device, and only devices with the at least one group in common will be able to communicate with
 each other.
 
 For example, if you have two VMs with CID 3 and 4, you can run the following commands to make them communicate:

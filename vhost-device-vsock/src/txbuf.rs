@@ -57,7 +57,7 @@ impl LocalTxBuf {
             let remain_txbuf = &mut self.buf[..(data_buf.len() - len)];
             data_buf
                 .read_slice(remain_txbuf, len)
-                .expect("shouldn't faile because remain_txbuf's len is data_buf.len() - len");
+                .expect("shouldn't fail because remain_txbuf's len is data_buf.len() - len");
         }
 
         // Increment tail by the amount of data that has been added to the buffer

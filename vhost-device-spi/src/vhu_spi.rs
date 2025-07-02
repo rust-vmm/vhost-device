@@ -179,7 +179,7 @@ impl<D: SpiDevice> VhostUserSpiBackend<D> {
                 .reader(&mem)
                 .map_err(|_| Error::DescriptorReadFailed)?;
 
-            let writter = desc_chain
+            let writer = desc_chain
                 .clone()
                 .writer(&mem)
                 .map_err(|_| Error::DescriptorReadFailed)?;
@@ -213,24 +213,24 @@ impl<D: SpiDevice> VhostUserSpiBackend<D> {
                 }
             }
 
-            let rx_buf: Vec<u8> = match writter.available_bytes().cmp(&size_of::<u8>()) {
+            let rx_buf: Vec<u8> = match writer.available_bytes().cmp(&size_of::<u8>()) {
                 Ordering::Less => {
                     return Err(Error::UnexpectedDescriptorSize(
                         size_of::<u8>(),
-                        writter.available_bytes() as u32,
+                        writer.available_bytes() as u32,
                     ));
                 }
                 Ordering::Equal => Vec::new(),
                 Ordering::Greater => {
                     if trans_len != 0
-                        && trans_len != (writter.available_bytes() - size_of::<u8>()) as u32
+                        && trans_len != (writer.available_bytes() - size_of::<u8>()) as u32
                     {
                         return Err(Error::TxRxTrnasLenNotEqual(
                             trans_len,
-                            (writter.available_bytes() - size_of::<u8>()) as u32,
+                            (writer.available_bytes() - size_of::<u8>()) as u32,
                         ));
                     } else if trans_len == 0 {
-                        trans_len = (writter.available_bytes() - size_of::<u8>()) as u32;
+                        trans_len = (writer.available_bytes() - size_of::<u8>()) as u32;
                     }
                     vec![0; trans_len as usize]
                 }
@@ -278,24 +278,24 @@ impl<D: SpiDevice> VhostUserSpiBackend<D> {
                     },
                 };
 
-                let mut writter = desc_chain
+                let mut writer = desc_chain
                     .clone()
                     .writer(&mem)
                     .map_err(|_| Error::DescriptorReadFailed)?;
 
-                if writter.available_bytes() > size_of::<u8>() {
-                    let rx_len = (writter.available_bytes() - size_of::<u8>()) as u32;
-                    let mut writter_status = writter
+                if writer.available_bytes() > size_of::<u8>() {
+                    let rx_len = (writer.available_bytes() - size_of::<u8>()) as u32;
+                    let mut writer_status = writer
                         .split_at(rx_len as usize)
                         .map_err(|_| Error::DescriptorReadFailed)?;
 
-                    writter_status
+                    writer_status
                         .write_obj(req_param_valid)
                         .map_err(|_| Error::DescriptorWriteFailed)?;
 
                     len += rx_len;
                 } else {
-                    writter
+                    writer
                         .write_obj(req_param_valid)
                         .map_err(|_| Error::DescriptorWriteFailed)?;
                 }
@@ -315,28 +315,28 @@ impl<D: SpiDevice> VhostUserSpiBackend<D> {
                         let mut len = size_of::<VirtioSpiTransferResult>() as u32;
                         let mem = atomic_mem.memory();
 
-                        let mut writter = desc_chain
+                        let mut writer = desc_chain
                             .clone()
                             .writer(&mem)
                             .map_err(|_| Error::DescriptorReadFailed)?;
 
-                        if writter.available_bytes() > size_of::<u8>() {
-                            let rx_len = (writter.available_bytes() - size_of::<u8>()) as u32;
-                            let mut writter_status = writter
+                        if writer.available_bytes() > size_of::<u8>() {
+                            let rx_len = (writer.available_bytes() - size_of::<u8>()) as u32;
+                            let mut writer_status = writer
                                 .split_at(rx_len as usize)
                                 .map_err(|_| Error::DescriptorReadFailed)?;
 
-                            writter_status
+                            writer_status
                                 .write_obj(in_hdr)
                                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
-                            writter
+                            writer
                                 .write(&req.rx_buf)
                                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
                             len += rx_len;
                         } else {
-                            writter
+                            writer
                                 .write_obj(in_hdr)
                                 .map_err(|_| Error::DescriptorWriteFailed)?;
                         }
@@ -356,12 +356,12 @@ impl<D: SpiDevice> VhostUserSpiBackend<D> {
                         let len = size_of::<VirtioSpiTransferResult>() as u32;
                         let mem = atomic_mem.memory();
 
-                        let mut writter = desc_chain
+                        let mut writer = desc_chain
                             .clone()
                             .writer(&mem)
                             .map_err(|_| Error::DescriptorReadFailed)?;
 
-                        writter
+                        writer
                             .write_obj(in_hdr)
                             .map_err(|_| Error::DescriptorWriteFailed)?;
 

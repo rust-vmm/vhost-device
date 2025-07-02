@@ -438,7 +438,7 @@ impl HandlerMap {
                 let values: MessageValues = vec![
                     MessageValue::Unsigned(n_sensors), // # of sensors, no async commands
                     MessageValue::Unsigned(0), // lower shared memory address -- not supported
-                    MessageValue::Unsigned(0), // higer shared memory address -- not supported
+                    MessageValue::Unsigned(0), // higher shared memory address -- not supported
                     MessageValue::Unsigned(0), // length of shared memory -- not supported
                 ];
                 Response::from(&values)
@@ -591,7 +591,7 @@ pub trait ScmiDevice: Send {
     // Get device notify fd
     fn get_notify_fd(&self) -> Option<RawFd>;
 
-    // Set id for this ScmiDeivce
+    // Set id for this ScmiDevice
     fn set_id(&mut self, id: usize);
 
     // Get id of this ScmiDevice

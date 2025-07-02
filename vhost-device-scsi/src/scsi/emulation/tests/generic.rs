@@ -36,7 +36,7 @@ fn test_invalid_service_action() {
     do_command_fail(
         &mut target,
         &[
-            0xa3, // MAINTAINANCE IN
+            0xa3, // MAINTENANCE IN
             0x1f, // vendor specific, unused by us
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ],

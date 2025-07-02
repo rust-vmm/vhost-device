@@ -142,7 +142,7 @@ impl VhostUserScsiBackend {
             }
             Err(RequestParseError::CouldNotReadGuestMemory(e)) => {
                 // See comment later about errors while writing to guest mem; maybe we at least
-                // got functional write desciptors, so we can report an error
+                // got functional write descriptors, so we can report an error
                 error!("Error reading request from guest memory: {:?}", e);
                 Response::error(ResponseCode::Failure, body_writer.residual())
             }

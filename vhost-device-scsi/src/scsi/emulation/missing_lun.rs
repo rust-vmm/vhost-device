@@ -49,7 +49,7 @@ impl LogicalUnit for MissingLun {
                         Ok(CmdOutput::ok())
                     }
                     SenseFormat::Descriptor => {
-                        // Don't support desciptor format.
+                        // Don't support descriptor format.
                         Ok(CmdOutput::check_condition(sense::INVALID_FIELD_IN_CDB))
                     }
                 }

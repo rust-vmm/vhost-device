@@ -73,7 +73,7 @@ pub fn respond_standard_inquiry_data(data_in: &mut impl Write) -> io::Result<()>
         // bits: don't support NormACA, support modern LUN format
         // INQUIRY data version 2
         0b0001_0000 | 0x2,
-        91, // additional INQURIY data length
+        91, // additional INQUIRY data length
         // bunch of feature bits we don't support:
         0,
         0,

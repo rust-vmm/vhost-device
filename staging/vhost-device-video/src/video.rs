@@ -720,7 +720,7 @@ pub struct virtio_video_crop {
     pub left: Le32,
     pub top: Le32,
     pub width: Le32,
-    pub heigth: Le32,
+    pub height: Le32,
 }
 
 #[repr(C)]
@@ -729,7 +729,7 @@ pub struct virtio_video_params {
     pub queue_type: Le32,
     pub format: Le32,
     pub frame_width: Le32,
-    pub frame_heigth: Le32,
+    pub frame_height: Le32,
     pub min_buffers: Le32,
     pub max_buffers: Le32,
     pub crop: virtio_video_crop,

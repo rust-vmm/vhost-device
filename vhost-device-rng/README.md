@@ -13,7 +13,7 @@ requests more bytes than the allowed limit the thread will block until the
 start of a new period.  The daemon will automatically split the available
 bandwidth equally between the guest when several threads are requested.
 
-Thought developed and tested with QEMU, the implemenation is based on the
+Though developed and tested with QEMU, the implementation is based on the
 vhost-user protocol and as such should be interoperable with other virtual
 machine managers.  Please see below for working examples.
 
@@ -48,7 +48,7 @@ machine managers.  Please see below for working examples.
 
 .. option:: -m, --max-bytes
 
-  In conjuction with the --period parameter, provides the maximum number of byte
+  In conjunction with the --period parameter, provides the maximum number of byte
   per milliseconds a RNG device can generate.
 
 ## Examples

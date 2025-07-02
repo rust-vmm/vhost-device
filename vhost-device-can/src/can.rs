@@ -166,7 +166,7 @@ impl CanController {
             }
         };
 
-        // Set non-blocking otherwise the device will not restart immediatelly
+        // Set non-blocking otherwise the device will not restart immediately
         // when the VM closes, and a new canfd message needs to be received for
         // restart to happen.
         // This caused by the fact that the thread is stacked in read function
@@ -257,7 +257,7 @@ impl CanController {
             }
         };
 
-        // Grab the data to be tranfered
+        // Grab the data to be transferred
         let data_len = tx_request.length.to_native() as usize;
         let data: Vec<u8> = tx_request.sdu.iter().cloned().take(data_len).collect();
 

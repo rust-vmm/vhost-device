@@ -379,7 +379,7 @@ impl VhostUserConsoleBackend {
                 trace!("VIRTIO_CONSOLE_PORT_OPEN");
             }
             other => {
-                trace!("Uknown control event: {}", other);
+                trace!("Unknown control event: {}", other);
                 return Err(Error::HandleEventUnknown(other));
             }
         };

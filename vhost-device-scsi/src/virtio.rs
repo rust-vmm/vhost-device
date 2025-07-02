@@ -183,7 +183,7 @@ where
             .current
             .is_some_and(|current| self.offset >= current.len())
         {
-            let current = self.current.expect("loop condition ensures existance");
+            let current = self.current.expect("loop condition ensures existence");
             self.offset -= current.len();
             self.current = self.iter.next();
         }

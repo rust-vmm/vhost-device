@@ -441,7 +441,7 @@ impl VideoBackend for V4L2Decoder {
         let pix_fmt = unsafe { &format.fmt.pix_mp };
         params.format = PixelFormat::from(pix_fmt.pixelformat).to_virtio();
         params.frame_width = pix_fmt.width.into();
-        params.frame_heigth = pix_fmt.height.into();
+        params.frame_height = pix_fmt.height.into();
         params.num_planes = (pix_fmt.num_planes as u32).into();
 
         for i in 0..pix_fmt.num_planes {
@@ -456,7 +456,7 @@ impl VideoBackend for V4L2Decoder {
                 params.crop.left = (sel.left as u32).into();
                 params.crop.top = (sel.top as u32).into();
                 params.crop.width = sel.width.into();
-                params.crop.heigth = sel.height.into();
+                params.crop.height = sel.height.into();
             }
         }
 
@@ -477,7 +477,7 @@ impl VideoBackend for V4L2Decoder {
         let queue_type = v4l2r::QueueType::from_value(params.queue_type.into()).unwrap();
         let mut format = v4l2r::Format {
             width: params.frame_width.into(),
-            height: params.frame_heigth.into(),
+            height: params.frame_height.into(),
             pixelformat: PixelFormat::from(<Le32 as Into<u32>>::into(params.format)),
             ..Default::default()
         };
@@ -779,7 +779,7 @@ impl V4L2Decoder {
                         && format_frame.width.step != 1
                         && format_frame.length.step != 1
                     {
-                        warn!("invalid step for continious framesize");
+                        warn!("invalid step for continuous framesize");
                         break;
                     }
 
@@ -823,7 +823,7 @@ impl V4L2Decoder {
                 warn!("driver returned wrong ival width: {}", ival.width);
             }
             if height != ival.height {
-                warn!("driver returned wrong ival heigth: {}", ival.height);
+                warn!("driver returned wrong ival height: {}", ival.height);
             }
 
             frame_rates.push(video::virtio_video_format_range::from(ival));

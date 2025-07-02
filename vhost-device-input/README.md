@@ -10,7 +10,7 @@ It polls on a host's input event device (/dev/input/eventX) and passes the
 input event data to guests.
 
 This program is tested with QEMU's `vhost-user-input-pci`.  The
-implemenation is based on the vhost-user protocol and as such should be
+implementation is based on the vhost-user protocol and as such should be
 interoperable with other virtual machine managers.  Please see below for
 working examples.
 

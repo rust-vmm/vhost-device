@@ -1001,7 +1001,7 @@ mod tests {
         let mem_handle = mem.memory();
         mem.memory()
             .check_address(queue_addr_start)
-            .expect("Invalid start adress");
+            .expect("Invalid start address");
 
         let mut output_bufs = Vec::new();
         let vq = MockSplitQueue::create(&*mem_handle, queue_addr_start, queue_size);
@@ -1027,17 +1027,17 @@ mod tests {
                 descriptors.push(desc);
                 next_addr += buf.len() as u64;
             }
-            let mut writable_descriptor_adresses = Vec::new();
+            let mut writable_descriptor_addresses = Vec::new();
             for desc_len in chain.writable_desc_lengths.iter().copied() {
                 mem.memory()
                     .check_address(GuestAddress(next_addr))
                     .expect("Writable descriptor's buffer address is not valid!");
                 let desc = SplitDescriptor::new(next_addr, desc_len, VRING_DESC_F_WRITE as u16, 0);
-                writable_descriptor_adresses.push(desc.addr());
+                writable_descriptor_addresses.push(desc.addr());
                 descriptors.push(desc);
                 next_addr += u64::from(desc_len);
             }
-            output_bufs.push(writable_descriptor_adresses);
+            output_bufs.push(writable_descriptor_addresses);
             make_descriptors_into_a_chain(
                 chain_index_start as u16,
                 &mut descriptors[chain_index_start..],

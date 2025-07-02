@@ -381,7 +381,7 @@ impl AudioBackend for PwBackend {
                         .expect("could not update params");
                 })
                 .process(move |stream, _data| match stream.dequeue_buffer() {
-                    None => debug!("No buffer recieved"),
+                    None => debug!("No buffer received"),
                     Some(mut req) => {
                         match direction {
                             Direction::Input => {

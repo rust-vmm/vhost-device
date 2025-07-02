@@ -210,7 +210,7 @@ pub(crate) struct VsockThreadBackend {
     tx_buffer_size: u32,
     /// Maps the guest CID to the corresponding backend. Used for sibling VM communication.
     pub cid_map: Arc<RwLock<CidMap>>,
-    /// Queue of raw vsock packets recieved from sibling VMs to be sent to the guest.
+    /// Queue of raw vsock packets received from sibling VMs to be sent to the guest.
     pub raw_pkts_queue: Arc<RwLock<RawPktsQ>>,
     /// Set of groups assigned to the device which it is allowed to communicate with.
     groups_set: Arc<RwLock<HashSet<String>>>,

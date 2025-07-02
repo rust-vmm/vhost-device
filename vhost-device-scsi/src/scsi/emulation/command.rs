@@ -512,7 +512,7 @@ impl Cdb {
                 let evpd = match cdb[1] {
                     0 => false,
                     1 => true,
-                    // obselete or reserved bits set
+                    // obsolete or reserved bits set
                     _ => return Err(ParseError::InvalidField),
                 };
                 let page_code_raw = cdb[2];

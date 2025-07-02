@@ -159,7 +159,7 @@ impl Default for GpuFlags {
 #[derive(Debug, ThisError)]
 pub enum GpuConfigError {
     #[error("The mode {0} does not support {1} capset")]
-    CapsetUnsuportedByMode(GpuMode, GpuCapset),
+    CapsetUnsupportedByMode(GpuMode, GpuCapset),
     #[error("Requested gfxstream-gles capset, but gles is disabled")]
     GlesRequiredByGfxstream,
 }
@@ -186,7 +186,7 @@ impl GpuConfig {
         };
         for capset in capset.iter() {
             if !supported_capset_mask.contains(capset) {
-                return Err(GpuConfigError::CapsetUnsuportedByMode(gpu_mode, capset));
+                return Err(GpuConfigError::CapsetUnsupportedByMode(gpu_mode, capset));
             }
         }
 
@@ -285,7 +285,7 @@ mod tests {
         let result = GpuConfig::new(mode, Some(capset), GpuFlags::new_default());
         assert_matches!(
             result,
-            Err(GpuConfigError::CapsetUnsuportedByMode(
+            Err(GpuConfigError::CapsetUnsupportedByMode(
                 requested_mode,
                 unsupported_capset
             )) if unsupported_capset == expected_capset && requested_mode == mode

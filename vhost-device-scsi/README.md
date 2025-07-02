@@ -16,7 +16,7 @@ Run QEMU:
 qemu-system-x86_64 ... \
   -device vhost-user-scsi-pci,num_queues=1,param_change=off,chardev=vus \
   -chardev socket,id=vus,path=/tmp/vhost-user-scsi.sock \
-  # must match total guest meory
+  # must match total guest memory
   -object memory-backend-memfd,id=mem,size=384M,share=on \
   -numa node,memdev=mem
 ```

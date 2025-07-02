@@ -50,8 +50,8 @@ fn test_report_luns_empty() {
         target.add_lun(Box::new(dev));
     }
 
-    // well-known only and several modes explictly defined to return an empty list
-    // for all but ceratin types of recieving LUNs
+    // well-known only and several modes explicitly defined to return an empty list
+    // for all but ceratin types of receiving LUNs
     let select_reports = &[0x1, 0x10, 0x11, 0x12];
 
     for &sr in select_reports {

@@ -447,7 +447,7 @@ fn test_inquiry() {
         &[],
         // some empty comments to get rustfmt to do something vaguely sensible
         &[
-            0,    // accessible; direct acccess block device
+            0,    // accessible; direct access block device
             0,    // features
             0x7,  // version
             0x12, // response data format v2, HiSup = 1

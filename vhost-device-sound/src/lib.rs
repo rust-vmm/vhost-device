@@ -248,7 +248,7 @@ impl TryFrom<Le32> for ControlMessageKind {
 pub struct SoundConfig {
     /// vhost-user Unix domain socket
     socket: PathBuf,
-    /// use multiple threads to hanlde the virtqueues
+    /// use multiple threads to handle the virtqueues
     multi_thread: bool,
     /// audio backend variant
     audio_backend: BackendType,

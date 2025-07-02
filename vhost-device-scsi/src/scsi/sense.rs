@@ -14,8 +14,8 @@ impl SenseTriple {
             0x0, 0x0, 0x0, 0x0,    // cmd-specific information
             self.1, // asc
             self.2, // ascq
-            0x0,    // field-replacable unit code
-            0x0, 0x0, 0x0, // sense-key-sepcific information
+            0x0,    // field-replaceable unit code
+            0x0, 0x0, 0x0, // sense-key-specific information
         ]
     }
 }

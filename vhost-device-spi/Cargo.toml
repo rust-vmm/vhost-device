@@ -22,14 +22,14 @@ libc = "0.2"
 log = "0.4"
 thiserror = "2.0"
 vhost = { version = "0.14", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.19"
+vhost-user-backend = "0.20"
 virtio-bindings = "0.2.5"
-virtio-queue = "0.15"
+virtio-queue = "0.16"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.14"
 bitflags = "2.9.1"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.15", features = ["test-utils"] }
+virtio-queue = { version = "0.16", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }

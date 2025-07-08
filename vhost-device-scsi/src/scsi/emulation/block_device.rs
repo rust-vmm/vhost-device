@@ -684,7 +684,11 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                             return Ok(CmdOutput::check_condition(sense::INVALID_FIELD_IN_CDB));
                         }
                         ParseOpcodeResult::Invalid => {
-                            warn!("Reporting that we don't support command {:#2x}. It might be worth adding.", opcode);
+                            warn!(
+                                "Reporting that we don't support command {:#2x}. It might be \
+                                 worth adding.",
+                                opcode
+                            );
                             one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                         }
                     },
@@ -701,7 +705,11 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                                         timeout_descriptor(data_in).map_err(CmdError::DataIn)?;
                                     }
                                 } else {
-                                    warn!("Reporting that we don't support command {:#2x}/{:#2x}. It might be worth adding.", opcode, sa);
+                                    warn!(
+                                        "Reporting that we don't support command {:#2x}/{:#2x}. \
+                                         It might be worth adding.",
+                                        opcode, sa
+                                    );
                                     one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                                 }
                             }
@@ -710,7 +718,11 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                                 // think an invalid opcode is one for which our implementation
                                 // "does not implement service actions", so we say invalid field in
                                 // CDB
-                                warn!("Reporting that we don't support command {:#2x}/{:#2x}. It might be worth adding.", opcode, sa);
+                                warn!(
+                                    "Reporting that we don't support command {:#2x}/{:#2x}. It \
+                                     might be worth adding.",
+                                    opcode, sa
+                                );
                                 return Ok(CmdOutput::check_condition(sense::INVALID_FIELD_IN_CDB));
                             }
                         }
@@ -736,12 +748,20 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                                         timeout_descriptor(data_in).map_err(CmdError::DataIn)?;
                                     }
                                 } else {
-                                    warn!("Reporting that we don't support command {:#2x}/{:#2x}. It might be worth adding.", opcode, sa);
+                                    warn!(
+                                        "Reporting that we don't support command {:#2x}/{:#2x}. \
+                                         It might be worth adding.",
+                                        opcode, sa
+                                    );
                                     one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                                 }
                             }
                             ParseOpcodeResult::Invalid => {
-                                warn!("Reporting that we don't support command {:#2x}[/{:#2x}]. It might be worth adding.", opcode, sa);
+                                warn!(
+                                    "Reporting that we don't support command {:#2x}[/{:#2x}]. It \
+                                     might be worth adding.",
+                                    opcode, sa
+                                );
                                 one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                             }
                         }

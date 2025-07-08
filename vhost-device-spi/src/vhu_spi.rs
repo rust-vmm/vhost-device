@@ -17,17 +17,18 @@ use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
-use virtio_queue::DescriptorChain;
-use virtio_queue::QueueOwnedT;
+use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
 use crate::spi::*;
 
@@ -488,8 +489,8 @@ impl<D: 'static + SpiDevice + Sync + Send> VhostUserBackendMut for VhostUserSpiB
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::slice::from_raw_parts;
+    use std::{path::PathBuf, slice::from_raw_parts};
+
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{
         desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
@@ -497,8 +498,7 @@ mod tests {
     };
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
-    use super::Error;
-    use super::*;
+    use super::{Error, *};
     use crate::spi::tests::{verify_rdwr_buf, DummyDevice};
 
     // Prepares descriptor chains

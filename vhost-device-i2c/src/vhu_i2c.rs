@@ -5,28 +5,30 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::warn;
-use std::mem::size_of;
-use std::sync::Arc;
 use std::{
     convert,
     io::{self, Result as IoResult},
+    mem::size_of,
+    sync::Arc,
 };
 
+use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
     Le16, Le32,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
 use crate::i2c::*;
 
@@ -368,10 +370,11 @@ mod tests {
     };
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
-    use super::Error;
-    use super::*;
-    use crate::i2c::tests::{update_rdwr_buf, verify_rdwr_buf, DummyDevice};
-    use crate::AdapterConfig;
+    use super::{Error, *};
+    use crate::{
+        i2c::tests::{update_rdwr_buf, verify_rdwr_buf, DummyDevice},
+        AdapterConfig,
+    };
 
     // Prepares a single chain of descriptors
     fn prepare_desc_chain(

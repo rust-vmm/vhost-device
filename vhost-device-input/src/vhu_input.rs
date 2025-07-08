@@ -117,7 +117,7 @@ type Result<T> = std::result::Result<T, VuInputError>;
 
 impl From<VuInputError> for io::Error {
     fn from(e: VuInputError) -> Self {
-        Self::new(io::ErrorKind::Other, e)
+        Self::other(e)
     }
 }
 

@@ -112,7 +112,7 @@ pub(crate) fn start_backend_server(socket: PathBuf, can_devs: String) -> Result<
         // Wait for read thread to exit
         match read_handle.join() {
             Ok(_) => info!("The read thread returned successfully"),
-            Err(e) => warn!("The read thread returned the error: {:?}", e),
+            Err(e) => warn!("The read thread returned the error: {e:?}"),
         }
     }
 }
@@ -128,12 +128,9 @@ pub fn start_backend(config: VuCanConfig) -> Result<()> {
         .map(|(a, b)| (a, b.to_string()))
         .enumerate()
     {
-        println!(
-            "thread_id: {}, socket: {:?}, can_devs: {:?}",
-            thread_id, socket, can_devs,
-        );
+        println!("thread_id: {thread_id}, socket: {socket:?}, can_devs: {can_devs:?}",);
 
-        let name = format!("vhu-can-{}", can_devs);
+        let name = format!("vhu-can-{can_devs}");
         let sender = senders.clone();
         let handle = thread::Builder::new()
             .name(name.clone())

@@ -5,26 +5,30 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::warn;
-use std::sync::{Arc, Mutex};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
-use std::{convert, io, result};
+use std::{
+    convert, io, result,
+    sync::{Arc, Mutex},
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
+use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
     ReadVolatile,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
 const QUEUE_SIZE: usize = 1024;
 const NUM_QUEUES: usize = 1;
@@ -287,7 +291,6 @@ impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBacke
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::ErrorKind;
 
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
@@ -297,6 +300,8 @@ mod tests {
         Queue,
     };
     use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
+
+    use super::*;
 
     // Add VuRngBackend accessor to artificially manipulate internal fields
     impl<T: ReadVolatile> VuRngBackend<T> {
@@ -439,7 +444,8 @@ mod tests {
         // Artificially set the period start time 5 seconds in the future
         backend.time_add(Duration::from_secs(5));
 
-        // Checking for a start time in the future throws a VuRngError::UnexpectedTimerValue
+        // Checking for a start time in the future throws a
+        // VuRngError::UnexpectedTimerValue
         assert_eq!(
             backend
                 .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
@@ -448,16 +454,17 @@ mod tests {
         );
 
         // Artificially set the period start time to 10 second.  This will simulate a
-        // condition where the the period has been exceeded and for the quota to be reset
-        // to its maximum value.
+        // condition where the the period has been exceeded and for the quota to be
+        // reset to its maximum value.
         backend.time_sub(Duration::from_secs(10));
         assert!(backend
             .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
             .unwrap());
 
         // Reset time to right now and set remaining quota to 0.  This will simulate a
-        // condition where the quota for a period has been exceeded and force the execution
-        // thread to wait for the start of the next period before serving requests.
+        // condition where the quota for a period has been exceeded and force the
+        // execution thread to wait for the start of the next period before
+        // serving requests.
         backend.time_now();
         backend.set_quota(0);
         assert!(backend
@@ -479,7 +486,8 @@ mod tests {
         // Artificial Vring
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
 
-        // Any type of error while reading an RNG source will throw a VuRngError::UnexpectedRngSourceError.
+        // Any type of error while reading an RNG source will throw a
+        // VuRngError::UnexpectedRngSourceError.
         assert_eq!(
             backend
                 .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)
@@ -525,14 +533,15 @@ mod tests {
             io::ErrorKind::Other
         );
 
-        // backend.event_idx is set to false by default, which will call backend.process_queue()
-        // a single time.  Since there is no descriptor in the vring backend.process_requests()
-        // will return immediately.
+        // backend.event_idx is set to false by default, which will call
+        // backend.process_queue() a single time.  Since there is no descriptor
+        // in the vring backend.process_requests() will return immediately.
         backend
             .handle_event(0, EventSet::IN, &[vring.clone()], 0)
             .unwrap();
 
-        // Set backend.event_idx to true in order to call backend.process_queue() multiple time
+        // Set backend.event_idx to true in order to call backend.process_queue()
+        // multiple time
         backend.set_event_idx(true);
         backend.handle_event(0, EventSet::IN, &[vring], 0).unwrap();
     }
@@ -555,9 +564,9 @@ mod tests {
             .process_requests(Vec::<RngDescriptorChain>::new(), &vring)
             .unwrap());
 
-        // The capacity of descriptors is 512 byte as set in build_desc_chain().  Set the
-        // quota value to half of that to simulate a condition where there is less antropy
-        // available than the capacity of the descriptor buffer.
+        // The capacity of descriptors is 512 byte as set in build_desc_chain().  Set
+        // the quota value to half of that to simulate a condition where there
+        // is less antropy available than the capacity of the descriptor buffer.
         backend.set_quota(0x100);
         assert!(backend
             .process_requests(vec![build_desc_chain(1, VRING_DESC_F_WRITE as u16)], &vring)

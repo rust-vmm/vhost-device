@@ -9,20 +9,21 @@ mod i2c;
 mod vhu_i2c;
 
 use core::fmt;
-use log::error;
-use std::num::ParseIntError;
-use std::path::PathBuf;
-use std::process::exit;
-use std::sync::{Arc, RwLock};
-use std::thread::{spawn, JoinHandle};
+use std::{
+    num::ParseIntError,
+    path::PathBuf,
+    process::exit,
+    sync::{Arc, RwLock},
+    thread::{spawn, JoinHandle},
+};
 
 use clap::Parser;
+use i2c::{I2cDevice, I2cMap, PhysDevice, MAX_I2C_VDEV};
+use log::error;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
-use i2c::{I2cDevice, I2cMap, PhysDevice, MAX_I2C_VDEV};
 use vhu_i2c::VhostUserI2cBackend;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -56,7 +57,8 @@ pub(crate) enum Error {
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct I2cArgs {
-    /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+    /// Location of vhost-user Unix domain socket. This is suffixed by
+    /// 0,1,2..socket_count-1.
     #[clap(short, long, value_name = "SOCKET")]
     socket_path: PathBuf,
 
@@ -65,7 +67,8 @@ struct I2cArgs {
     socket_count: usize,
 
     /// List of I2C bus and clients in format
-    /// <bus-name>:<client_addr>[:<client_addr>][,<bus-name>:<client_addr>[:<client_addr>]].
+    /// <bus-name>:<client_addr>[:<client_addr>][,<bus-name>:<client_addr>[:
+    /// <client_addr>]].
     #[clap(short = 'l', long)]
     device_list: String,
 }
@@ -267,14 +270,14 @@ fn start_backend<D: 'static + I2cDevice + Send + Sync>(args: I2cArgs) -> Result<
         let i2c_map = i2c_map.clone();
 
         let handle: JoinHandle<Result<()>> = spawn(move || loop {
-            // A separate thread is spawned for each socket and can connect to a separate guest.
-            // These are run in an infinite loop to not require the daemon to be restarted once a
-            // guest exits.
+            // A separate thread is spawned for each socket and can connect to a separate
+            // guest. These are run in an infinite loop to not require the
+            // daemon to be restarted once a guest exits.
             //
             // There isn't much value in complicating code here to return an error from the
-            // threads, and so the code uses unwrap() instead. The panic on a thread won't cause
-            // trouble to other threads/guests or the main() function and should be safe for the
-            // daemon.
+            // threads, and so the code uses unwrap() instead. The panic on a thread won't
+            // cause trouble to other threads/guests or the main() function and
+            // should be safe for the daemon.
             let backend = Arc::new(RwLock::new(
                 VhostUserI2cBackend::new(i2c_map.clone()).map_err(Error::CouldNotCreateBackend)?,
             ));
@@ -310,9 +313,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use std::path::Path;
 
+    use assert_matches::assert_matches;
     use vhost::vhost_user::Listener;
 
     use super::*;
@@ -388,8 +391,8 @@ mod tests {
 
         // Space in filenames
         let cmd_args = I2cArgs::from_args(invalid_socket_name, " 1:4", 1);
-        // " ./vi2c.sock" will fail because " ." does not exist, while "." exists in every UNIX
-        // directory.
+        // " ./vi2c.sock" will fail because " ." does not exist, while "." exists in
+        // every UNIX directory.
         assert_matches!(
             I2cConfiguration::try_from(cmd_args).unwrap_err(),
             Error::PathParseFailure(p, msg) if p == Path::new(invalid_socket_name) && msg.starts_with("Parent directory `") && msg.ends_with("` does not exist.")

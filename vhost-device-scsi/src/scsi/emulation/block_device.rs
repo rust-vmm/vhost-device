@@ -247,7 +247,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
             return Ok(CmdOutput::check_condition(sense::INVALID_FIELD_IN_CDB));
         }
 
-        debug!("Incoming command: {:?}", command);
+        debug!("Incoming command: {command:?}");
 
         match command {
             LunSpecificCommand::TestUnitReady => Ok(CmdOutput::ok()),
@@ -274,7 +274,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                         Ok(CmdOutput::ok())
                     }
                     Err(e) => {
-                        error!("Error getting image size: {}", e);
+                        error!("Error getting image size: {e}");
                         // TODO: Is this a reasonable sense code to send?
                         Ok(CmdOutput::check_condition(sense::UNRECOVERED_READ_ERROR))
                     }
@@ -309,7 +309,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                         Ok(CmdOutput::ok())
                     }
                     Err(e) => {
-                        error!("Error getting image size: {}", e);
+                        error!("Error getting image size: {e}");
                         // TODO: Is this a reasonable sense code to send?
                         Ok(CmdOutput::check_condition(sense::UNRECOVERED_READ_ERROR))
                     }
@@ -415,7 +415,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                     // is a bit blunt, but does the trick.
 
                     if let Err(e) = self.backend.sync() {
-                        error!("Error syncing file: {}", e);
+                        error!("Error syncing file: {e}");
                         return Ok(CmdOutput::check_condition(sense::TARGET_FAILURE));
                     }
                 }
@@ -426,7 +426,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 let size = match self.backend.size_in_blocks() {
                     Ok(size) => size,
                     Err(e) => {
-                        error!("Error getting image size for read: {}", e);
+                        error!("Error getting image size for read: {e}");
                         return Ok(CmdOutput::check_condition(sense::UNRECOVERED_READ_ERROR));
                     }
                 };
@@ -448,7 +448,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                         Ok(CmdOutput::ok())
                     }
                     Err(e) => {
-                        error!("Error reading image: {}", e);
+                        error!("Error reading image: {e}");
                         Ok(CmdOutput::check_condition(sense::UNRECOVERED_READ_ERROR))
                     }
                 }
@@ -468,7 +468,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 let size = match self.backend.size_in_blocks() {
                     Ok(size) => size,
                     Err(e) => {
-                        error!("Error getting image size for read: {}", e);
+                        error!("Error getting image size for read: {e}");
                         return Ok(CmdOutput::check_condition(sense::TARGET_FAILURE));
                     }
                 };
@@ -486,7 +486,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
 
                 if fua {
                     if let Err(e) = self.backend.sync() {
-                        error!("Error syncing file: {}", e);
+                        error!("Error syncing file: {e}");
                         return Ok(CmdOutput::check_condition(sense::TARGET_FAILURE));
                     }
                 }
@@ -494,7 +494,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 match write_result {
                     Ok(()) => Ok(CmdOutput::ok()),
                     Err(e) => {
-                        error!("Error writing to block device: {}", e);
+                        error!("Error writing to block device: {e}");
                         Ok(CmdOutput::check_condition(sense::TARGET_FAILURE))
                     }
                 }
@@ -516,7 +516,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 let size = match self.backend.size_in_blocks() {
                     Ok(size) => size,
                     Err(e) => {
-                        error!("Error getting image size for read: {}", e);
+                        error!("Error getting image size for read: {e}");
                         return Ok(CmdOutput::check_condition(sense::UNRECOVERED_READ_ERROR));
                     }
                 };
@@ -537,7 +537,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 ];
                 let read_result = data_out.read_exact(&mut buf);
                 if let Err(e) = read_result {
-                    error!("Error reading from data_out: {}", e);
+                    error!("Error reading from data_out: {e}");
                     return Ok(CmdOutput::check_condition(sense::TARGET_FAILURE));
                 }
 
@@ -546,7 +546,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 match write_result {
                     Ok(()) => Ok(CmdOutput::ok()),
                     Err(e) => {
-                        error!("Error writing to block device: {}", e);
+                        error!("Error writing to block device: {e}");
                         Ok(CmdOutput::check_condition(sense::TARGET_FAILURE))
                     }
                 }
@@ -685,9 +685,8 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                         }
                         ParseOpcodeResult::Invalid => {
                             warn!(
-                                "Reporting that we don't support command {:#2x}. It might be \
-                                 worth adding.",
-                                opcode
+                                "Reporting that we don't support command {opcode:#2x}. It might be \
+                                 worth adding."
                             );
                             one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                         }
@@ -706,9 +705,8 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                                     }
                                 } else {
                                     warn!(
-                                        "Reporting that we don't support command {:#2x}/{:#2x}. \
-                                         It might be worth adding.",
-                                        opcode, sa
+                                        "Reporting that we don't support command {opcode:#2x}/{sa:#2x}. \
+                                         It might be worth adding."
                                     );
                                     one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                                 }
@@ -719,9 +717,8 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                                 // "does not implement service actions", so we say invalid field in
                                 // CDB
                                 warn!(
-                                    "Reporting that we don't support command {:#2x}/{:#2x}. It \
-                                     might be worth adding.",
-                                    opcode, sa
+                                    "Reporting that we don't support command {opcode:#2x}/{sa:#2x}. It \
+                                     might be worth adding."
                                 );
                                 return Ok(CmdOutput::check_condition(sense::INVALID_FIELD_IN_CDB));
                             }
@@ -749,18 +746,16 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                                     }
                                 } else {
                                     warn!(
-                                        "Reporting that we don't support command {:#2x}/{:#2x}. \
-                                         It might be worth adding.",
-                                        opcode, sa
+                                        "Reporting that we don't support command {opcode:#2x}/{sa:#2x}. \
+                                         It might be worth adding."
                                     );
                                     one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                                 }
                             }
                             ParseOpcodeResult::Invalid => {
                                 warn!(
-                                    "Reporting that we don't support command {:#2x}[/{:#2x}]. It \
-                                     might be worth adding.",
-                                    opcode, sa
+                                    "Reporting that we don't support command {opcode:#2x}[/{sa:#2x}]. It \
+                                     might be worth adding."
                                 );
                                 one_command_not_supported(data_in).map_err(CmdError::DataIn)?;
                             }
@@ -788,7 +783,7 @@ impl<T: BlockDeviceBackend> LogicalUnit for BlockDevice<T> {
                 match self.backend.sync() {
                     Ok(()) => Ok(CmdOutput::ok()),
                     Err(e) => {
-                        error!("Error syncing block device: {}", e);
+                        error!("Error syncing block device: {e}");
                         Ok(CmdOutput::check_condition(sense::TARGET_FAILURE))
                     }
                 }

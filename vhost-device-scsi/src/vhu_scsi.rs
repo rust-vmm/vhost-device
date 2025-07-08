@@ -130,7 +130,7 @@ impl VhostUserScsiBackend {
                             if e.kind() == ErrorKind::WriteZero {
                                 Response::error(ResponseCode::Overrun, 0)
                             } else {
-                                error!("Error writing response to guest memory: {}", e);
+                                error!("Error writing response to guest memory: {e}");
 
                                 // There's some chance the header and data in are on different
                                 // descriptors, and only the data in
@@ -148,11 +148,11 @@ impl VhostUserScsiBackend {
             Err(RequestParseError::CouldNotReadGuestMemory(e)) => {
                 // See comment later about errors while writing to guest mem; maybe we at least
                 // got functional write descriptors, so we can report an error
-                error!("Error reading request from guest memory: {:?}", e);
+                error!("Error reading request from guest memory: {e:?}");
                 Response::error(ResponseCode::Failure, body_writer.residual())
             }
             Err(RequestParseError::FailedParsingLun(lun)) => {
-                error!("Unable to parse LUN: {:?}", lun);
+                error!("Unable to parse LUN: {lun:?}");
                 Response::error(ResponseCode::Failure, body_writer.residual())
             }
         };
@@ -167,7 +167,7 @@ impl VhostUserScsiBackend {
             // silently fail or crash. There isn't too much sense in crashing, IMO, as
             // the guest could still recover by, say, installing a fixed kernel and
             // rebooting. So let's just log an error and do nothing.
-            error!("Error writing response to guest memory: {:?}", e);
+            error!("Error writing response to guest memory: {e:?}");
         }
     }
 
@@ -176,7 +176,7 @@ impl VhostUserScsiBackend {
             .get_mut()
             .get_queue_mut()
             .iter(self.mem.as_ref().unwrap().memory())
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?
+            .map_err(io::Error::other)?
             .collect();
         for dc in chains {
             let mut writer = DescriptorChainWriter::new(dc.clone());
@@ -186,12 +186,10 @@ impl VhostUserScsiBackend {
 
             vring
                 .add_used(dc.head_index(), writer.max_written())
-                .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
         }
 
-        vring
-            .signal_used_queue()
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        vring.signal_used_queue().map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -272,7 +270,7 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
                 }
             }
             _ => {
-                error!("Ignoring descriptor on queue {}", device_event);
+                error!("Ignoring descriptor on queue {device_event}");
             }
         }
 

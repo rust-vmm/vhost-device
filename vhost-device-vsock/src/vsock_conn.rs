@@ -190,7 +190,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                             ) {
                                 // TODO: let's move this logic out of this func, and handle it
                                 // properly
-                                error!("epoll_register failed: {:?}, but proceed further.", e);
+                                error!("epoll_register failed: {e:?}, but proceed further.");
                             }
                         };
                     }
@@ -275,7 +275,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                         epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
                     ) {
                         // TODO: let's move this logic out of this func, and handle it properly
-                        error!("epoll_register failed: {:?}, but proceed further.", e);
+                        error!("epoll_register failed: {e:?}, but proceed further.");
                     }
                 };
             }

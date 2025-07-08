@@ -5,19 +5,20 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 mod vhu_rng;
 
-use log::error;
-use std::fs::File;
-use std::path::PathBuf;
-use std::process::exit;
-use std::sync::{Arc, Mutex, RwLock};
-use std::thread::{self, JoinHandle};
+use std::{
+    fs::File,
+    path::PathBuf,
+    process::exit,
+    sync::{Arc, Mutex, RwLock},
+    thread::{self, JoinHandle},
+};
 
 use clap::Parser;
+use log::error;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
 use vhu_rng::VuRngBackend;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 // Chosen to replicate the max period found in QEMU's vhost-user-rng
 // and virtio-rng implementations.
@@ -139,10 +140,11 @@ pub(crate) fn start_backend(config: VuRngConfig) -> Result<()> {
         let random = Arc::clone(&random_file);
 
         let handle: JoinHandle<Result<()>> = thread::spawn(move || loop {
-            // If creating the VuRngBackend isn't successull there isn't much else to do than
-            // killing the thread, which .unwrap() does.  When that happens an error code is
-            // generated and displayed by the runtime mechanic.  Killing a thread doesn't affect
-            // the other threads spun-off by the daemon.
+            // If creating the VuRngBackend isn't successull there isn't much else to do
+            // than killing the thread, which .unwrap() does.  When that happens
+            // an error code is generated and displayed by the runtime mechanic.
+            // Killing a thread doesn't affect the other threads spun-off by the
+            // daemon.
             let vu_rng_backend = Arc::new(RwLock::new(
                 VuRngBackend::new(random.clone(), period_ms, max_bytes)
                     .map_err(Error::CouldNotCreateBackend)?,
@@ -179,8 +181,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use std::path::Path;
+
+    use assert_matches::assert_matches;
     use tempfile::tempdir;
 
     use super::*;
@@ -190,7 +193,8 @@ mod tests {
         // All parameters have default values, except for the socket path.
         let default_args: RngArgs = Parser::parse_from(["", "-s", "/some/socket_path"]);
 
-        // A valid configuration that should be equal to the above default configuration.
+        // A valid configuration that should be equal to the above default
+        // configuration.
         let args = RngArgs {
             period: VHU_RNG_MAX_PERIOD_MS,
             max_bytes: usize::MAX,

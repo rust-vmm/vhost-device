@@ -131,7 +131,7 @@ fn start_backend<D: 'static + SpiDevice + Send + Sync>(args: SpiArgs) -> Result<
     let (senders, receiver) = std::sync::mpsc::channel();
 
     for (thread_id, socket) in config.generate_socket_paths().into_iter().enumerate() {
-        let name = format!("vhu-vsock-spi-{:?}", thread_id);
+        let name = format!("vhu-vsock-spi-{thread_id:?}");
 
         let sender = senders.clone();
 

@@ -82,8 +82,8 @@ enum AdapterIdentifier {
 impl fmt::Display for AdapterIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AdapterIdentifier::Name(name) => write!(f, "adapter_name: {}", name),
-            AdapterIdentifier::Number(no) => write!(f, "adapter_no:: {}", no),
+            AdapterIdentifier::Name(name) => write!(f, "adapter_name: {name}"),
+            AdapterIdentifier::Number(no) => write!(f, "adapter_no:: {no}"),
         }
     }
 }

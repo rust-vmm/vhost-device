@@ -666,17 +666,17 @@ mod tests {
             Err(DeviceError::MissingDeviceProperties(missing)) => {
                 assert_eq!(missing, vec!["abc".to_owned(), "ghi".to_owned()])
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
         match properties.check(&["def"], &["foo", "baz"]) {
             Err(DeviceError::UnexpectedDeviceProperties(unexpected)) => {
                 assert_eq!(unexpected, vec!["bar".to_owned()])
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
         match properties.check(&["def"], &["foo", "bar"]) {
             Ok(()) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 }

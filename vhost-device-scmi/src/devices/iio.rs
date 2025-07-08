@@ -438,7 +438,7 @@ impl SensorT for IIOSensor {
         let signed = scan_type.sign == 's';
         let le_endian = scan_type.endianness == IioEndian::IioLe;
         if !signed || !le_endian {
-            error!("Unsupported notification format: {:?}", scan_type);
+            error!("Unsupported notification format: {scan_type:?}");
             return Err(ScmiDeviceError::GenericError);
         }
 
@@ -489,7 +489,7 @@ impl SensorT for IIOSensor {
     fn notify_status_set(&self, enabled: bool) -> Result<(), DeviceError> {
         let path_split: Vec<_> = self.path.to_str().unwrap().split('/').collect();
         let iio_name = path_split[path_split.len() - 1];
-        let buffer_enable = format!("/sys/bus/iio/devices/{}/buffer/enable", iio_name);
+        let buffer_enable = format!("/sys/bus/iio/devices/{iio_name}/buffer/enable");
         let mut scan_enable = vec![];
         for i in 0..self.number_of_axes() {
             scan_enable.push(format!(
@@ -830,7 +830,7 @@ mod tests {
             Err(DeviceError::MissingDeviceProperties(missing)) => {
                 assert_eq!(missing, vec!["channel".to_owned()])
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -849,7 +849,7 @@ mod tests {
             Err(DeviceError::UnexpectedDeviceProperties(extra)) => {
                 assert_eq!(extra, ["bar".to_owned(), "foo".to_owned()])
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -870,7 +870,7 @@ mod tests {
             Err(DeviceError::IOError(path, std::io::Error { .. })) => {
                 assert_eq!(path, "non-existent")
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -883,11 +883,10 @@ mod tests {
             Err(DeviceError::GenericError(message)) => {
                 assert!(
                     message.starts_with("No \"in_accel\" channel found in \"./_test"),
-                    "Unexpected error: {}",
-                    message
+                    "Unexpected error: {message}"
                 )
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 

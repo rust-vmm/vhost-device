@@ -5,22 +5,26 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use std::{
+    collections::VecDeque,
+    io::{self, Result as IoResult},
+};
+
 use log::error;
 use nix::libc;
-use std::collections::VecDeque;
-use std::io::{self, Result as IoResult};
 use thiserror::Error as ThisError;
-
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::VIRTIO_F_VERSION_1;
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::VIRTIO_F_VERSION_1,
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::QueueT;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
 use crate::input::*;
 
@@ -53,9 +57,9 @@ pub(crate) struct VuInputConfig {
     val: [u8; VIRTIO_INPUT_CFG_SIZE],
 }
 
-// If deriving the 'Default' trait, an array is limited with a maximum size of 32 bytes,
-// thus it cannot meet the length VIRTIO_INPUT_CFG_SIZE (128) for the 'val' array.
-// Implement Default trait to accommodate array 'val'.
+// If deriving the 'Default' trait, an array is limited with a maximum size of
+// 32 bytes, thus it cannot meet the length VIRTIO_INPUT_CFG_SIZE (128) for the
+// 'val' array. Implement Default trait to accommodate array 'val'.
 impl Default for VuInputConfig {
     fn default() -> VuInputConfig {
         VuInputConfig {
@@ -187,7 +191,8 @@ impl<T: InputDevice> VuInputBackend<T> {
                 // Now cannot get available descriptor, which means the host cannot process
                 // event data in time and overrun happens in the backend. In this case,
                 // we simply drop the incoming input event and notify guest for handling
-                // events. At the end, it returns Ok(false) so can avoid exiting the thread loop.
+                // events. At the end, it returns Ok(false) so can avoid exiting the thread
+                // loop.
                 self.ev_list.clear();
 
                 vring
@@ -368,8 +373,8 @@ impl<T: 'static + InputDevice + Sync + Send> VhostUserBackendMut for VuInputBack
     }
 
     // In virtio spec https://docs.oasis-open.org/virtio/virtio/v1.2/cs01/virtio-v1.2-cs01.pdf,
-    // section "5.8.5.1 Driver Requirements: Device Initialization", it doesn't mention to
-    // use 'offset' argument, so set it as unused.
+    // section "5.8.5.1 Driver Requirements: Device Initialization", it doesn't
+    // mention to use 'offset' argument, so set it as unused.
     fn set_config(&mut self, _offset: u32, buf: &[u8]) -> io::Result<()> {
         self.select = buf[0];
         self.subsel = buf[1];
@@ -425,11 +430,10 @@ impl<T: 'static + InputDevice + Sync + Send> VhostUserBackendMut for VuInputBack
 
 #[cfg(test)]
 mod tests {
+    use std::{mem, os::fd::RawFd, path::PathBuf};
+
     use assert_matches::assert_matches;
     use evdev::{BusType, FetchEventsSynced, InputId};
-    use std::mem;
-    use std::os::fd::RawFd;
-    use std::path::PathBuf;
     use virtio_queue::desc::{split::Descriptor as SplitDescriptor, RawDescriptor};
     use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
@@ -506,8 +510,8 @@ mod tests {
             Ok(())
         );
 
-        // Currently handles EVENT_ID_IN_VRING_EPOLL only, since the event list is empty,
-        // an error is generated.
+        // Currently handles EVENT_ID_IN_VRING_EPOLL only, since the event list is
+        // empty, an error is generated.
         assert_eq!(
             backend
                 .handle_event(

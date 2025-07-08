@@ -7,9 +7,6 @@
 mod input;
 mod vhu_input;
 
-use clap::Parser;
-use evdev::Device;
-use log::error;
 use std::{
     any::Any,
     collections::HashMap,
@@ -19,6 +16,9 @@ use std::{
     thread,
 };
 
+use clap::Parser;
+use evdev::Device;
+use log::error;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vhu_input::VuInputBackend;
@@ -95,10 +95,11 @@ pub(crate) fn start_backend_server<D: 'static + InputDevice + Send + Sync>(
         let ev_dev = D::open(event.clone()).map_err(|_| Error::AccessEventDeviceFile)?;
         let raw_fd = ev_dev.get_raw_fd();
 
-        // If creating the VuInputBackend isn't successful there isn't much else to do than
-        // killing the thread, which .unwrap() does.  When that happens an error code is
-        // generated and displayed by the runtime mechanic.  Killing a thread doesn't affect
-        // the other threads spun-off by the daemon.
+        // If creating the VuInputBackend isn't successful there isn't much else to do
+        // than killing the thread, which .unwrap() does.  When that happens an
+        // error code is generated and displayed by the runtime mechanic.
+        // Killing a thread doesn't affect the other threads spun-off by the
+        // daemon.
         let vu_input_backend = Arc::new(RwLock::new(
             VuInputBackend::new(ev_dev).map_err(Error::CouldNotCreateBackend)?,
         ));
@@ -172,10 +173,13 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{self},
+        os::fd::RawFd,
+    };
+
     use assert_matches::assert_matches;
     use evdev::{BusType, FetchEventsSynced, InputId};
-    use std::io::{self};
-    use std::os::fd::RawFd;
 
     use super::*;
 
@@ -201,15 +205,16 @@ mod tests {
 
     #[test]
     fn verify_cmd_line_arguments() {
-        // All parameters have default values, except for the socket path.  White spaces are
-        // introduced on purpose to make sure Strings are trimmed properly.
+        // All parameters have default values, except for the socket path.  White spaces
+        // are introduced on purpose to make sure Strings are trimmed properly.
         let default_args: InputArgs = Parser::parse_from([
             "",
             "--socket-path=/some/socket_path",
             "--event-list=/dev/input/event1,/dev/input/event2",
         ]);
 
-        // A valid configuration that should be equal to the above default configuration.
+        // A valid configuration that should be equal to the above default
+        // configuration.
         let args = InputArgs {
             socket_path: PathBuf::from("/some/socket_path"),
             event_list: vec![

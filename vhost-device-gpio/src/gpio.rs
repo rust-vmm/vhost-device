@@ -5,11 +5,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::error;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::{
+    sync::{Arc, Mutex, RwLock},
+    time::Duration,
+};
 
 use libgpiod::{chip, line, request, Error as LibGpiodError};
+use log::error;
 use thiserror::Error as ThisError;
 use vm_memory::{ByteValued, Le16, Le32};
 
@@ -276,7 +278,8 @@ impl GpioDevice for PhysDevice {
         // Allocate the buffer and configure the line for interrupt.
         //
         // The GPIO Virtio specification allows a single interrupt event for each
-        // `wait_for_interrupt()` message. And for that we need a single `request::Buffer`.
+        // `wait_for_interrupt()` message. And for that we need a single
+        // `request::Buffer`.
         state.buffer = Some(request::Buffer::new(1).map_err(Error::GpiodFailed)?);
 
         state
@@ -292,32 +295,36 @@ impl GpioDevice for PhysDevice {
     }
 
     fn wait_for_interrupt(&self, gpio: u16) -> Result<bool> {
-        // While waiting here for the interrupt to occur, it is possible that we receive another
-        // request from the guest to disable the interrupt instead, via a call to `set_irq_type()`.
+        // While waiting here for the interrupt to occur, it is possible that we receive
+        // another request from the guest to disable the interrupt instead, via
+        // a call to `set_irq_type()`.
         //
-        // The interrupt design here should allow that call to return as soon as possible, after
-        // disabling the interrupt and at the same time we need to make sure that we don't end up
-        // freeing resources currently used by `wait_for_interrupt()`.
+        // The interrupt design here should allow that call to return as soon as
+        // possible, after disabling the interrupt and at the same time we need
+        // to make sure that we don't end up freeing resources currently used by
+        // `wait_for_interrupt()`.
         //
-        // To allow that, the line state management is done via two resources: `request` and
-        // `buffer`.
+        // To allow that, the line state management is done via two resources: `request`
+        // and `buffer`.
         //
-        // The `request` is required by `wait_for_interrupt()` to query libgpiod and must not get
-        // freed while we are waiting for an interrupt. This can happen, for example, if another
-        // thread disables the interrupt, via `set_irq_type(VIRTIO_GPIO_IRQ_TYPE_NONE)`, followed
-        // by `set_direction(VIRTIO_GPIO_DIRECTION_NONE)`, where we drop the `request`. For this
-        // reason, the `request` is implemented as an Arc instance.
+        // The `request` is required by `wait_for_interrupt()` to query libgpiod and
+        // must not get freed while we are waiting for an interrupt. This can
+        // happen, for example, if another thread disables the interrupt, via
+        // `set_irq_type(VIRTIO_GPIO_IRQ_TYPE_NONE)`, followed
+        // by `set_direction(VIRTIO_GPIO_DIRECTION_NONE)`, where we drop the `request`.
+        // For this reason, the `request` is implemented as an Arc instance.
         //
-        // The `buffer` on the other hand is required only after we have sensed an interrupt and
-        // need to read it. The design here takes advantage of that and allows `set_irq_type()` to
-        // go and free the `buffer`, while this routine is waiting for the interrupt. Once the
-        // waiting period is over or an interrupt is sensed, `wait_for_interrupt() will find the
+        // The `buffer` on the other hand is required only after we have sensed an
+        // interrupt and need to read it. The design here takes advantage of
+        // that and allows `set_irq_type()` to go and free the `buffer`, while
+        // this routine is waiting for the interrupt. Once the waiting period is
+        // over or an interrupt is sensed, `wait_for_interrupt() will find the
         // buffer being dropped and return an error which will be handled by
         // `Controller::wait_for_interrupt()`.
         //
-        // This design also allows `wait_for_interrupt()` to not take a lock for the entire
-        // duration, which can potentially also starve the other thread trying to disable the
-        // interrupt.
+        // This design also allows `wait_for_interrupt()` to not take a lock for the
+        // entire duration, which can potentially also starve the other thread
+        // trying to disable the interrupt.
 
         // Take the state lock, get the request and release the state lock again
         let request = {
@@ -374,8 +381,8 @@ impl<D: GpioDevice> GpioController<D> {
     pub(crate) fn new(device: D) -> Result<GpioController<D>> {
         let ngpio = device.num_gpios()?;
 
-        // The gpio's name can be of any length, we are just trying to allocate something
-        // reasonable to start with, we can always extend it later.
+        // The gpio's name can be of any length, we are just trying to allocate
+        // something reasonable to start with, we can always extend it later.
         let mut gpio_names = String::with_capacity((ngpio * 10).into());
         let mut state = Vec::with_capacity(ngpio as usize);
 
@@ -522,8 +529,7 @@ impl<D: GpioDevice> GpioController<D> {
 pub(crate) mod tests {
     use std::mem::size_of_val;
 
-    use super::Error;
-    use super::*;
+    use super::{Error, *};
     use crate::mock_gpio::MockGpioDevice;
 
     #[test]

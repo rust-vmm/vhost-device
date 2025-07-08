@@ -5,33 +5,37 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::error;
-use std::mem::size_of;
-use std::slice::from_raw_parts;
-use std::sync::{Arc, RwLock};
-use std::thread::{spawn, JoinHandle};
 use std::{
     convert,
     io::{self, Result as IoResult},
+    mem::size_of,
+    slice::from_raw_parts,
+    sync::{Arc, RwLock},
+    thread::{spawn, JoinHandle},
 };
 
+use log::error;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard,
     GuestMemoryMmap, Le16, Le32,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
-use crate::gpio::{GpioController, GpioDevice};
-use crate::virtio_gpio::VIRTIO_GPIO_IRQ_TYPE_NONE;
+use crate::{
+    gpio::{GpioController, GpioDevice},
+    virtio_gpio::VIRTIO_GPIO_IRQ_TYPE_NONE,
+};
 
 /// Possible values of the status field
 const VIRTIO_GPIO_STATUS_OK: u8 = 0x0;
@@ -509,12 +513,12 @@ mod tests {
     };
     use vm_memory::{Address, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
-    use super::Error;
-    use super::*;
-    use crate::gpio::Error as GpioError;
-    use crate::gpio::*;
-    use crate::mock_gpio::MockGpioDevice;
-    use crate::virtio_gpio::*;
+    use super::{Error, *};
+    use crate::{
+        gpio::{Error as GpioError, *},
+        mock_gpio::MockGpioDevice,
+        virtio_gpio::*,
+    };
 
     // Prepares a single chain of descriptors for request queue
     fn prepare_desc_chain<R: ByteValued>(
@@ -1076,8 +1080,8 @@ mod tests {
         backend.process_events(desc_chains.clone(), &vring).unwrap();
         validate_desc_chains(desc_chains, VIRTIO_GPIO_IRQ_STATUS_INVALID, None);
 
-        // Wait for interrupt failure with VIRTIO_GPIO_IRQ_STATUS_INVALID status, as was set at the
-        // top of this function.
+        // Wait for interrupt failure with VIRTIO_GPIO_IRQ_STATUS_INVALID status, as was
+        // set at the top of this function.
         const GPIO: u16 = 5;
         // Set irq type
         let desc_chain = prepare_request_desc_chain(

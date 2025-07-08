@@ -7,18 +7,19 @@
 
 mod vhu_foo;
 
-use log::error;
-use std::path::PathBuf;
-use std::process::exit;
-use std::sync::{Arc, RwLock};
-use std::thread::{spawn, JoinHandle};
+use std::{
+    path::PathBuf,
+    process::exit,
+    sync::{Arc, RwLock},
+    thread::{spawn, JoinHandle},
+};
 
 use clap::Parser;
+use log::error;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
 use vhu_foo::VhostUserFooBackend;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -50,9 +51,10 @@ impl TryFrom<FooArgs> for FooConfiguration {
     type Error = Error;
 
     fn try_from(args: FooArgs) -> Result<Self> {
-        // Even though this try_from() conversion always succeeds, in cases where the device's
-        // configuration type needs to validate arguments and/or make operations that can fail a
-        // TryFrom<_> implementation will be necessary.
+        // Even though this try_from() conversion always succeeds, in cases where the
+        // device's configuration type needs to validate arguments and/or make
+        // operations that can fail a TryFrom<_> implementation will be
+        // necessary.
         Ok(FooConfiguration {
             socket_path: args.socket_path,
         })
@@ -82,9 +84,10 @@ fn start_backend(args: FooArgs) -> Result<()> {
     let info = FooInfo::new();
 
     let handle: JoinHandle<Result<()>> = spawn(move || loop {
-        // There isn't much value in complicating code here to return an error from the threads,
-        // and so the code uses unwrap() instead. The panic on a thread won't cause trouble to the
-        // main() function and should be safe for the daemon.
+        // There isn't much value in complicating code here to return an error from the
+        // threads, and so the code uses unwrap() instead. The panic on a thread
+        // won't cause trouble to the main() function and should be safe for the
+        // daemon.
         let backend = Arc::new(RwLock::new(
             VhostUserFooBackend::new(info).map_err(Error::CouldNotCreateBackend)?,
         ));
@@ -113,8 +116,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use std::path::Path;
+
+    use assert_matches::assert_matches;
 
     use super::*;
 

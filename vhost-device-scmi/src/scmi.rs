@@ -177,7 +177,7 @@ impl ScmiResponse {
             };
             ret_bytes.append(&mut bytes)
         }
-        debug!("ret bytes: {:?}", ret_bytes);
+        debug!("ret bytes: {ret_bytes:?}");
         Self { header, ret_bytes }
     }
 
@@ -221,10 +221,7 @@ impl ScmiRequest {
             0 => MessageType::Command,
             _ => MessageType::Unsupported,
         };
-        debug!(
-            "SCMI request: protocol id={}, message id={}, message_type={:?}, token={}",
-            protocol_id, message_id, message_type, token
-        );
+        debug!("SCMI request: protocol id={protocol_id}, message id={message_id}, message_type={message_type:?}, token={token}");
         Self {
             header,
             message_id,
@@ -342,9 +339,7 @@ impl HandlerMap {
     ) {
         assert!(
             self.get(protocol_id, message_id).is_none(),
-            "Multiple handlers defined for SCMI message {}/{}",
-            protocol_id,
-            message_id
+            "Multiple handlers defined for SCMI message {protocol_id}/{message_id}"
         );
         self.0.insert(
             (protocol_id, message_id),
@@ -843,7 +838,7 @@ impl ScmiHandler {
                 ParameterType::_SignedInt32 => MessageValue::Signed(i32::from_le_bytes(slice)),
                 ParameterType::UnsignedInt32 => MessageValue::Unsigned(u32::from_le_bytes(slice)),
             };
-            debug!("SCMI parameter {}: {:?}", n, v);
+            debug!("SCMI parameter {n}: {v:?}");
             values.push(v);
         }
         request.parameters = Some(values);
@@ -883,19 +878,19 @@ impl ScmiHandler {
                 ScmiDeviceError::NoSuchDevice
                 | ScmiDeviceError::NotEnabled
                 | ScmiDeviceError::InvalidParameters => {
-                    info!("Invalid device access: {}, {}", device_index, error);
+                    info!("Invalid device access: {device_index}, {error}");
                     Response::from(ReturnStatus::InvalidParameters)
                 }
                 ScmiDeviceError::UnsupportedRequest => {
-                    info!("Unsupported request for {}", device_index);
+                    info!("Unsupported request for {device_index}");
                     Response::from(ReturnStatus::NotSupported)
                 }
                 ScmiDeviceError::UnsupportedNotify => {
-                    info!("Unsupported notify for {}", device_index);
+                    info!("Unsupported notify for {device_index}");
                     Response::from(ReturnStatus::NotSupported)
                 }
                 ScmiDeviceError::GenericError => {
-                    warn!("Device error in {}", device_index);
+                    warn!("Device error in {device_index}");
                     Response::from(ReturnStatus::GenericError)
                 }
             },
@@ -935,7 +930,7 @@ impl ScmiHandler {
             .skip(skip)
             .collect();
         let n_protocols = protocols.len();
-        debug!("Number of listed protocols after {}: {}", skip, n_protocols);
+        debug!("Number of listed protocols after {skip}: {n_protocols}");
         let mut values: Vec<MessageValue> = vec![MessageValue::Unsigned(n_protocols as u32)];
         if n_protocols > 0 {
             let mut compressed: Vec<u32> = vec![0; 1 + (n_protocols - 1) / 4];
@@ -1559,7 +1554,7 @@ mod tests {
         let mut handler = ScmiHandler::new();
         for sensor_id in 0..2 {
             let properties =
-                DeviceProperties::new(vec![("name".to_owned(), format!("fake{}", sensor_id))]);
+                DeviceProperties::new(vec![("name".to_owned(), format!("fake{sensor_id}"))]);
             let fake_sensor = FakeSensor::new_device(&properties).unwrap();
             handler.register_device(fake_sensor);
             enable_sensor(sensor_id, true, &mut handler);

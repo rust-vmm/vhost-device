@@ -86,7 +86,7 @@ pub enum VuScmiError {
 
 impl From<VuScmiError> for io::Error {
     fn from(e: VuScmiError) -> Self {
-        Self::new(io::ErrorKind::Other, e)
+        Self::other(e)
     }
 }
 
@@ -198,7 +198,7 @@ impl VuScmiBackend {
                 .map_err(|_| VuScmiError::DescriptorReadFailed)?;
             let mut scmi_request = ScmiRequest::new(header);
             let n_parameters = self.scmi_handler.number_of_parameters(&scmi_request);
-            debug!("SCMI request with n parameters: {:?}", n_parameters);
+            debug!("SCMI request with n parameters: {n_parameters:?}");
             let value_size = 4;
             if let Some(expected_parameters) = n_parameters {
                 if expected_parameters > 0 {
@@ -227,7 +227,7 @@ impl VuScmiBackend {
 
             debug!("Calling SCMI request handler");
             let mut response = self.scmi_handler.handle(scmi_request);
-            debug!("SCMI response: {:?}", response);
+            debug!("SCMI response: {response:?}");
 
             let desc_response = descriptors[1];
             if !desc_response.is_write_only() {
@@ -284,7 +284,7 @@ impl VuScmiBackend {
                 debug!("Notification sent");
             }
             Err(err) => {
-                warn!("Failed SCMI request: {}", err);
+                warn!("Failed SCMI request: {err}");
                 return Err(err);
             }
         }
@@ -349,7 +349,7 @@ impl VuScmiBackend {
                 debug!("Notification sent");
             }
             Err(err) => {
-                warn!("Failed SCMI request: {}", err);
+                warn!("Failed SCMI request: {err}");
                 return Err(err);
             }
         }
@@ -452,7 +452,7 @@ impl VhostUserBackendMut for VuScmiBackend {
 
     fn set_event_idx(&mut self, enabled: bool) {
         self.event_idx = enabled;
-        debug!("Event idx set to: {}", enabled);
+        debug!("Event idx set to: {enabled}");
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
@@ -530,7 +530,7 @@ impl VhostUserBackendMut for VuScmiBackend {
                         .enable_notification()
                         .map_err(|error: virtio_queue::Error| std::io::Error::other(error))?;
                 } else {
-                    warn!("unhandled device_event: {}", device_event);
+                    warn!("unhandled device_event: {device_event}");
                     return Err(VuScmiError::HandleEventUnknownEvent.into());
                 }
             }
@@ -652,10 +652,7 @@ mod tests {
                 VRING_DESC_F_NEXT as u16
             };
             f |= p.flags;
-            let offset = match p.addr {
-                Some(addr) => addr,
-                _ => 0x100,
-            };
+            let offset = p.addr.unwrap_or(0x100);
             let desc = RawDescriptor::from(SplitDescriptor::new(offset, p.len, f, (i + 1) as u16));
             vq.desc_table().store(i as u16, desc).unwrap();
         }
@@ -761,7 +758,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorCount(1) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Have three descriptors, expected two.
@@ -772,7 +769,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorCount(3) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Write only descriptors.
@@ -788,7 +785,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedWriteOnlyDescriptor(0) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request address.
@@ -810,7 +807,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::DescriptorReadFailed => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request length (very small).
@@ -832,7 +829,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedMinimumDescriptorSize(4, 2) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request length (too small).
@@ -842,7 +839,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorSize(8, 4) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request length (too large).
@@ -852,7 +849,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorSize(4, 8) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Read only descriptors.
@@ -868,7 +865,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedReadableDescriptor(1) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid response address.
@@ -890,7 +887,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::DescriptorWriteFailed => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid response length.
@@ -912,7 +909,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::InsufficientDescriptorSize(8, 6) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -965,7 +962,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorCount(2) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Read only descriptor
@@ -980,7 +977,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedReadableDescriptor(0) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 

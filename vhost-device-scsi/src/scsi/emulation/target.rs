@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::convert::TryFrom;
-use std::io::{Read, Write};
+use std::{
+    convert::TryFrom,
+    io::{Read, Write},
+};
 
 use log::error;
 

@@ -6,7 +6,7 @@ use std::{
     cmp::{max, min},
     convert::TryInto,
     io,
-    io::{ErrorKind, Read, Write},
+    io::{Read, Write},
     mem,
     ops::Deref,
     rc::Rc,
@@ -223,11 +223,15 @@ where
                 .memory()
                 .write(
                     &buf[..(to_write as usize)],
-                    GuestAddress(current.addr().0.checked_add(u64::from(self.offset)).ok_or(
-                        io::Error::new(ErrorKind::Other, vm_memory::Error::InvalidGuestRegion),
-                    )?),
+                    GuestAddress(
+                        current
+                            .addr()
+                            .0
+                            .checked_add(u64::from(self.offset))
+                            .ok_or(io::Error::other(vm_memory::Error::InvalidGuestRegion))?,
+                    ),
                 )
-                .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
 
             self.offset += written as u32;
 
@@ -295,7 +299,7 @@ where
                     &mut buf[..(to_read as usize)],
                     GuestAddress(current.addr().0 + u64::from(self.offset)),
                 )
-                .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
 
             self.offset += read as u32;
 

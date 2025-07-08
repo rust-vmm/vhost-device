@@ -71,7 +71,7 @@ pub enum Error {
 
 impl From<Error> for io::Error {
     fn from(err: Error) -> Self {
-        Self::new(io::ErrorKind::Other, err)
+        Self::other(err)
     }
 }
 
@@ -265,7 +265,7 @@ impl VhostUserConsoleBackend {
 
             let my_string = String::from_utf8(tx_data).unwrap();
             if self.controller.read().unwrap().backend == BackendType::Nested {
-                print!("{}", my_string);
+                print!("{my_string}");
                 io::stdout().flush().unwrap();
             } else {
                 self.output_queue
@@ -379,7 +379,7 @@ impl VhostUserConsoleBackend {
                 trace!("VIRTIO_CONSOLE_PORT_OPEN");
             }
             other => {
-                trace!("Unknown control event: {}", other);
+                trace!("Unknown control event: {other}");
                 return Err(Error::HandleEventUnknown(other));
             }
         };
@@ -577,7 +577,7 @@ impl VhostUserConsoleBackend {
                         .expect("No listener")
                         .local_addr()
                         .unwrap();
-                    println!("New connection on: {}", local_addr);
+                    println!("New connection on: {local_addr}");
                     let stream_raw_fd = stream.as_raw_fd();
                     self.stream_fd = Some(stream_raw_fd);
                     if let Err(err) = Self::epoll_register(
@@ -585,7 +585,7 @@ impl VhostUserConsoleBackend {
                         stream_raw_fd,
                         epoll::Events::EPOLLIN,
                     ) {
-                        warn!("Failed to register with epoll: {:?}", err);
+                        warn!("Failed to register with epoll: {err:?}");
                     }
 
                     let stream: Box<dyn ReadWrite + Send + Sync> = Box::new(stream);
@@ -593,7 +593,7 @@ impl VhostUserConsoleBackend {
                     self.write_tcp_stream();
                 }
                 Err(e) => {
-                    eprintln!("Stream error: {}", e);
+                    eprintln!("Stream error: {e}");
                 }
             }
         }
@@ -614,7 +614,7 @@ impl VhostUserConsoleBackend {
                     .expect("Stream not found")
                     .write_all(&byte_stream)
                 {
-                    eprintln!("Error writing to stream: {}", e);
+                    eprintln!("Error writing to stream: {e}");
                 }
             }
         }
@@ -631,12 +631,12 @@ impl VhostUserConsoleBackend {
                         .expect("No listener")
                         .local_addr()
                         .unwrap();
-                    println!("Close connection on: {}", local_addr);
+                    println!("Close connection on: {local_addr}");
                     if let Err(err) = Self::epoll_unregister(
                         self.epoll_fd.as_raw_fd(),
                         self.stream_fd.expect("No stream fd"),
                     ) {
-                        warn!("Failed to register with epoll: {:?}", err);
+                        warn!("Failed to register with epoll: {err:?}");
                     }
                     return;
                 }
@@ -648,7 +648,7 @@ impl VhostUserConsoleBackend {
                 }
             }
             Err(e) => {
-                eprintln!("Error reading from socket: {}", e);
+                eprintln!("Error reading from socket: {e}");
             }
         }
     }
@@ -675,7 +675,7 @@ impl VhostUserConsoleBackend {
                 Ok(())
             }
             Err(e) => {
-                eprintln!("Read stdin error: {}", e);
+                eprintln!("Read stdin error: {e}");
                 Err(e)
             }
         }

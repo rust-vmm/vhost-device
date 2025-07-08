@@ -103,7 +103,7 @@ impl GpioDevice for PhysDevice {
     where
         Self: Sized,
     {
-        let path = format!("/dev/gpiochip{}", device);
+        let path = format!("/dev/gpiochip{device}");
         let chip = chip::Chip::open(&path).map_err(Error::GpiodFailed)?;
         let ngpio = chip.info().map_err(Error::GpiodFailed)?.num_lines() as u16;
 

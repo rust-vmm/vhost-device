@@ -543,7 +543,8 @@ impl Cdb {
                     (0x3f, 0x0) => ModePageSelection::AllPageZeros,
                     _ => {
                         warn!(
-                            "Rejecting request for unknown mode page {page_code:#2x}/{subpage_code:#2x}."
+                            "Rejecting request for unknown mode page \
+                             {page_code:#2x}/{subpage_code:#2x}."
                         );
                         return Err(ParseError::InvalidField);
                     }

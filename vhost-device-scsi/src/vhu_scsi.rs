@@ -192,9 +192,7 @@ impl VhostUserScsiBackend {
                 .map_err(io::Error::other)?;
         }
 
-        vring
-            .signal_used_queue()
-            .map_err(io::Error::other)?;
+        vring.signal_used_queue().map_err(io::Error::other)?;
         Ok(())
     }
 

@@ -224,9 +224,13 @@ where
                 .memory()
                 .write(
                     &buf[..(to_write as usize)],
-                    GuestAddress(current.addr().0.checked_add(u64::from(self.offset)).ok_or(
-                        io::Error::other(vm_memory::Error::InvalidGuestRegion),
-                    )?),
+                    GuestAddress(
+                        current
+                            .addr()
+                            .0
+                            .checked_add(u64::from(self.offset))
+                            .ok_or(io::Error::other(vm_memory::Error::InvalidGuestRegion))?,
+                    ),
                 )
                 .map_err(io::Error::other)?;
 

@@ -5,39 +5,43 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use crate::can::CanController;
-use crate::can::Error::QueueEmpty;
-use crate::virtio_can::{
-    VirtioCanCtrlRequest, VirtioCanFrame, VirtioCanHeader, CANFD_VALID_LENGTHS, CAN_CS_STARTED,
-    CAN_CS_STOPPED, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF, CAN_ERR_FLAG, CAN_FRMF_TYPE_FD,
-    CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED, VIRTIO_CAN_FLAGS_FD,
-    VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_FLAGS_VALID_MASK, VIRTIO_CAN_F_CAN_CLASSIC,
-    VIRTIO_CAN_F_CAN_FD, VIRTIO_CAN_F_RTR_FRAMES, VIRTIO_CAN_RESULT_NOT_OK, VIRTIO_CAN_RESULT_OK,
-    VIRTIO_CAN_RX, VIRTIO_CAN_SET_CTRL_MODE_START, VIRTIO_CAN_SET_CTRL_MODE_STOP,
-    VIRTIO_CAN_S_CTRL_BUSOFF, VIRTIO_CAN_TX,
-};
-use log::{error, trace, warn};
-use std::os::fd::AsRawFd;
-use std::slice::from_raw_parts;
-use std::sync::{Arc, RwLock};
 use std::{
     convert,
     io::{self, Result as IoResult},
+    os::fd::AsRawFd,
+    slice::from_raw_parts,
+    sync::{Arc, RwLock},
 };
+
+use log::{error, trace, warn};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::VringEpollHandler;
-use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
+
+use crate::{
+    can::{CanController, Error::QueueEmpty},
+    virtio_can::{
+        VirtioCanCtrlRequest, VirtioCanFrame, VirtioCanHeader, CANFD_VALID_LENGTHS, CAN_CS_STARTED,
+        CAN_CS_STOPPED, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF, CAN_ERR_FLAG, CAN_FRMF_TYPE_FD,
+        CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED, VIRTIO_CAN_FLAGS_FD,
+        VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_FLAGS_VALID_MASK, VIRTIO_CAN_F_CAN_CLASSIC,
+        VIRTIO_CAN_F_CAN_FD, VIRTIO_CAN_F_RTR_FRAMES, VIRTIO_CAN_RESULT_NOT_OK,
+        VIRTIO_CAN_RESULT_OK, VIRTIO_CAN_RX, VIRTIO_CAN_SET_CTRL_MODE_START,
+        VIRTIO_CAN_SET_CTRL_MODE_STOP, VIRTIO_CAN_S_CTRL_BUSOFF, VIRTIO_CAN_TX,
+    },
+};
 
 /// Virtio configuration
 const QUEUE_SIZE: usize = 64;
@@ -720,9 +724,8 @@ impl VhostUserBackendMut for VhostUserCanBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::virtio_can::{VirtioCanCtrlResponse, VirtioCanTxResponse};
     use std::mem::size_of;
+
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{
         desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
@@ -730,6 +733,9 @@ mod tests {
         Queue,
     };
     use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, Le16, Le32};
+
+    use super::*;
+    use crate::virtio_can::{VirtioCanCtrlResponse, VirtioCanTxResponse};
 
     #[test]
     fn test_virtio_can_tx_response_default() {
@@ -1137,7 +1143,8 @@ mod tests {
             frame.length
         );
 
-        // Test 3: Return Error::InvalidCanLength(frame_length) when length is out-of-range (>8)
+        // Test 3: Return Error::InvalidCanLength(frame_length) when length is
+        // out-of-range (>8)
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_TX.into(),
             can_id: 0.into(),
@@ -1286,7 +1293,8 @@ mod tests {
         );
 
         // Test 2: Take a valid CAN / CANFD message and try to enable RTR in flags.
-        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not
+        // negotiated.
         vu_can_backend.acked_features(1 << VIRTIO_CAN_F_RTR_FRAMES);
 
         assert_eq!(
@@ -1295,7 +1303,8 @@ mod tests {
         );
 
         // Test 3: Take a valid CAN / CANFD message and try to enable RTR in flags.
-        //         the test should succeed because VIRTIO_CAN_F_CAN_CLASSIC is negotiated.
+        //         the test should succeed because VIRTIO_CAN_F_CAN_CLASSIC is
+        // negotiated.
         vu_can_backend
             .acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_CLASSIC));
 
@@ -1310,8 +1319,8 @@ mod tests {
         );
 
         // Test 4: Take a valid CAN / CANFD message and try to enable RTR in flags.
-        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated,
-        //         and RTR does not work with VIRTIO_CAN_F_CAN_FD.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not
+        // negotiated,         and RTR does not work with VIRTIO_CAN_F_CAN_FD.
         vu_can_backend.acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_FD));
 
         assert_eq!(
@@ -1812,7 +1821,8 @@ mod tests {
         };
 
         // Test 1: Take a valid CAN / CANFD message and try to enable RTR in flags.
-        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not
+        // negotiated.
         vu_can_backend.acked_features(1 << VIRTIO_CAN_F_CAN_CLASSIC);
 
         assert_eq!(
@@ -1821,7 +1831,8 @@ mod tests {
         );
 
         // Test 2: Take a valid CAN / CANFD message and try to enable RTR in flags.
-        //         the test should succeed because VIRTIO_CAN_F_CAN_CLASSIC is negotiated.
+        //         the test should succeed because VIRTIO_CAN_F_CAN_CLASSIC is
+        // negotiated.
         vu_can_backend
             .acked_features((1 << VIRTIO_CAN_F_RTR_FRAMES) | (1 << VIRTIO_CAN_F_CAN_CLASSIC));
 
@@ -1836,8 +1847,8 @@ mod tests {
         );
 
         // Test 3: Take a valid CAN / CANFD message and try to enable RTR in flags.
-        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not negotiated,
-        //         and RTR does not work with VIRTIO_CAN_F_CAN_FD.
+        //         the test should fail because VIRTIO_CAN_F_CAN_CLASSIC is not
+        // negotiated,         and RTR does not work with VIRTIO_CAN_F_CAN_FD.
 
         let frame = VirtioCanFrame {
             msg_type: 0.into(),

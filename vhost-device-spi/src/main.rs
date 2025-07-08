@@ -22,12 +22,11 @@ use std::{
 
 use clap::Parser;
 use log::error;
+use spi::{PhysDevice, SpiController, SpiDevice};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
-use spi::{PhysDevice, SpiController, SpiDevice};
 use vhu_spi::VhostUserSpiBackend;
+use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -49,7 +48,8 @@ enum Error {
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct SpiArgs {
-    /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+    /// Location of vhost-user Unix domain socket. This is suffixed by
+    /// 0,1,2..socket_count-1.
     #[clap(short, long)]
     socket_path: PathBuf,
 
@@ -176,8 +176,9 @@ fn main() {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use assert_matches::assert_matches;
     use std::path::Path;
+
+    use assert_matches::assert_matches;
 
     use super::*;
     use crate::spi::tests::DummyDevice;

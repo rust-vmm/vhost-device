@@ -341,10 +341,7 @@ impl VsockThreadBackend {
                         .unwrap()
                         .is_disjoint(sibling_groups_set.read().unwrap().deref())
                     {
-                        info!(
-                            "vsock: dropping packet for cid: {:?} due to group mismatch",
-                            dst_cid
-                        );
+                        info!("vsock: dropping packet for cid: {dst_cid:?} due to group mismatch");
                         return Ok(());
                     }
 
@@ -354,7 +351,7 @@ impl VsockThreadBackend {
                         .push_back(RawVsockPacket::from_vsock_packet(pkt)?);
                     let _ = sibling_event_fd.write(1);
                 } else {
-                    warn!("vsock: dropping packet for unknown cid: {:?}", dst_cid);
+                    warn!("vsock: dropping packet for unknown cid: {dst_cid:?}");
                 }
 
                 return Ok(());

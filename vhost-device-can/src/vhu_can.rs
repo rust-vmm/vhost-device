@@ -94,7 +94,7 @@ pub(crate) enum Error {
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        io::Error::other(e)
     }
 }
 
@@ -130,7 +130,7 @@ impl VhostUserCanBackend {
         let mut flags = 0;
 
         if msg_type != VIRTIO_CAN_TX {
-            warn!("TX: Message type 0x{:x} unknown\n", msg_type);
+            warn!("TX: Message type 0x{msg_type:x} unknown\n");
             return Err(Error::UnexpectedCanMsgType(msg_type));
         }
 
@@ -435,7 +435,7 @@ impl VhostUserCanBackend {
                         }
                     }
                     Err(e) => {
-                        warn!("The tx frame had the following error: {}", e);
+                        warn!("The tx frame had the following error: {e}");
                         VIRTIO_CAN_RESULT_NOT_OK
                     }
                 };
@@ -506,7 +506,7 @@ impl VhostUserCanBackend {
             let can_rx = match self.check_rx_frame(response) {
                 Ok(frame) => frame,
                 Err(e) => {
-                    warn!("The tx frame had the following error: {}", e);
+                    warn!("The tx frame had the following error: {e}");
                     return Err(e);
                 }
             };

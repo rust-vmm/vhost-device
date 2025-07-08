@@ -40,7 +40,7 @@ struct CanArgs {
 fn check_can_devices(can_devices: &[String]) -> Result<()> {
     for can_dev in can_devices {
         if CanSocket::open(can_dev).is_err() {
-            info!("There is no interface with the following name {}", can_dev);
+            info!("There is no interface with the following name {can_dev}");
             return Err(Error::CouldNotFindCANDevs);
         }
     }

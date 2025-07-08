@@ -43,13 +43,7 @@ pub mod device;
 pub mod stream;
 pub mod virtio_sound;
 
-use std::{
-    convert::TryFrom,
-    io::{Error as IoError, ErrorKind},
-    mem::size_of,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{convert::TryFrom, io::Error as IoError, mem::size_of, path::PathBuf, sync::Arc};
 
 pub use args::BackendType;
 pub use stream::Stream;
@@ -182,7 +176,7 @@ pub enum Error {
 
 impl From<Error> for IoError {
     fn from(e: Error) -> Self {
-        Self::new(ErrorKind::Other, e)
+        Self::other(e)
     }
 }
 
@@ -302,14 +296,14 @@ impl Drop for IOMessage {
                 .into(),
         };
         let used_len: u32 = self.used_len.load(std::sync::atomic::Ordering::SeqCst);
-        log::trace!("dropping IOMessage {:?}", resp);
+        log::trace!("dropping IOMessage {resp:?}");
 
         let mem = self.desc_chain.memory();
 
         let mut writer = match self.desc_chain.clone().writer(mem) {
             Ok(writer) => writer,
             Err(err) => {
-                log::error!("Error::DescriptorReadFailed: {}", err);
+                log::error!("Error::DescriptorReadFailed: {err}");
                 return;
             }
         };
@@ -319,23 +313,23 @@ impl Drop for IOMessage {
         let mut writer_status = match writer.split_at(offset) {
             Ok(writer_status) => writer_status,
             Err(err) => {
-                log::error!("Error::DescriptorReadFailed: {}", err);
+                log::error!("Error::DescriptorReadFailed: {err}");
                 return;
             }
         };
 
         if let Err(err) = writer_status.write_obj(resp) {
-            log::error!("Error::DescriptorWriteFailed: {}", err);
+            log::error!("Error::DescriptorWriteFailed: {err}");
             return;
         }
         if let Err(err) = self.vring.add_used(
             self.desc_chain.head_index(),
             resp.as_slice().len() as u32 + used_len,
         ) {
-            log::error!("Couldn't add used bytes count to vring: {}", err);
+            log::error!("Couldn't add used bytes count to vring: {err}");
         }
         if let Err(err) = self.vring.signal_used_queue() {
-            log::error!("Couldn't signal used queue: {}", err);
+            log::error!("Couldn't signal used queue: {err}");
         }
     }
 }
@@ -459,7 +453,7 @@ mod tests {
     fn test_display() {
         crate::init_logger();
         let error = InvalidControlMessage(42);
-        let formatted_error = format!("{}", error);
+        let formatted_error = format!("{error}");
         assert_eq!(formatted_error, "Invalid control message code 42");
     }
 

@@ -207,7 +207,7 @@ pub fn try_backoff<T, E: std::fmt::Display>(
     let distribution = match Uniform::new(0.0_f32, 1.0_f32) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Failed to create uniform distribution: {}", e);
+            eprintln!("Failed to create uniform distribution: {e}");
             return Err(());
         }
     };

@@ -132,7 +132,7 @@ pub(crate) fn start_backend<D: 'static + InputDevice + Send + Sync>(
         .zip(config.event_list.iter().cloned())
         .enumerate()
     {
-        let name = format!("vhu-vsock-input-{:?}", event);
+        let name = format!("vhu-vsock-input-{event:?}");
         let sender = senders.clone();
         let handle = thread::Builder::new()
             .name(name.clone())

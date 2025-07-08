@@ -39,8 +39,7 @@ impl VirtioScsiLun {
             // bytes[2..3] is a normal SCSI single-level lun
             if (bytes[2] & Self::ADDRESS_METHOD_PATTERN) != Self::FLAT_SPACE_ADDRESSING_METHOD {
                 error!(
-                    "Got LUN in unsupported format: {:#2x} {:#2x}. \
-                     Only flat space addressing is supported!",
+                    "Got LUN in unsupported format: {:#2x} {:#2x}. Only flat space addressing is supported!",
                     bytes[2], bytes[3]
                 );
                 return None;
@@ -350,7 +349,8 @@ pub(crate) mod tests {
         let mem: GuestMemoryMmap =
             GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap();
 
-        // The `build_desc_chain` function will populate the `NEXT` related flags and field.
+        // The `build_desc_chain` function will populate the `NEXT` related flags and
+        // field.
         let v = vec![
             // A device-writable request header descriptor.
             RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),

@@ -17,11 +17,13 @@ use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::scsi::emulation::{
-    block_device::{BlockDevice, FileBackend, MediumRotationRate},
-    target::EmulatedTarget,
+use crate::{
+    scsi::emulation::{
+        block_device::{BlockDevice, FileBackend, MediumRotationRate},
+        target::EmulatedTarget,
+    },
+    vhu_scsi::VhostUserScsiBackend,
 };
-use crate::vhu_scsi::VhostUserScsiBackend;
 
 #[derive(Debug, ThisError)]
 enum Error {

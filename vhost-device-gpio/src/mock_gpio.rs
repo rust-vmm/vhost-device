@@ -33,7 +33,7 @@ impl MockGpioDevice {
     pub(crate) fn new(ngpio: u16) -> Self {
         let mut gpio_names = Vec::with_capacity(ngpio.into());
         for i in 0..ngpio {
-            gpio_names.push(format!("dummy{}", i));
+            gpio_names.push(format!("dummy{i}"));
         }
 
         Self {

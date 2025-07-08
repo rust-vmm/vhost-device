@@ -82,7 +82,7 @@ pub(crate) enum Error {
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        io::Error::other(e)
     }
 }
 
@@ -240,7 +240,7 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
                 }
 
                 Err(x) => {
-                    error!("{:?}", x);
+                    error!("{x:?}");
                     vec![VIRTIO_GPIO_STATUS_ERR, 0]
                 }
             };

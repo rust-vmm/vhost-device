@@ -5,21 +5,23 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::info;
-use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::os::unix::io::AsRawFd;
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    fs::{self, File, OpenOptions},
+    os::unix::io::AsRawFd,
+    path::Path,
+};
 
 use libc::{c_ulong, ioctl};
+use log::info;
 use thiserror::Error as ThisError;
 use vmm_sys_util::errno::Error as IoError;
 
 use super::AdapterConfig;
 use crate::AdapterIdentifier;
 
-// The type of the `req` parameter is different for the `musl` library. This will enable
-// successful build for other non-musl libraries.
+// The type of the `req` parameter is different for the `musl` library. This
+// will enable successful build for other non-musl libraries.
 #[cfg(target_env = "musl")]
 type IoctlRequest = libc::c_int;
 #[cfg(not(target_env = "musl"))]
@@ -58,7 +60,8 @@ pub(crate) enum Error {
 
 // Linux I2C/SMBUS definitions
 
-// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further details.
+// IOCTL commands, refer Linux's Documentation/i2c/dev-interface.rst for further
+// details.
 
 /// NOTE: Slave address is 7 or 10 bits, but 10-bit addresses are NOT supported!
 /// (due to code brokenness)
@@ -611,9 +614,10 @@ impl<D: I2cDevice> I2cMap<D> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use vmm_sys_util::tempfile::TempFile;
+
     use super::*;
     use crate::DeviceConfig;
-    use vmm_sys_util::tempfile::TempFile;
 
     // Update read-buffer of each write-buffer with index + 1 value.
     pub fn update_rdwr_buf(buf: &mut [u8]) {

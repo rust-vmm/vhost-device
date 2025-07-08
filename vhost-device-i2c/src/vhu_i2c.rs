@@ -69,7 +69,7 @@ pub(crate) enum Error {
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        io::Error::other(e)
     }
 }
 
@@ -348,7 +348,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cB
             }
 
             _ => {
-                warn!("unhandled device_event: {}", device_event);
+                warn!("unhandled device_event: {device_event}");
                 return Err(Error::HandleEventUnknown.into());
             }
         }

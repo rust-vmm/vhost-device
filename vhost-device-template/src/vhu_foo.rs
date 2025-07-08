@@ -5,23 +5,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{info, warn};
 use std::{
     convert,
     io::{self, Result as IoResult},
 };
 
+use log::{info, warn};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
 use crate::FooInfo;
 
@@ -83,8 +85,9 @@ impl VhostUserFooBackend {
 
         // Iterate over each FOO request.
         //
-        // The layout of the various structures, to be read from and written into the descriptor
-        // buffers, is defined in the Virtio specification for each protocol.
+        // The layout of the various structures, to be read from and written into the
+        // descriptor buffers, is defined in the Virtio specification for each
+        // protocol.
         for desc_chain in requests.clone() {
             let counter = self.info.counter();
             let descriptors: Vec<_> = desc_chain.clone().collect();
@@ -102,10 +105,11 @@ impl VhostUserFooBackend {
                     "read only"
                 };
 
-                // We now can iterate over the set of descriptors and process the messages. There
-                // will be a number of read only descriptors containing messages as defined by the
-                // specification. If any replies are needed, the driver should have placed one or
-                // more writable descriptors at the end for the device to use to reply.
+                // We now can iterate over the set of descriptors and process the messages.
+                // There will be a number of read only descriptors containing
+                // messages as defined by the specification. If any replies are
+                // needed, the driver should have placed one or more writable
+                // descriptors at the end for the device to use to reply.
                 info!("Length of the {} descriptor@{} is: {}", perm, i, desc.len());
             }
         }
@@ -221,6 +225,7 @@ impl VhostUserBackendMut for VhostUserFooBackend {
 #[cfg(test)]
 mod tests {
     use std::mem::size_of;
+
     use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{

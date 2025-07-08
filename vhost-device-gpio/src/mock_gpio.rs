@@ -5,11 +5,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::info;
 use std::sync::RwLock;
 
-use crate::gpio::{Error, GpioDevice, GpioState, Result};
-use crate::virtio_gpio::*;
+use log::info;
+
+use crate::{
+    gpio::{Error, GpioDevice, GpioState, Result},
+    virtio_gpio::*,
+};
 
 #[derive(Debug)]
 pub(crate) struct MockGpioDevice {

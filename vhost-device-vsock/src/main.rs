@@ -483,7 +483,7 @@ fn main() {
     let configs = match Vec::<VsockConfig>::try_from(VsockArgs::parse()) {
         Ok(c) => c,
         Err(e) => {
-            println!("Error parsing arguments: {}", e);
+            println!("Error parsing arguments: {e}");
             return;
         }
     };

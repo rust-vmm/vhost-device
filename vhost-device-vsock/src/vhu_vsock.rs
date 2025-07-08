@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    io::{self, Result as IoResult},
+    io::Result as IoResult,
     path::PathBuf,
     sync::{Arc, Mutex, RwLock},
 };
@@ -144,7 +144,7 @@ pub(crate) enum Error {
 
 impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
-        std::io::Error::new(io::ErrorKind::Other, e)
+        std::io::Error::other(e)
     }
 }
 

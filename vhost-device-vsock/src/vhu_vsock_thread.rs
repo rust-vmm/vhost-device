@@ -319,13 +319,13 @@ impl VhostUserVsockThread {
                         })
                         .and_then(|stream| self.add_stream_listener(stream))
                         .unwrap_or_else(|err| {
-                            warn!("Unable to accept new local connection: {:?}", err);
+                            warn!("Unable to accept new local connection: {err:?}");
                         });
                     } else {
                         // If we aren't ready to process requests, accept and immediately close
                         // the connection.
                         conn.map(drop).unwrap_or_else(|err| {
-                            warn!("Error closing an incoming connection: {:?}", err);
+                            warn!("Error closing an incoming connection: {err:?}");
                         });
                     }
                 }
@@ -336,14 +336,14 @@ impl VhostUserVsockThread {
                         match conn {
                             Ok((stream, addr)) => {
                                 if let Err(err) = stream.set_nonblocking(true) {
-                                    warn!("Failed to set stream to non-blocking: {:?}", err);
+                                    warn!("Failed to set stream to non-blocking: {err:?}");
                                     return;
                                 }
 
                                 let peer_port = match vsock_listener.local_addr() {
                                     Ok(listener_addr) => listener_addr.port(),
                                     Err(err) => {
-                                        warn!("Failed to get peer address: {:?}", err);
+                                        warn!("Failed to get peer address: {err:?}");
                                         return;
                                     }
                                 };
@@ -361,16 +361,16 @@ impl VhostUserVsockThread {
                                     stream_raw_fd,
                                     epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
                                 ) {
-                                    warn!("Failed to register with epoll: {:?}", err);
+                                    warn!("Failed to register with epoll: {err:?}");
                                 }
                             }
                             Err(err) => {
-                                warn!("Unable to accept new local connection: {:?}", err);
+                                warn!("Unable to accept new local connection: {err:?}");
                             }
                         }
                     } else {
                         conn.map(drop).unwrap_or_else(|err| {
-                            warn!("Error closing an incoming connection: {:?}", err);
+                            warn!("Error closing an incoming connection: {err:?}");
                         });
                     }
                 }
@@ -404,7 +404,7 @@ impl VhostUserVsockThread {
                         let peer_port = match Self::read_local_stream_port(unix_stream) {
                             Ok(port) => port,
                             Err(err) => {
-                                warn!("Error while parsing \"connect PORT\n\" command: {:?}", err);
+                                warn!("Error while parsing \"connect PORT\n\" command: {err:?}");
                                 return;
                             }
                         };
@@ -413,7 +413,7 @@ impl VhostUserVsockThread {
                         let local_port = match self.allocate_local_port() {
                             Ok(lp) => lp,
                             Err(err) => {
-                                warn!("Error while allocating local port: {:?}", err);
+                                warn!("Error while allocating local port: {err:?}");
                                 return;
                             }
                         };
@@ -617,7 +617,7 @@ impl VhostUserVsockThread {
                     }
                 }
                 Err(e) => {
-                    warn!("vsock: RX queue error: {:?}", e);
+                    warn!("vsock: RX queue error: {e:?}");
                     0
                 }
             };

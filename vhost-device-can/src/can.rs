@@ -5,22 +5,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{error, info, trace, warn};
-use std::sync::{Arc, RwLock};
+use std::{
+    sync::{Arc, RwLock},
+    thread::{spawn, JoinHandle},
+};
 
-use std::thread::{spawn, JoinHandle};
+use log::{error, info, trace, warn};
 use thiserror::Error as ThisError;
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 extern crate queues;
 use queues::*;
 extern crate socketcan;
-use crate::virtio_can::{
-    VirtioCanConfig, VirtioCanFrame, CAN_CS_STARTED, CAN_CS_STOPPED, CAN_EFF_FLAG,
-    CAN_FRMF_TYPE_FD, VIRTIO_CAN_RX,
-};
 use socketcan::{
     CanAnyFrame, CanDataFrame, CanFdFrame, CanFdSocket, EmbeddedFrame, ExtendedId, Frame, Id,
     Socket, StandardId,
+};
+
+use crate::virtio_can::{
+    VirtioCanConfig, VirtioCanFrame, CAN_CS_STARTED, CAN_CS_STOPPED, CAN_EFF_FLAG,
+    CAN_FRMF_TYPE_FD, VIRTIO_CAN_RX,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -286,9 +289,10 @@ impl CanController {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, RwLock};
+
     use super::*;
     use crate::vhu_can::VhostUserCanBackend;
-    use std::sync::{Arc, RwLock};
 
     #[test]
     fn test_can_controller_creation() {

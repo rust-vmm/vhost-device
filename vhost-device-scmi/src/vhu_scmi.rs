@@ -5,29 +5,35 @@
 //! General part of the vhost-user SCMI backend.  Nothing very different from
 //! the other rust-vmm backends.
 
+use std::{
+    io,
+    io::Result as IoResult,
+    mem::size_of,
+    sync::{Arc, RwLock},
+};
+
 use log::{debug, error, warn};
-use std::io;
-use std::io::Result as IoResult;
-use std::mem::size_of;
-use std::sync::{Arc, RwLock};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::VringEpollHandler;
-use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
-use crate::devices::common::{available_devices, DeviceError};
-use crate::scmi::{MessageHeader, ScmiHandler, ScmiRequest};
-use crate::VuScmiConfig;
+use crate::{
+    devices::common::{available_devices, DeviceError},
+    scmi::{MessageHeader, ScmiHandler, ScmiRequest},
+    VuScmiConfig,
+};
 
 // QUEUE_SIZE must be apparently at least 1024 for MMIO.
 // There is probably a maximum size per descriptor defined in the kernel.
@@ -92,14 +98,17 @@ pub struct VuScmiBackend {
     event_idx: bool,
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    /// Event vring and descriptors serve for asynchronous responses and notifications.
-    /// They are obtained from the driver and we store them here for later use.
-    /// (We currently don't implement asynchronous responses or notifications but we support
-    /// the event queue because the Linux VIRTIO SCMI driver seems to be unhappy if it is not
-    /// present. And it doesn't harm to be ready for possible event queue use in future.)
+    /// Event vring and descriptors serve for asynchronous responses and
+    /// notifications. They are obtained from the driver and we store them
+    /// here for later use. (We currently don't implement asynchronous
+    /// responses or notifications but we support the event queue because
+    /// the Linux VIRTIO SCMI driver seems to be unhappy if it is not
+    /// present. And it doesn't harm to be ready for possible event queue use in
+    /// future.)
     event_vring: Option<VringRwLock>,
     event_descriptors: Vec<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
-    /// The abstraction of request handling, with all the needed information stored inside.
+    /// The abstraction of request handling, with all the needed information
+    /// stored inside.
     scmi_handler: ScmiHandler,
 }
 
@@ -140,7 +149,8 @@ impl VuScmiBackend {
     }
 
     /// Registers all the devices that can provide notifications
-    /// Create a hashmap to store the relationship about device's notify_fd and scmibackend eventfd.
+    /// Create a hashmap to store the relationship about device's notify_fd and
+    /// scmibackend eventfd.
     pub fn register_device_event_fd(
         &self,
         handlers: Vec<Arc<VringEpollHandler<Arc<RwLock<VuScmiBackend>>>>>,

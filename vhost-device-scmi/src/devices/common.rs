@@ -9,24 +9,25 @@
 //! The module also defines common infrastructure to provide sensor devices to
 //! SCMI, see [SensorT].
 
-use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
-use std::fmt::Write;
-use std::fs::File;
-use std::os::unix::io::RawFd;
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsString,
+    fmt::Write,
+    fs::File,
+    os::unix::io::RawFd,
+};
 
 use itertools::Itertools;
 use log::debug;
 use thiserror::Error as ThisError;
 
+use super::{fake, iio};
 use crate::scmi::{
     self, DeviceResult, MessageId, MessageValue, MessageValues, ProtocolId, ScmiDevice,
     ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH, SENSOR_AXIS_DESCRIPTION_GET, SENSOR_CONFIG_GET,
     SENSOR_CONFIG_SET, SENSOR_CONTINUOUS_UPDATE_NOTIFY, SENSOR_DESCRIPTION_GET, SENSOR_PROTOCOL_ID,
     SENSOR_READING_GET, SENSOR_UPDATE,
 };
-
-use super::{fake, iio};
 
 /// Non-SCMI related device errors.
 #[derive(Debug, ThisError)]
@@ -233,10 +234,12 @@ pub struct Sensor {
     /// using [Sensor::new] are disabled initially.
     enabled: bool,
 
-    /// Sensor notification can be enabled or disabled when frontend sends SENSOR_CONTINUOUS_UPDATE_NOTIFY.
+    /// Sensor notification can be enabled or disabled when frontend sends
+    /// SENSOR_CONTINUOUS_UPDATE_NOTIFY.
     notify_enabled: bool,
-    /// If this sensor supports notifying the frontend actively, it should record
-    /// notification device file here. (e.g. For iio device, the file is /dev/iio:deviceX)
+    /// If this sensor supports notifying the frontend actively, it should
+    /// record notification device file here. (e.g. For iio device, the file
+    /// is /dev/iio:deviceX)
     pub notify_dev: Option<File>,
 
     /// Sensor id, to identify the sensor in notification lookup.
@@ -407,8 +410,8 @@ pub trait SensorT: Send {
             axis_resolution | ((axis_exponent as u32) << 27),
         )); //resolution
 
-        // In SCMI spec, it specifies that if the sensor does not report the min and max range,
-        // the following field should be as as:
+        // In SCMI spec, it specifies that if the sensor does not report the min and max
+        // range, the following field should be as as:
         // axis_min_range_low 0x0
         // axis_min_range_high 0x80000000
         // axis_max_range_low 0xFFFFFFFF
@@ -520,8 +523,8 @@ pub trait SensorT: Send {
 
     /// Returns the notification messages from the device.
     ///
-    /// Usually need to redefine this. Different sensors may have different ways to
-    /// get notifications.
+    /// Usually need to redefine this. Different sensors may have different ways
+    /// to get notifications.
     fn reading_update(&mut self, _device_index: u32) -> DeviceResult {
         Ok(vec![])
     }
@@ -529,7 +532,8 @@ pub trait SensorT: Send {
     /// Enable/Disable Sensor notify function.
     ///
     /// Usually need to redefine this.
-    /// Different sensors require different configuration to enable/disable notifications.
+    /// Different sensors require different configuration to enable/disable
+    /// notifications.
     fn notify_status_set(&self, _enabled: bool) -> Result<(), DeviceError> {
         Ok(())
     }
@@ -563,7 +567,8 @@ pub trait SensorT: Send {
     fn notify(&mut self, device_index: u32, message_id: MessageId) -> DeviceResult {
         match message_id {
             SENSOR_UPDATE => {
-                // Read pending notifications, to prevent spamming the frontend with EVENT:IN interrupts.
+                // Read pending notifications, to prevent spamming the frontend with EVENT:IN
+                // interrupts.
                 let ret = self.reading_update(device_index);
                 if !self.sensor().enabled || !self.sensor().notify_enabled {
                     return Result::Err(ScmiDeviceError::NotEnabled);

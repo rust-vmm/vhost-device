@@ -382,7 +382,7 @@ impl I2cDevice for PhysDevice {
             AdapterIdentifier::Name(adapter_name) => PhysDevice::find_adapter(adapter_name)?,
             AdapterIdentifier::Number(no) => *no,
         };
-        let device_path = format!("/dev/i2c-{}", adapter_no);
+        let device_path = format!("/dev/i2c-{adapter_no}");
 
         Self::open_with(&device_path, adapter_no)
     }

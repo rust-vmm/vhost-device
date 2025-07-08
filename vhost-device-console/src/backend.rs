@@ -143,9 +143,9 @@ pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
         .enumerate()
     {
         let tcp_addr = tcp_addr.clone();
-        info!("thread_id: {}, socket: {:?}", thread_id, socket);
+        info!("thread_id: {thread_id}, socket: {socket:?}");
 
-        let name = format!("vhu-console-{}", tcp_addr);
+        let name = format!("vhu-console-{tcp_addr}");
         let sender = senders.clone();
         let handle = Builder::new()
             .name(name.clone())

@@ -63,7 +63,7 @@ pub(crate) enum VuRngError {
 
 impl convert::From<VuRngError> for io::Error {
     fn from(e: VuRngError) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        io::Error::other(e)
     }
 }
 
@@ -277,7 +277,7 @@ impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBacke
             }
 
             _ => {
-                warn!("unhandled device_event: {}", device_event);
+                warn!("unhandled device_event: {device_event}");
                 return Err(VuRngError::HandleEventUnknownEvent.into());
             }
         }

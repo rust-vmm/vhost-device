@@ -64,7 +64,7 @@ impl CanController {
     // Creates a new controller corresponding to `device`.
     pub(crate) fn new(can_name: String) -> Result<CanController> {
         let can_name = can_name.to_owned();
-        info!("can_name: {:?}", can_name);
+        info!("can_name: {can_name:?}");
 
         let rx_fifo = Queue::new();
         let rx_efd = EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?;
@@ -93,10 +93,10 @@ impl CanController {
         let last_elem = canframe.length.to_native() as usize - 1;
         for (index, sdu) in canframe.sdu.iter().enumerate() {
             if index == last_elem {
-                trace!("0x{:x}", sdu);
+                trace!("0x{sdu:x}");
                 break;
             }
-            trace!("0x{:x}, ", sdu);
+            trace!("0x{sdu:x}, ");
         }
         trace!("]");
     }
@@ -198,19 +198,19 @@ impl CanController {
                 // Match and process frame variants
                 let read_can_frame = match frame {
                     CanAnyFrame::Normal(frame) => {
-                        trace!("Received CAN frame: {:?}", frame);
+                        trace!("Received CAN frame: {frame:?}");
                         Self::process_frame(frame, false)
                     }
                     CanAnyFrame::Fd(frame) => {
-                        trace!("Received CAN FD frame: {:?}", frame);
+                        trace!("Received CAN FD frame: {frame:?}");
                         Self::process_frame(frame, true)
                     }
                     CanAnyFrame::Remote(frame) => {
-                        trace!("Received Remote CAN frame: {:?}", frame);
+                        trace!("Received Remote CAN frame: {frame:?}");
                         Self::process_frame(frame, false)
                     }
                     CanAnyFrame::Error(frame) => {
-                        trace!("Received Error frame: {:?}", frame);
+                        trace!("Received Error frame: {frame:?}");
                         Self::process_frame(frame, false)
                     }
                 };
@@ -354,7 +354,7 @@ mod tests {
                 let operation_result = controller.can_out(frame);
                 assert!(operation_result.is_ok());
             }
-            Err(_) => warn!("There is no CAN interface with {} name", can_name),
+            Err(_) => warn!("There is no CAN interface with {can_name} name"),
         }
     }
 

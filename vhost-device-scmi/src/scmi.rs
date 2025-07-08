@@ -130,7 +130,8 @@ impl From<&MessageValues> for Response {
 }
 
 impl Response {
-    // Notification is different from general response, it doesn't need ReturnStatus.
+    // Notification is different from general response, it doesn't need
+    // ReturnStatus.
     pub fn from_notification(value: &MessageValues) -> Self {
         Self {
             values: value.to_vec(),
@@ -211,9 +212,10 @@ impl ScmiRequest {
     pub(crate) fn new(header: MessageHeader) -> Self {
         let protocol_id: u8 = ((header >> 10) & 0xFF).try_into().unwrap();
         let message_id: u8 = (header & 0xFF).try_into().unwrap();
-        // Token is an arbitrary info, the Linux SCMI driver uses it as a sequence number.
-        // No actual meaning for vhost except copying the unchanged header in the response
-        // as required by SCMI specification. We extract it here only for debugging purposes.
+        // Token is an arbitrary info, the Linux SCMI driver uses it as a sequence
+        // number. No actual meaning for vhost except copying the unchanged
+        // header in the response as required by SCMI specification. We extract
+        // it here only for debugging purposes.
         let token: u16 = ((header >> 18) & 0x3FF).try_into().unwrap();
         let message_type = match (header >> 8) & 0x3 {
             0 => MessageType::Command,
@@ -436,10 +438,14 @@ impl HandlerMap {
             |handler: &ScmiHandler, _| -> Response {
                 let n_sensors = u32::from(handler.devices.number_of_devices(SENSOR_PROTOCOL_ID));
                 let values: MessageValues = vec![
-                    MessageValue::Unsigned(n_sensors), // # of sensors, no async commands
-                    MessageValue::Unsigned(0), // lower shared memory address -- not supported
-                    MessageValue::Unsigned(0), // higher shared memory address -- not supported
-                    MessageValue::Unsigned(0), // length of shared memory -- not supported
+                    // # of sensors, no async commands
+                    MessageValue::Unsigned(n_sensors),
+                    // lower shared memory address -- not supported
+                    MessageValue::Unsigned(0),
+                    // higher shared memory address -- not supported
+                    MessageValue::Unsigned(0),
+                    // length of shared memory -- not supported
+                    MessageValue::Unsigned(0),
                 ];
                 Response::from(&values)
             },
@@ -667,10 +673,11 @@ pub type DeviceResult = Result<MessageValues, ScmiDeviceError>;
 
 pub type DeviceIdentify = (ProtocolId, usize);
 
-/// EventfdMap is a structure used to construct the relationship between device_event and DeviceIdentify
-/// Once a device supports notification, it should insert a key-value to this hashmap
-/// "device_event" is automatically assigned according to "available device event",
-/// then function handle_event can find the device via this hashmap.
+/// EventfdMap is a structure used to construct the relationship between
+/// device_event and DeviceIdentify Once a device supports notification, it
+/// should insert a key-value to this hashmap "device_event" is automatically
+/// assigned according to "available device event", then function handle_event
+/// can find the device via this hashmap.
 struct EventfdMap {
     // Next available device_event, it should be initialized with NOTIFY_ALLOW_START_FD
     available_device_event: u16,
@@ -686,7 +693,8 @@ impl EventfdMap {
         }
     }
 
-    // If this device has eventfd for notification, insert it into map with a device_eventfd
+    // If this device has eventfd for notification, insert it into map with a
+    // device_eventfd
     fn insert(&mut self, device_identify: DeviceIdentify) {
         let mut map = self.map.lock().unwrap();
         map.insert(self.available_device_event, device_identify);
@@ -755,9 +763,9 @@ impl ScmiHandler {
         self.event_fds.available_device_event - 1
     }
 
-    /// According to device_event, find out the device which will do notification.
-    /// Then call its notify function to return a ScmiResponse.
-    /// Now only SENSOR PROTOCOL can do notification.
+    /// According to device_event, find out the device which will do
+    /// notification. Then call its notify function to return a
+    /// ScmiResponse. Now only SENSOR PROTOCOL can do notification.
     /// And it supports only the `SENSOR_UPDATE` message.
     pub fn notify(&mut self, device_event: u16) -> Option<ScmiResponse> {
         let event_fds_locked = self.event_fds.map.lock().unwrap();
@@ -847,7 +855,8 @@ impl ScmiHandler {
             .expect("Impossibly large number of SCMI protocols")
     }
 
-    // If a device can notify, record its event_fd, which will be assigned to the device later.
+    // If a device can notify, record its event_fd, which will be assigned to the
+    // device later.
     pub fn register_device(&mut self, device: Box<dyn ScmiDevice>) {
         let register_event = device.get_notify_fd().is_some();
         let device_identify = self.devices.insert(device);
@@ -955,9 +964,8 @@ impl ScmiHandler {
 
 #[cfg(test)]
 mod tests {
-    use crate::devices::{common::DeviceProperties, fake::FakeSensor};
-
     use super::*;
+    use crate::devices::{common::DeviceProperties, fake::FakeSensor};
 
     #[test]
     fn test_response_from_status() {
@@ -1377,8 +1385,9 @@ mod tests {
             MessageValue::Unsigned(0),
             MessageValue::Unsigned(axis_index),
         ];
-        // Each call will return only one descriptor to avoid exceeding the maximum length of the message
-        // and to inform about the number of the remaining sensor axis descriptions.
+        // Each call will return only one descriptor to avoid exceeding the maximum
+        // length of the message and to inform about the number of the remaining
+        // sensor axis descriptions.
         let num_axis_flags = 1 | ((n_axes - axis_index - 1) << 26);
         let mut result = vec![MessageValue::Unsigned(num_axis_flags)];
         let name = format!("acc_{}", char::from_u32('X' as u32 + axis_index).unwrap()).to_string();

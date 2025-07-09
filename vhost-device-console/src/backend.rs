@@ -42,11 +42,16 @@ pub enum Error {
     ThreadPanic(String, Box<dyn Any + Send>),
     #[error("Error using multiple sockets with Nested backend")]
     WrongBackendSocket,
+    #[error("Invalid cmdline option")]
+    InvalidCmdlineOption,
+    #[error("Invalid uds file")]
+    InvalidUdsFile,
 }
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct VuConsoleConfig {
     pub socket_path: PathBuf,
+    pub uds_path: PathBuf,
     pub backend: BackendType,
     pub tcp_port: String,
     pub socket_count: u32,
@@ -73,15 +78,40 @@ impl VuConsoleConfig {
         (0..self.socket_count).map(make_socket_path).collect()
     }
 
-    pub fn generate_tcp_addrs(&self) -> Vec<String> {
-        let tcp_port_base = self.tcp_port.clone();
+    pub fn generate_vm_socks(&self) -> Vec<String> {
+        match self.backend {
+            // if type is Nested, result will be dropped.
+            BackendType::Nested => {
+                vec![String::new()]
+            }
 
-        let make_tcp_port = |i: u32| -> String {
-            let port_num: u32 = tcp_port_base.clone().parse().unwrap();
-            "127.0.0.1:".to_owned() + &(port_num + i).to_string()
-        };
+            BackendType::Network => {
+                let port_base: u32 = self.tcp_port.parse().unwrap();
+                let make_tcp_port =
+                    |i: u32| -> String { "127.0.0.1:".to_owned() + &(port_base + i).to_string() };
+                (0..self.socket_count).map(make_tcp_port).collect()
+            }
 
-        (0..self.socket_count).map(make_tcp_port).collect()
+            BackendType::Uds => {
+                let uds_filename = self.uds_path.file_name().expect("uds has no filename.");
+                let uds_parent = self
+                    .uds_path
+                    .parent()
+                    .expect("uds has no parent directory.");
+
+                let make_uds_path = |i: u32| -> String {
+                    let mut filename = uds_filename.to_os_string();
+                    filename.push(std::ffi::OsStr::new(&i.to_string()));
+                    uds_parent
+                        .join(&filename)
+                        .to_str()
+                        .expect("Path contains invalid UTF-8 characters")
+                        .to_string()
+                };
+
+                (0..self.socket_count).map(make_uds_path).collect()
+            }
+        }
     }
 }
 
@@ -89,7 +119,7 @@ impl VuConsoleConfig {
 /// vhost-device-console backend server.
 pub fn start_backend_server(
     socket: PathBuf,
-    tcp_addr: String,
+    vm_sock: String,
     backend: BackendType,
     max_queue_size: usize,
 ) -> Result<()> {
@@ -104,7 +134,7 @@ pub fn start_backend_server(
         vu_console_backend
             .write()
             .unwrap()
-            .assign_input_method(tcp_addr.clone())
+            .assign_input_method(vm_sock.clone())
             .map_err(Error::CouldNotInitBackend)?;
 
         let mut daemon = VhostUserDaemon::new(
@@ -132,26 +162,26 @@ pub fn start_backend_server(
 pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
     let mut handles = HashMap::new();
     let (senders, receiver) = std::sync::mpsc::channel();
-    let tcp_addrs = config.generate_tcp_addrs();
+    let vm_socks = config.generate_vm_socks();
     let backend = config.backend;
     let max_queue_size = config.max_queue_size;
 
-    for (thread_id, (socket, tcp_addr)) in config
+    for (thread_id, (socket, vm_sock)) in config
         .generate_socket_paths()
         .into_iter()
-        .zip(tcp_addrs.iter())
+        .zip(vm_socks.iter())
         .enumerate()
     {
-        let tcp_addr = tcp_addr.clone();
+        let vm_sock = vm_sock.clone();
         info!("thread_id: {}, socket: {:?}", thread_id, socket);
 
-        let name = format!("vhu-console-{}", tcp_addr);
+        let name = format!("vhu-console-{}", vm_sock);
         let sender = senders.clone();
         let handle = Builder::new()
             .name(name.clone())
             .spawn(move || {
                 let result = std::panic::catch_unwind(move || {
-                    start_backend_server(socket, tcp_addr.to_string(), backend, max_queue_size)
+                    start_backend_server(socket, vm_sock.to_string(), backend, max_queue_size)
                 });
 
                 // Notify the main thread that we are done.
@@ -187,8 +217,9 @@ mod tests {
     fn test_console_valid_configuration_nested() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: None,
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -200,8 +231,9 @@ mod tests {
     fn test_console_invalid_configuration_nested_1() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: None,
             socket_count: 0,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -216,8 +248,9 @@ mod tests {
     fn test_console_invalid_configuration_nested_2() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: None,
             socket_count: 2,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -232,8 +265,9 @@ mod tests {
     fn test_console_valid_configuration_network_1() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: Some(String::from("12345")),
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -245,8 +279,9 @@ mod tests {
     fn test_console_valid_configuration_network_2() {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: Some(String::from("12345")),
             socket_count: 2,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -257,16 +292,16 @@ mod tests {
     fn test_backend_start_and_stop(args: ConsoleArgs) -> Result<()> {
         let config = VuConsoleConfig::try_from(args).expect("Wrong config");
 
-        let tcp_addrs = config.generate_tcp_addrs();
+        let vm_socks = config.generate_vm_socks();
         let backend = config.backend;
         let max_queue_size = config.max_queue_size;
 
-        for (socket, tcp_addr) in config
+        for (socket, vm_sock) in config
             .generate_socket_paths()
             .into_iter()
-            .zip(tcp_addrs.iter())
+            .zip(vm_socks.iter())
         {
-            start_backend_server(socket, tcp_addr.to_string(), backend, max_queue_size)?;
+            start_backend_server(socket, vm_sock.to_string(), backend, max_queue_size)?;
         }
         Ok(())
     }
@@ -275,8 +310,9 @@ mod tests {
     fn test_start_backend_server_success() {
         let args = ConsoleArgs {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            uds_path: None,
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: Some(String::from("12345")),
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -288,6 +324,7 @@ mod tests {
     fn test_start_backend_success() {
         let config = VuConsoleConfig {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
+            uds_path: PathBuf::new(),
             backend: BackendType::Network,
             tcp_port: String::from("12346"),
             socket_count: 1,
@@ -295,5 +332,52 @@ mod tests {
         };
 
         assert!(start_backend(config).is_err());
+    }
+
+    #[test]
+    fn test_console_invalid_uds_path() {
+        let args = ConsoleArgs {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            uds_path: Some("/non_existing_dir/test.sock".to_string().into()),
+            backend: BackendType::Uds,
+            tcp_port: Some(String::new()),
+            socket_count: 1,
+            max_queue_size: 128,
+        };
+
+        assert_matches!(VuConsoleConfig::try_from(args), Err(Error::InvalidUdsFile));
+    }
+
+    #[test]
+    fn test_generate_vm_sock_addrs_uds() {
+        let config = VuConsoleConfig {
+            socket_path: PathBuf::new(),
+            uds_path: "/tmp/vm.sock".to_string().into(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 3,
+            max_queue_size: 128,
+        };
+
+        let addrs = config.generate_vm_socks();
+        assert_eq!(
+            addrs,
+            vec!["/tmp/vm.sock0", "/tmp/vm.sock1", "/tmp/vm.sock2"]
+        );
+    }
+
+    #[test]
+    fn test_start_uds_backend_with_invalid_path() {
+        let config = VuConsoleConfig {
+            socket_path: PathBuf::from("/tmp/vhost.sock"),
+            uds_path: "/invalid/path/uds.sock".to_string().into(),
+            backend: BackendType::Uds,
+            tcp_port: String::new(),
+            socket_count: 1,
+            max_queue_size: 128,
+        };
+
+        let result = start_backend(config);
+        assert!(result.is_err());
     }
 }

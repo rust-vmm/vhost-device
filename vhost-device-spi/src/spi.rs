@@ -13,8 +13,10 @@ use std::{
 };
 
 use thiserror::Error as ThisError;
-use vmm_sys_util::errno::Error as IoError;
-use vmm_sys_util::ioctl::{ioctl_with_mut_ptr, ioctl_with_mut_ref, ioctl_with_ref};
+use vmm_sys_util::{
+    errno::Error as IoError,
+    ioctl::{ioctl_with_mut_ptr, ioctl_with_mut_ref, ioctl_with_ref},
+};
 
 use crate::{linux_spi::*, vhu_spi::VirtioSpiConfig, virtio_spi::*};
 
@@ -676,9 +678,11 @@ impl<D: SpiDevice> SpiController<D> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use std::path::PathBuf;
+
     use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
 
     // Update read-buffer of each write-buffer with index + 1 value.
     pub fn update_rdwr_buf(buf: u64, len: u32) {

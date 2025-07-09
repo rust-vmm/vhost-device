@@ -9,22 +9,21 @@
 //!
 //! For some entry points, see [IIOSensor] and [Axis].
 
-use std::cmp::{max, min};
-use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::fs::File;
-use std::io::{ErrorKind, Read};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::io::RawFd;
-
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::{
+    cmp::{max, min},
+    ffi::{OsStr, OsString},
+    fs,
+    fs::File,
+    io::{ErrorKind, Read},
+    os::unix::io::{AsRawFd, RawFd},
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use log::{debug, error, warn};
 
-use crate::scmi::{self, DeviceResult, MessageValue, ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH};
-
 use super::common::{DeviceError, DeviceProperties, MaybeDevice, Sensor, SensorDevice, SensorT};
+use crate::scmi::{self, DeviceResult, MessageValue, ScmiDeviceError, MAX_SIMPLE_STRING_LENGTH};
 
 /// Information about units used by the given Linux IIO channel.
 struct UnitMapping<'a> {
@@ -255,9 +254,10 @@ struct Axis {
     /// sufficiently accurate SCMI value that is represented by an integer (not
     /// a float) + decadic exponent.
     custom_exponent: i8,
-    /// This is an extended attribute field. It reports the resolution of the sensor axis.
-    /// The representation is in [custom_resolution] x 10^[custom_exponent] format.
-    /// This field is present only if Bit[8] of axis_attributes_low is set to 1.
+    /// This is an extended attribute field. It reports the resolution of the
+    /// sensor axis. The representation is in [custom_resolution] x
+    /// 10^[custom_exponent] format. This field is present only if Bit[8] of
+    /// axis_attributes_low is set to 1.
     custom_resolution: u64,
     /// Channel scan type, necessary if the sensor supports notifications.
     /// The data from /dev/iio:deviceX will be formatted according to this.
@@ -426,17 +426,19 @@ impl SensorT for IIOSensor {
     fn reading_update(&mut self, device_index: u32) -> DeviceResult {
         let mut result = vec![];
         // The buffer length should correspond to the IIO device type.
-        // The type is available from /sys/bus/iio/devices/iio:deviceX/scan_elements/in_XXX_type.
-        // For example, if the content of in_XXX_type is le:s16/16>>0, each value is a little endian
-        // signed 16-bit integer. For a 3-axes sensor with [x, y, z, (t)] values, i.e. the 3 axes plus an
-        // optional timestamp, we need 6 or 8 bytes buffer.
-        // Currently, the only supported type is "le:s16/16>>0".
+        // The type is available from
+        // /sys/bus/iio/devices/iio:deviceX/scan_elements/in_XXX_type.
+        // For example, if the content of in_XXX_type is le:s16/16>>0, each value is a
+        // little endian signed 16-bit integer. For a 3-axes sensor with [x, y,
+        // z, (t)] values, i.e. the 3 axes plus an optional timestamp, we need 6
+        // or 8 bytes buffer. Currently, the only supported type is
+        // "le:s16/16>>0".
         let scan_type = self.axes[0].scan_type.unwrap();
 
         let signed = scan_type.sign == 's';
         let le_endian = scan_type.endianness == IioEndian::IioLe;
         if !signed || !le_endian {
-            error!("Unsupported notification format: {:?}", scan_type);
+            error!("Unsupported notification format: {scan_type:?}");
             return Err(ScmiDeviceError::GenericError);
         }
 
@@ -487,7 +489,7 @@ impl SensorT for IIOSensor {
     fn notify_status_set(&self, enabled: bool) -> Result<(), DeviceError> {
         let path_split: Vec<_> = self.path.to_str().unwrap().split('/').collect();
         let iio_name = path_split[path_split.len() - 1];
-        let buffer_enable = format!("/sys/bus/iio/devices/{}/buffer/enable", iio_name);
+        let buffer_enable = format!("/sys/bus/iio/devices/{iio_name}/buffer/enable");
         let mut scan_enable = vec![];
         for i in 0..self.number_of_axes() {
             scan_enable.push(format!(
@@ -731,13 +733,13 @@ impl IIOSensor {
 
 #[cfg(test)]
 mod tests {
-    use crate::scmi::ScmiDevice;
-
-    use super::*;
     use std::{
         assert_eq, fs,
         path::{Path, PathBuf},
     };
+
+    use super::*;
+    use crate::scmi::ScmiDevice;
 
     fn make_directory(prefix: &str) -> PathBuf {
         for i in 1..100 {
@@ -828,7 +830,7 @@ mod tests {
             Err(DeviceError::MissingDeviceProperties(missing)) => {
                 assert_eq!(missing, vec!["channel".to_owned()])
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -847,7 +849,7 @@ mod tests {
             Err(DeviceError::UnexpectedDeviceProperties(extra)) => {
                 assert_eq!(extra, ["bar".to_owned(), "foo".to_owned()])
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -868,7 +870,7 @@ mod tests {
             Err(DeviceError::IOError(path, std::io::Error { .. })) => {
                 assert_eq!(path, "non-existent")
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -881,11 +883,10 @@ mod tests {
             Err(DeviceError::GenericError(message)) => {
                 assert!(
                     message.starts_with("No \"in_accel\" channel found in \"./_test"),
-                    "Unexpected error: {}",
-                    message
+                    "Unexpected error: {message}"
                 )
             }
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 

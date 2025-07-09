@@ -130,7 +130,8 @@ impl From<&MessageValues> for Response {
 }
 
 impl Response {
-    // Notification is different from general response, it doesn't need ReturnStatus.
+    // Notification is different from general response, it doesn't need
+    // ReturnStatus.
     pub fn from_notification(value: &MessageValues) -> Self {
         Self {
             values: value.to_vec(),
@@ -176,7 +177,7 @@ impl ScmiResponse {
             };
             ret_bytes.append(&mut bytes)
         }
-        debug!("ret bytes: {:?}", ret_bytes);
+        debug!("ret bytes: {ret_bytes:?}");
         Self { header, ret_bytes }
     }
 
@@ -211,17 +212,18 @@ impl ScmiRequest {
     pub(crate) fn new(header: MessageHeader) -> Self {
         let protocol_id: u8 = ((header >> 10) & 0xFF).try_into().unwrap();
         let message_id: u8 = (header & 0xFF).try_into().unwrap();
-        // Token is an arbitrary info, the Linux SCMI driver uses it as a sequence number.
-        // No actual meaning for vhost except copying the unchanged header in the response
-        // as required by SCMI specification. We extract it here only for debugging purposes.
+        // Token is an arbitrary info, the Linux SCMI driver uses it as a sequence
+        // number. No actual meaning for vhost except copying the unchanged
+        // header in the response as required by SCMI specification. We extract
+        // it here only for debugging purposes.
         let token: u16 = ((header >> 18) & 0x3FF).try_into().unwrap();
         let message_type = match (header >> 8) & 0x3 {
             0 => MessageType::Command,
             _ => MessageType::Unsupported,
         };
         debug!(
-            "SCMI request: protocol id={}, message id={}, message_type={:?}, token={}",
-            protocol_id, message_id, message_type, token
+            "SCMI request: protocol id={protocol_id}, message id={message_id}, \
+             message_type={message_type:?}, token={token}"
         );
         Self {
             header,
@@ -340,9 +342,7 @@ impl HandlerMap {
     ) {
         assert!(
             self.get(protocol_id, message_id).is_none(),
-            "Multiple handlers defined for SCMI message {}/{}",
-            protocol_id,
-            message_id
+            "Multiple handlers defined for SCMI message {protocol_id}/{message_id}"
         );
         self.0.insert(
             (protocol_id, message_id),
@@ -436,10 +436,14 @@ impl HandlerMap {
             |handler: &ScmiHandler, _| -> Response {
                 let n_sensors = u32::from(handler.devices.number_of_devices(SENSOR_PROTOCOL_ID));
                 let values: MessageValues = vec![
-                    MessageValue::Unsigned(n_sensors), // # of sensors, no async commands
-                    MessageValue::Unsigned(0), // lower shared memory address -- not supported
-                    MessageValue::Unsigned(0), // higher shared memory address -- not supported
-                    MessageValue::Unsigned(0), // length of shared memory -- not supported
+                    // # of sensors, no async commands
+                    MessageValue::Unsigned(n_sensors),
+                    // lower shared memory address -- not supported
+                    MessageValue::Unsigned(0),
+                    // higher shared memory address -- not supported
+                    MessageValue::Unsigned(0),
+                    // length of shared memory -- not supported
+                    MessageValue::Unsigned(0),
                 ];
                 Response::from(&values)
             },
@@ -667,10 +671,11 @@ pub type DeviceResult = Result<MessageValues, ScmiDeviceError>;
 
 pub type DeviceIdentify = (ProtocolId, usize);
 
-/// EventfdMap is a structure used to construct the relationship between device_event and DeviceIdentify
-/// Once a device supports notification, it should insert a key-value to this hashmap
-/// "device_event" is automatically assigned according to "available device event",
-/// then function handle_event can find the device via this hashmap.
+/// EventfdMap is a structure used to construct the relationship between
+/// device_event and DeviceIdentify Once a device supports notification, it
+/// should insert a key-value to this hashmap "device_event" is automatically
+/// assigned according to "available device event", then function handle_event
+/// can find the device via this hashmap.
 struct EventfdMap {
     // Next available device_event, it should be initialized with NOTIFY_ALLOW_START_FD
     available_device_event: u16,
@@ -686,7 +691,8 @@ impl EventfdMap {
         }
     }
 
-    // If this device has eventfd for notification, insert it into map with a device_eventfd
+    // If this device has eventfd for notification, insert it into map with a
+    // device_eventfd
     fn insert(&mut self, device_identify: DeviceIdentify) {
         let mut map = self.map.lock().unwrap();
         map.insert(self.available_device_event, device_identify);
@@ -755,9 +761,9 @@ impl ScmiHandler {
         self.event_fds.available_device_event - 1
     }
 
-    /// According to device_event, find out the device which will do notification.
-    /// Then call its notify function to return a ScmiResponse.
-    /// Now only SENSOR PROTOCOL can do notification.
+    /// According to device_event, find out the device which will do
+    /// notification. Then call its notify function to return a
+    /// ScmiResponse. Now only SENSOR PROTOCOL can do notification.
     /// And it supports only the `SENSOR_UPDATE` message.
     pub fn notify(&mut self, device_event: u16) -> Option<ScmiResponse> {
         let event_fds_locked = self.event_fds.map.lock().unwrap();
@@ -835,7 +841,7 @@ impl ScmiHandler {
                 ParameterType::_SignedInt32 => MessageValue::Signed(i32::from_le_bytes(slice)),
                 ParameterType::UnsignedInt32 => MessageValue::Unsigned(u32::from_le_bytes(slice)),
             };
-            debug!("SCMI parameter {}: {:?}", n, v);
+            debug!("SCMI parameter {n}: {v:?}");
             values.push(v);
         }
         request.parameters = Some(values);
@@ -847,7 +853,8 @@ impl ScmiHandler {
             .expect("Impossibly large number of SCMI protocols")
     }
 
-    // If a device can notify, record its event_fd, which will be assigned to the device later.
+    // If a device can notify, record its event_fd, which will be assigned to the
+    // device later.
     pub fn register_device(&mut self, device: Box<dyn ScmiDevice>) {
         let register_event = device.get_notify_fd().is_some();
         let device_identify = self.devices.insert(device);
@@ -874,19 +881,19 @@ impl ScmiHandler {
                 ScmiDeviceError::NoSuchDevice
                 | ScmiDeviceError::NotEnabled
                 | ScmiDeviceError::InvalidParameters => {
-                    info!("Invalid device access: {}, {}", device_index, error);
+                    info!("Invalid device access: {device_index}, {error}");
                     Response::from(ReturnStatus::InvalidParameters)
                 }
                 ScmiDeviceError::UnsupportedRequest => {
-                    info!("Unsupported request for {}", device_index);
+                    info!("Unsupported request for {device_index}");
                     Response::from(ReturnStatus::NotSupported)
                 }
                 ScmiDeviceError::UnsupportedNotify => {
-                    info!("Unsupported notify for {}", device_index);
+                    info!("Unsupported notify for {device_index}");
                     Response::from(ReturnStatus::NotSupported)
                 }
                 ScmiDeviceError::GenericError => {
-                    warn!("Device error in {}", device_index);
+                    warn!("Device error in {device_index}");
                     Response::from(ReturnStatus::GenericError)
                 }
             },
@@ -926,7 +933,7 @@ impl ScmiHandler {
             .skip(skip)
             .collect();
         let n_protocols = protocols.len();
-        debug!("Number of listed protocols after {}: {}", skip, n_protocols);
+        debug!("Number of listed protocols after {skip}: {n_protocols}");
         let mut values: Vec<MessageValue> = vec![MessageValue::Unsigned(n_protocols as u32)];
         if n_protocols > 0 {
             let mut compressed: Vec<u32> = vec![0; 1 + (n_protocols - 1) / 4];
@@ -955,9 +962,8 @@ impl ScmiHandler {
 
 #[cfg(test)]
 mod tests {
-    use crate::devices::{common::DeviceProperties, fake::FakeSensor};
-
     use super::*;
+    use crate::devices::{common::DeviceProperties, fake::FakeSensor};
 
     #[test]
     fn test_response_from_status() {
@@ -1377,8 +1383,9 @@ mod tests {
             MessageValue::Unsigned(0),
             MessageValue::Unsigned(axis_index),
         ];
-        // Each call will return only one descriptor to avoid exceeding the maximum length of the message
-        // and to inform about the number of the remaining sensor axis descriptions.
+        // Each call will return only one descriptor to avoid exceeding the maximum
+        // length of the message and to inform about the number of the remaining
+        // sensor axis descriptions.
         let num_axis_flags = 1 | ((n_axes - axis_index - 1) << 26);
         let mut result = vec![MessageValue::Unsigned(num_axis_flags)];
         let name = format!("acc_{}", char::from_u32('X' as u32 + axis_index).unwrap()).to_string();
@@ -1550,7 +1557,7 @@ mod tests {
         let mut handler = ScmiHandler::new();
         for sensor_id in 0..2 {
             let properties =
-                DeviceProperties::new(vec![("name".to_owned(), format!("fake{}", sensor_id))]);
+                DeviceProperties::new(vec![("name".to_owned(), format!("fake{sensor_id}"))]);
             let fake_sensor = FakeSensor::new_device(&properties).unwrap();
             handler.register_device(fake_sensor);
             enable_sensor(sensor_id, true, &mut handler);

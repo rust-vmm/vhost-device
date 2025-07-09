@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use core::slice;
-use std::convert::{TryFrom, TryInto};
-use std::io::{self, ErrorKind};
-use std::mem;
+use std::{
+    convert::{TryFrom, TryInto},
+    io::{self, ErrorKind},
+    mem,
+};
 
 use log::{debug, error, info, warn};
 use vhost::vhost_user::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::virtio_scsi::{virtio_scsi_config, virtio_scsi_event};
 use virtio_bindings::{
     virtio_config::VIRTIO_F_VERSION_1,
     virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
-    virtio_scsi::VIRTIO_SCSI_F_HOTPLUG,
+    virtio_scsi::{virtio_scsi_config, virtio_scsi_event, VIRTIO_SCSI_F_HOTPLUG},
 };
 use virtio_queue::QueueOwnedT;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
@@ -21,11 +22,12 @@ use vmm_sys_util::{
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
-use crate::scsi::Target;
-use crate::virtio::CDB_SIZE;
 use crate::{
-    scsi::{self, CmdError, TaskAttr},
-    virtio::{self, Request, RequestParseError, Response, ResponseCode, VirtioScsiLun, SENSE_SIZE},
+    scsi::{self, CmdError, Target, TaskAttr},
+    virtio::{
+        self, Request, RequestParseError, Response, ResponseCode, VirtioScsiLun, CDB_SIZE,
+        SENSE_SIZE,
+    },
 };
 
 const REQUEST_QUEUE: u16 = 2;
@@ -59,7 +61,10 @@ impl VhostUserScsiBackend {
             VirtioScsiLun::ReportLuns => {
                 // TODO: do we need to handle the REPORT LUNS well-known LUN?
                 // In practice, everyone seems to just use LUN 0
-                warn!("Guest is trying to use the REPORT LUNS well-known LUN, which we don't support.");
+                warn!(
+                    "Guest is trying to use the REPORT LUNS well-known LUN, which we don't \
+                     support."
+                );
                 None
             }
         }
@@ -92,7 +97,8 @@ impl VhostUserScsiBackend {
                                 2 => TaskAttr::HeadOfQueue,
                                 3 => TaskAttr::Aca,
                                 _ => {
-                                    // virtio-scsi spec allows us to map any task attr to simple, presumably
+                                    // virtio-scsi spec allows us to map any task attr to simple,
+                                    // presumably
                                     // including future ones
                                     warn!("Unknown task attr: {}", r.task_attr);
                                     TaskAttr::Simple
@@ -117,8 +123,9 @@ impl VhostUserScsiBackend {
                             }
                         }
                         Err(CmdError::CdbTooShort) => {
-                            // the CDB buffer is, by default, sized larger than any CDB we support; we don't
-                            // handle writes to config space (because QEMU doesn't let us), so there's no
+                            // the CDB buffer is, by default, sized larger than any CDB we support;
+                            // we don't handle writes to config space
+                            // (because QEMU doesn't let us), so there's no
                             // way the guest can set it too small
                             unreachable!();
                         }
@@ -126,10 +133,11 @@ impl VhostUserScsiBackend {
                             if e.kind() == ErrorKind::WriteZero {
                                 Response::error(ResponseCode::Overrun, 0)
                             } else {
-                                error!("Error writing response to guest memory: {}", e);
+                                error!("Error writing response to guest memory: {e}");
 
-                                // There's some chance the header and data in are on different descriptors,
-                                // and only the data in descriptor is bad, so let's at least try to write an
+                                // There's some chance the header and data in are on different
+                                // descriptors, and only the data in
+                                // descriptor is bad, so let's at least try to write an
                                 // error to the header
                                 Response::error(ResponseCode::Failure, body_writer.residual())
                             }
@@ -143,11 +151,11 @@ impl VhostUserScsiBackend {
             Err(RequestParseError::CouldNotReadGuestMemory(e)) => {
                 // See comment later about errors while writing to guest mem; maybe we at least
                 // got functional write descriptors, so we can report an error
-                error!("Error reading request from guest memory: {:?}", e);
+                error!("Error reading request from guest memory: {e:?}");
                 Response::error(ResponseCode::Failure, body_writer.residual())
             }
             Err(RequestParseError::FailedParsingLun(lun)) => {
-                error!("Unable to parse LUN: {:?}", lun);
+                error!("Unable to parse LUN: {lun:?}");
                 Response::error(ResponseCode::Failure, body_writer.residual())
             }
         };
@@ -162,7 +170,7 @@ impl VhostUserScsiBackend {
             // silently fail or crash. There isn't too much sense in crashing, IMO, as
             // the guest could still recover by, say, installing a fixed kernel and
             // rebooting. So let's just log an error and do nothing.
-            error!("Error writing response to guest memory: {:?}", e);
+            error!("Error writing response to guest memory: {e:?}");
         }
     }
 
@@ -171,7 +179,7 @@ impl VhostUserScsiBackend {
             .get_mut()
             .get_queue_mut()
             .iter(self.mem.as_ref().unwrap().memory())
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?
+            .map_err(io::Error::other)?
             .collect();
         for dc in chains {
             let mut writer = DescriptorChainWriter::new(dc.clone());
@@ -181,12 +189,10 @@ impl VhostUserScsiBackend {
 
             vring
                 .add_used(dc.head_index(), writer.max_written())
-                .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
         }
 
-        vring
-            .signal_used_queue()
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        vring.signal_used_queue().map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -267,7 +273,7 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
                 }
             }
             _ => {
-                error!("Ignoring descriptor on queue {}", device_event);
+                error!("Ignoring descriptor on queue {device_event}");
             }
         }
 
@@ -427,7 +433,8 @@ mod tests {
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap(),
         );
-        // The `build_desc_chain` function will populate the `NEXT` related flags and field.
+        // The `build_desc_chain` function will populate the `NEXT` related flags and
+        // field.
         let v = vec![
             RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)), // request
             RawDescriptor::from(Descriptor::new(

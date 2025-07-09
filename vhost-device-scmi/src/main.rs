@@ -6,7 +6,8 @@
 //! [System Control and Management Interface](https://developer.arm.com/Architectures/System%20Control%20and%20Management%20Interface)
 //! (SCMI).
 //!
-//! Currently, the mandatory parts of the following SCMI protocols are implemented:
+//! Currently, the mandatory parts of the following SCMI protocols are
+//! implemented:
 //!
 //! - base
 //! - sensor management
@@ -37,8 +38,6 @@ mod devices;
 mod scmi;
 mod vhu_scmi;
 
-use devices::common::{devices_help, DeviceDescription, DeviceProperties};
-
 use std::{
     path::PathBuf,
     process::exit,
@@ -46,9 +45,9 @@ use std::{
 };
 
 use clap::{CommandFactory, Parser};
+use devices::common::{devices_help, DeviceDescription, DeviceProperties};
 use itertools::Itertools;
 use log::{debug, error};
-
 use vhost_user_backend::VhostUserDaemon;
 use vhu_scmi::VuScmiBackend;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
@@ -103,8 +102,9 @@ fn start_backend(config: VuScmiConfig) -> Result<()> {
         )
         .map_err(|e| e.to_string())?;
 
-        // Register devices such as "/dev/iio:deviceX" which can actively notify the frontend to epoll the handler.
-        // Then once there is data coming from these devices, an event will be created. (device_event=3)
+        // Register devices such as "/dev/iio:deviceX" which can actively notify the
+        // frontend to epoll the handler. Then once there is data coming from
+        // these devices, an event will be created. (device_event=3)
         let handlers = daemon.get_epoll_handlers();
         backend
             .read()
@@ -145,18 +145,15 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::Path;
+
+    use super::*;
 
     #[test]
     fn test_command_line() {
         let path = "/foo/scmi.sock".to_owned();
         let params_string = format!(
-            "binary \
-                     --device dummy \
-                     -s {path} \
-                     --device fake,name=foo,prop=value \
-                     -d fake,name=bar"
+            "binary --device dummy -s {path} --device fake,name=foo,prop=value -d fake,name=bar"
         );
         let params: Vec<&str> = params_string.split_whitespace().collect();
         let args: args::ScmiArgs = Parser::parse_from(params);

@@ -36,7 +36,7 @@ mod vhost_device_scmi;
 
 fn main() {
     if let Err(err) = run_app() {
-        eprintln!("{}", err);
+        eprintln!("{err}");
         std::process::exit(-1);
     }
 }

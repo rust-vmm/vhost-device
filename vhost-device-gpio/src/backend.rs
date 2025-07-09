@@ -5,24 +5,27 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::error;
-use std::num::ParseIntError;
-use std::path::PathBuf;
-use std::process::exit;
-use std::sync::{Arc, RwLock};
-use std::thread::{spawn, JoinHandle};
+use std::{
+    num::ParseIntError,
+    path::PathBuf,
+    process::exit,
+    sync::{Arc, RwLock},
+    thread::{spawn, JoinHandle},
+};
 
 use clap::Parser;
 use env_logger::Env;
+use log::error;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::gpio::{GpioController, GpioDevice, PhysDevice};
-use crate::vhu_gpio::VhostUserGpioBackend;
-
 #[cfg(any(test, feature = "mock_gpio"))]
 use crate::mock_gpio::MockGpioDevice;
+use crate::{
+    gpio::{GpioController, GpioDevice, PhysDevice},
+    vhu_gpio::VhostUserGpioBackend,
+};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -49,15 +52,15 @@ pub(crate) enum Error {
     ServeFailed(vhost_user_backend::Error),
 }
 
-const GPIO_AFTER_HELP: &str = "Each device number here will be used to \
-access the corresponding /dev/gpiochipX or simulate a GPIO device \
-with N pins (when feature enabled). \
-Example, \"-c 4 -l 3:s4:6:s1\"\n";
+const GPIO_AFTER_HELP: &str = "Each device number here will be used to access the corresponding \
+                               /dev/gpiochipX or simulate a GPIO device with N pins (when feature \
+                               enabled). Example, \"-c 4 -l 3:s4:6:s1\"\n";
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None, after_help = GPIO_AFTER_HELP)]
 struct GpioArgs {
-    /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+    /// Location of vhost-user Unix domain socket. This is suffixed by
+    /// 0,1,2..socket_count-1.
     #[clap(short, long)]
     socket_path: PathBuf,
 

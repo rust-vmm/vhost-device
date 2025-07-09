@@ -17,11 +17,13 @@ use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::scsi::emulation::{
-    block_device::{BlockDevice, FileBackend, MediumRotationRate},
-    target::EmulatedTarget,
+use crate::{
+    scsi::emulation::{
+        block_device::{BlockDevice, FileBackend, MediumRotationRate},
+        target::EmulatedTarget,
+    },
+    vhu_scsi::VhostUserScsiBackend,
 };
-use crate::vhu_scsi::VhostUserScsiBackend;
 
 #[derive(Debug, ThisError)]
 enum Error {
@@ -66,7 +68,10 @@ fn create_backend(args: &ScsiArgs) -> Result<VhostUserScsiBackend> {
     }
 
     if !args.read_only {
-        warn!("Currently, only read-only images are supported. Unless you know what you're doing, you want to pass -r");
+        warn!(
+            "Currently, only read-only images are supported. Unless you know what you're doing, \
+             you want to pass -r"
+        );
     }
 
     for image in &args.images {

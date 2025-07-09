@@ -5,19 +5,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::{error, info, warn};
-use std::any::Any;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::thread;
+use std::{
+    any::Any,
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+    thread,
+};
 
+use log::{error, info, warn};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::can::CanController;
-use crate::vhu_can::VhostUserCanBackend;
+use crate::{can::CanController, vhu_can::VhostUserCanBackend};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -111,7 +112,7 @@ pub(crate) fn start_backend_server(socket: PathBuf, can_devs: String) -> Result<
         // Wait for read thread to exit
         match read_handle.join() {
             Ok(_) => info!("The read thread returned successfully"),
-            Err(e) => warn!("The read thread returned the error: {:?}", e),
+            Err(e) => warn!("The read thread returned the error: {e:?}"),
         }
     }
 }
@@ -127,12 +128,9 @@ pub fn start_backend(config: VuCanConfig) -> Result<()> {
         .map(|(a, b)| (a, b.to_string()))
         .enumerate()
     {
-        println!(
-            "thread_id: {}, socket: {:?}, can_devs: {:?}",
-            thread_id, socket, can_devs,
-        );
+        println!("thread_id: {thread_id}, socket: {socket:?}, can_devs: {can_devs:?}",);
 
-        let name = format!("vhu-can-{}", can_devs);
+        let name = format!("vhu-can-{can_devs}");
         let sender = senders.clone();
         let handle = thread::Builder::new()
             .name(name.clone())
@@ -164,11 +162,10 @@ pub fn start_backend(config: VuCanConfig) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::backend::Error::FailCreateCanControllerSocket;
-    use crate::can::Error::SocketOpen;
-    use crate::CanArgs;
     use assert_matches::assert_matches;
+
+    use super::*;
+    use crate::{backend::Error::FailCreateCanControllerSocket, can::Error::SocketOpen, CanArgs};
 
     #[test]
     fn test_can_valid_configuration() {

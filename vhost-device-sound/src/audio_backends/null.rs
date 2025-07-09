@@ -17,13 +17,13 @@ impl NullBackend {
 
 impl AudioBackend for NullBackend {
     fn write(&self, stream_id: u32) -> Result<()> {
-        log::trace!("NullBackend write stream_id {}", stream_id);
+        log::trace!("NullBackend write stream_id {stream_id}");
         _ = std::mem::take(&mut self.streams.write().unwrap()[stream_id as usize].requests);
         Ok(())
     }
 
     fn read(&self, _id: u32) -> Result<()> {
-        log::trace!("NullBackend read stream_id {}", _id);
+        log::trace!("NullBackend read stream_id {_id}");
         Ok(())
     }
 

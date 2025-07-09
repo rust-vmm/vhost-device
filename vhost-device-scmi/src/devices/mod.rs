@@ -3,8 +3,9 @@
 
 //! Implementation of SCMI bindings to host devices.
 //!
-//! The general infrastructure is implemented in [crate::devices::common] module.
-//! Access to particular kinds of devices is implemented in the other modules:
+//! The general infrastructure is implemented in [crate::devices::common]
+//! module. Access to particular kinds of devices is implemented in the other
+//! modules:
 //! - [crate::devices::fake] provides a fake sensor.
 //! - [crate::devices::iio] implements access to industrial I/O (IIO) devices.
 

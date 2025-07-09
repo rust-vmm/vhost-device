@@ -5,29 +5,35 @@
 //! General part of the vhost-user SCMI backend.  Nothing very different from
 //! the other rust-vmm backends.
 
+use std::{
+    io,
+    io::Result as IoResult,
+    mem::size_of,
+    sync::{Arc, RwLock},
+};
+
 use log::{debug, error, warn};
-use std::io;
-use std::io::Result as IoResult;
-use std::mem::size_of;
-use std::sync::{Arc, RwLock};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::VringEpollHandler;
-use vhost_user_backend::{VhostUserBackendMut, VringRwLock, VringT};
-use virtio_bindings::bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
-use virtio_bindings::bindings::virtio_ring::{
-    VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC,
+use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};
+use virtio_bindings::bindings::{
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
+    virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC},
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
     Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
 };
-use vmm_sys_util::epoll::EventSet;
-use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
+use vmm_sys_util::{
+    epoll::EventSet,
+    eventfd::{EventFd, EFD_NONBLOCK},
+};
 
-use crate::devices::common::{available_devices, DeviceError};
-use crate::scmi::{MessageHeader, ScmiHandler, ScmiRequest};
-use crate::VuScmiConfig;
+use crate::{
+    devices::common::{available_devices, DeviceError},
+    scmi::{MessageHeader, ScmiHandler, ScmiRequest},
+    VuScmiConfig,
+};
 
 // QUEUE_SIZE must be apparently at least 1024 for MMIO.
 // There is probably a maximum size per descriptor defined in the kernel.
@@ -80,7 +86,7 @@ pub enum VuScmiError {
 
 impl From<VuScmiError> for io::Error {
     fn from(e: VuScmiError) -> Self {
-        Self::new(io::ErrorKind::Other, e)
+        Self::other(e)
     }
 }
 
@@ -92,14 +98,17 @@ pub struct VuScmiBackend {
     event_idx: bool,
     pub exit_event: EventFd,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    /// Event vring and descriptors serve for asynchronous responses and notifications.
-    /// They are obtained from the driver and we store them here for later use.
-    /// (We currently don't implement asynchronous responses or notifications but we support
-    /// the event queue because the Linux VIRTIO SCMI driver seems to be unhappy if it is not
-    /// present. And it doesn't harm to be ready for possible event queue use in future.)
+    /// Event vring and descriptors serve for asynchronous responses and
+    /// notifications. They are obtained from the driver and we store them
+    /// here for later use. (We currently don't implement asynchronous
+    /// responses or notifications but we support the event queue because
+    /// the Linux VIRTIO SCMI driver seems to be unhappy if it is not
+    /// present. And it doesn't harm to be ready for possible event queue use in
+    /// future.)
     event_vring: Option<VringRwLock>,
     event_descriptors: Vec<DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>>,
-    /// The abstraction of request handling, with all the needed information stored inside.
+    /// The abstraction of request handling, with all the needed information
+    /// stored inside.
     scmi_handler: ScmiHandler,
 }
 
@@ -140,7 +149,8 @@ impl VuScmiBackend {
     }
 
     /// Registers all the devices that can provide notifications
-    /// Create a hashmap to store the relationship about device's notify_fd and scmibackend eventfd.
+    /// Create a hashmap to store the relationship about device's notify_fd and
+    /// scmibackend eventfd.
     pub fn register_device_event_fd(
         &self,
         handlers: Vec<Arc<VringEpollHandler<Arc<RwLock<VuScmiBackend>>>>>,
@@ -188,7 +198,7 @@ impl VuScmiBackend {
                 .map_err(|_| VuScmiError::DescriptorReadFailed)?;
             let mut scmi_request = ScmiRequest::new(header);
             let n_parameters = self.scmi_handler.number_of_parameters(&scmi_request);
-            debug!("SCMI request with n parameters: {:?}", n_parameters);
+            debug!("SCMI request with n parameters: {n_parameters:?}");
             let value_size = 4;
             if let Some(expected_parameters) = n_parameters {
                 if expected_parameters > 0 {
@@ -217,7 +227,7 @@ impl VuScmiBackend {
 
             debug!("Calling SCMI request handler");
             let mut response = self.scmi_handler.handle(scmi_request);
-            debug!("SCMI response: {:?}", response);
+            debug!("SCMI response: {response:?}");
 
             let desc_response = descriptors[1];
             if !desc_response.is_write_only() {
@@ -274,7 +284,7 @@ impl VuScmiBackend {
                 debug!("Notification sent");
             }
             Err(err) => {
-                warn!("Failed SCMI request: {}", err);
+                warn!("Failed SCMI request: {err}");
                 return Err(err);
             }
         }
@@ -339,7 +349,7 @@ impl VuScmiBackend {
                 debug!("Notification sent");
             }
             Err(err) => {
-                warn!("Failed SCMI request: {}", err);
+                warn!("Failed SCMI request: {err}");
                 return Err(err);
             }
         }
@@ -442,7 +452,7 @@ impl VhostUserBackendMut for VuScmiBackend {
 
     fn set_event_idx(&mut self, enabled: bool) {
         self.event_idx = enabled;
-        debug!("Event idx set to: {}", enabled);
+        debug!("Event idx set to: {enabled}");
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
@@ -520,7 +530,7 @@ impl VhostUserBackendMut for VuScmiBackend {
                         .enable_notification()
                         .map_err(|error: virtio_queue::Error| std::io::Error::other(error))?;
                 } else {
-                    warn!("unhandled device_event: {}", device_event);
+                    warn!("unhandled device_event: {device_event}");
                     return Err(VuScmiError::HandleEventUnknownEvent.into());
                 }
             }
@@ -642,10 +652,7 @@ mod tests {
                 VRING_DESC_F_NEXT as u16
             };
             f |= p.flags;
-            let offset = match p.addr {
-                Some(addr) => addr,
-                _ => 0x100,
-            };
+            let offset = p.addr.unwrap_or(0x100);
             let desc = RawDescriptor::from(SplitDescriptor::new(offset, p.len, f, (i + 1) as u16));
             vq.desc_table().store(i as u16, desc).unwrap();
         }
@@ -751,7 +758,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorCount(1) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Have three descriptors, expected two.
@@ -762,7 +769,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorCount(3) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Write only descriptors.
@@ -778,7 +785,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedWriteOnlyDescriptor(0) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request address.
@@ -800,7 +807,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::DescriptorReadFailed => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request length (very small).
@@ -822,7 +829,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedMinimumDescriptorSize(4, 2) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request length (too small).
@@ -832,7 +839,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorSize(8, 4) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid request length (too large).
@@ -842,7 +849,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorSize(4, 8) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Read only descriptors.
@@ -858,7 +865,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedReadableDescriptor(1) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid response address.
@@ -880,7 +887,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::DescriptorWriteFailed => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Invalid response length.
@@ -902,7 +909,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::InsufficientDescriptorSize(8, 6) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 
@@ -955,7 +962,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedDescriptorCount(2) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
 
         // Read only descriptor
@@ -970,7 +977,7 @@ mod tests {
             .unwrap_err()
         {
             VuScmiError::UnexpectedReadableDescriptor(0) => (),
-            other => panic!("Unexpected result: {:?}", other),
+            other => panic!("Unexpected result: {other:?}"),
         }
     }
 

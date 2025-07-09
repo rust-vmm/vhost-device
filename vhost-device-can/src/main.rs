@@ -10,12 +10,11 @@ mod can;
 mod vhu_can;
 mod virtio_can;
 
+use std::{convert::TryFrom, path::PathBuf, process::exit};
+
 use clap::Parser;
 use log::{error, info};
 use socketcan::{CanSocket, Socket};
-use std::convert::TryFrom;
-use std::path::PathBuf;
-use std::process::exit;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 use crate::backend::{start_backend, Error, VuCanConfig};
@@ -23,11 +22,13 @@ use crate::backend::{start_backend, Error, VuCanConfig};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CanArgs {
-    /// Location of vhost-user Unix domain socket. This is suffixed by 0,1,2..socket_count-1.
+    /// Location of vhost-user Unix domain socket. This is suffixed by
+    /// 0,1,2..socket_count-1.
     #[clap(short, long, value_name = "SOCKET")]
     socket_path: PathBuf,
 
-    /// A can device name to be used for reading (ex. vcan, can0, can1, ... etc.)
+    /// A can device name to be used for reading (ex. vcan, can0, can1, ...
+    /// etc.)
     #[clap(short = 'd', long)]
     can_devices: String,
 
@@ -39,7 +40,7 @@ struct CanArgs {
 fn check_can_devices(can_devices: &[String]) -> Result<()> {
     for can_dev in can_devices {
         if CanSocket::open(can_dev).is_err() {
-            info!("There is no interface with the following name {}", can_dev);
+            info!("There is no interface with the following name {can_dev}");
             return Err(Error::CouldNotFindCANDevs);
         }
     }

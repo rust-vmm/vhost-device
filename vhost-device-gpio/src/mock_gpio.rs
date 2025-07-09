@@ -5,11 +5,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use log::info;
 use std::sync::RwLock;
 
-use crate::gpio::{Error, GpioDevice, GpioState, Result};
-use crate::virtio_gpio::*;
+use log::info;
+
+use crate::{
+    gpio::{Error, GpioDevice, GpioState, Result},
+    virtio_gpio::*,
+};
 
 #[derive(Debug)]
 pub(crate) struct MockGpioDevice {
@@ -30,7 +33,7 @@ impl MockGpioDevice {
     pub(crate) fn new(ngpio: u16) -> Self {
         let mut gpio_names = Vec::with_capacity(ngpio.into());
         for i in 0..ngpio {
-            gpio_names.push(format!("dummy{}", i));
+            gpio_names.push(format!("dummy{i}"));
         }
 
         Self {

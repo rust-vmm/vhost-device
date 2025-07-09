@@ -120,7 +120,7 @@ pub enum PCMState {
 
 macro_rules! set_new_state {
     ($new_state_fn:ident, $new_state:expr, $($valid_source_states:tt)*) => {
-        pub fn $new_state_fn(&mut self) -> Result<()> {
+        pub const fn $new_state_fn(&mut self) -> Result<()> {
             if !matches!(self, $($valid_source_states)*) {
                 return Err(Error::InvalidStateTransition(*self, $new_state));
             }
@@ -343,7 +343,7 @@ impl Drop for Request {
         let payload_len = match u32::try_from(self.len()) {
             Ok(len) => len,
             Err(len) => {
-                log::warn!("used_len {} overflows u32", len);
+                log::warn!("used_len {len} overflows u32");
                 u32::MAX
             }
         };
@@ -645,7 +645,7 @@ mod tests {
         let mut debug_output = String::new();
 
         // Format the Debug representation into the String.
-        write!(&mut debug_output, "{:?}", request).unwrap();
+        write!(&mut debug_output, "{request:?}").unwrap();
 
         let expected_debug = format!(
             "Request {{ pos: {}, len: {}, direction: {:?}, message: {:?} }}",

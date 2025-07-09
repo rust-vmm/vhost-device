@@ -207,10 +207,7 @@ fn write_samples_direct(
         let mut buf = vec![0; n_bytes];
         let read_bytes = match request.read_output(&mut buf) {
             Err(err) => {
-                log::error!(
-                    "Could not read TX request from guest, dropping it immediately: {}",
-                    err
-                );
+                log::error!("Could not read TX request from guest, dropping it immediately: {err}");
                 stream.requests.pop_front();
                 continue;
             }
@@ -230,7 +227,7 @@ fn write_samples_direct(
     match mmap.status().state() {
         State::Suspended | State::Running | State::Prepared => Ok(false),
         State::XRun => Ok(true), // Recover from this in next round
-        n => panic!("Unexpected pcm state {:?}", n),
+        n => panic!("Unexpected pcm state {n:?}"),
     }
 }
 
@@ -276,7 +273,7 @@ fn read_samples_direct(
     match mmap.status().state() {
         State::Suspended | State::Running | State::Prepared => Ok(false),
         State::XRun => Ok(true), // Recover from this in next round
-        n => panic!("Unexpected pcm state {:?}", n),
+        n => panic!("Unexpected pcm state {n:?}"),
     }
 }
 
@@ -291,14 +288,10 @@ fn write_samples_io(
     let avail = match p.avail_update() {
         Ok(n) => n,
         Err(err) => {
-            log::trace!("Recovering from {}", err);
+            log::trace!("Recovering from {err}");
             p.recover(err.errno() as std::os::raw::c_int, true)?;
             if let Err(err) = p.start() {
-                log::error!(
-                    "Could not restart stream {}; ALSA returned: {}",
-                    stream_id,
-                    err
-                );
+                log::error!("Could not restart stream {stream_id}; ALSA returned: {err}");
                 return Err(err);
             }
             p.avail_update()?
@@ -320,10 +313,7 @@ fn write_samples_io(
             let read_bytes = match request.read_output(&mut buf[0..n_bytes]) {
                 Ok(v) => v,
                 Err(err) => {
-                    log::error!(
-                        "Could not read TX request, dropping it immediately: {}",
-                        err
-                    );
+                    log::error!("Could not read TX request, dropping it immediately: {err}");
                     stream.requests.pop_front();
                     return 0;
                 }
@@ -344,7 +334,7 @@ fn write_samples_io(
     match p.state() {
         State::Suspended | State::Running | State::Prepared => Ok(false),
         State::XRun => Ok(true), // Recover from this in next round
-        n => panic!("Unexpected pcm state {:?}", n),
+        n => panic!("Unexpected pcm state {n:?}"),
     }
 }
 
@@ -359,14 +349,10 @@ fn read_samples_io(
     let avail = match p.avail_update() {
         Ok(n) => n,
         Err(err) => {
-            log::trace!("Recovering from {}", err);
+            log::trace!("Recovering from {err}");
             p.recover(err.errno() as std::os::raw::c_int, true)?;
             if let Err(err) = p.start() {
-                log::error!(
-                    "Could not restart stream {}; ALSA returned: {}",
-                    stream_id,
-                    err
-                );
+                log::error!("Could not restart stream {stream_id}; ALSA returned: {err}");
                 return Err(err);
             }
             p.avail_update()?
@@ -415,7 +401,7 @@ fn read_samples_io(
     match p.state() {
         State::Suspended | State::Running | State::Prepared => Ok(false),
         State::XRun => Ok(true), // Recover from this in next round
-        n => panic!("Unexpected pcm state {:?}", n),
+        n => panic!("Unexpected pcm state {n:?}"),
     }
 }
 
@@ -513,10 +499,7 @@ impl AlsaBackend {
             // create worker
             thread::spawn(move || {
                 while let Err(err) = alsa_worker(mtx.clone(), streams.clone(), &receiver, i) {
-                    log::error!(
-                        "Worker thread exited with error: {}, sleeping for 500ms",
-                        err
-                    );
+                    log::error!("Worker thread exited with error: {err}, sleeping for 500ms");
                     sleep(Duration::from_millis(500));
                 }
             });
@@ -604,11 +587,7 @@ impl AudioBackend for AlsaBackend {
         if !matches!(lck.state(), State::Running) {
             // Fail gracefully if Start does not succeed.
             if let Err(err) = lck.start() {
-                log::error!(
-                    "Could not start stream {}; ALSA returned: {}",
-                    stream_id,
-                    err
-                );
+                log::error!("Could not start stream {stream_id}; ALSA returned: {err}");
                 return Err(Error::UnexpectedAudioBackendError(err.into()));
             }
         }
@@ -629,7 +608,7 @@ impl AudioBackend for AlsaBackend {
             .state
             .prepare()
         {
-            log::error!("Stream {}: {}", stream_id, err);
+            log::error!("Stream {stream_id}: {err}");
             return Err(Error::Stream(err));
         }
         let pcm = &self.pcms[stream_id as usize];
@@ -637,11 +616,7 @@ impl AudioBackend for AlsaBackend {
         if !matches!(lck.state(), State::Running) {
             // Fail gracefully if Prepare does not succeed.
             if let Err(err) = lck.prepare() {
-                log::error!(
-                    "Could not prepare stream {}; ALSA returned: {}",
-                    stream_id,
-                    err
-                );
+                log::error!("Could not prepare stream {stream_id}; ALSA returned: {err}");
                 return Err(Error::UnexpectedAudioBackendError(err.into()));
             }
         }
@@ -658,7 +633,7 @@ impl AudioBackend for AlsaBackend {
             .state
             .stop()
         {
-            log::error!("Stream {} stop {}", id, err);
+            log::error!("Stream {id} stop {err}");
         }
         Ok(())
     }
@@ -676,7 +651,7 @@ impl AudioBackend for AlsaBackend {
             let mut streams = self.streams.write().unwrap();
             let st = &mut streams[stream_id as usize];
             if let Err(err) = st.state.set_parameters() {
-                log::error!("Stream {} set_parameters {}", stream_id, err);
+                log::error!("Stream {stream_id} set_parameters {err}");
                 return Err(Error::Stream(err));
             } else if !st.supports_format(request.format) || !st.supports_rate(request.rate) {
                 return Err(Error::UnexpectedAudioBackendConfiguration);
@@ -709,7 +684,7 @@ impl AudioBackend for AlsaBackend {
         }
         let mut streams = self.streams.write().unwrap();
         if let Err(err) = streams[stream_id as usize].state.release() {
-            log::error!("Stream {}: {}", stream_id, err);
+            log::error!("Stream {stream_id}: {err}");
             return Err(Error::Stream(err));
         }
         // Stop worker thread
@@ -802,7 +777,7 @@ mod tests {
             #[allow(clippy::redundant_clone)]
             let _ = backend.clone();
 
-            _ = format!("{:?}", backend);
+            _ = format!("{backend:?}");
         }
     }
 

@@ -81,11 +81,13 @@ pub(crate) struct VhostUserVsockThread {
     local_port: Wrapping<u32>,
     /// The tx buffer size
     tx_buffer_size: u32,
-    /// EventFd to notify this thread for custom events. Currently used to notify
-    /// this thread to process raw vsock packets sent from a sibling VM.
+    /// EventFd to notify this thread for custom events. Currently used to
+    /// notify this thread to process raw vsock packets sent from a sibling
+    /// VM.
     pub sibling_event_fd: EventFd,
     /// Keeps track of which RX queue was processed first in the last iteration.
-    /// Used to alternate between the RX queues to prevent the starvation of one by the other.
+    /// Used to alternate between the RX queues to prevent the starvation of one
+    /// by the other.
     last_processed: RxQueueType,
 }
 
@@ -317,13 +319,13 @@ impl VhostUserVsockThread {
                         })
                         .and_then(|stream| self.add_stream_listener(stream))
                         .unwrap_or_else(|err| {
-                            warn!("Unable to accept new local connection: {:?}", err);
+                            warn!("Unable to accept new local connection: {err:?}");
                         });
                     } else {
                         // If we aren't ready to process requests, accept and immediately close
                         // the connection.
                         conn.map(drop).unwrap_or_else(|err| {
-                            warn!("Error closing an incoming connection: {:?}", err);
+                            warn!("Error closing an incoming connection: {err:?}");
                         });
                     }
                 }
@@ -334,14 +336,14 @@ impl VhostUserVsockThread {
                         match conn {
                             Ok((stream, addr)) => {
                                 if let Err(err) = stream.set_nonblocking(true) {
-                                    warn!("Failed to set stream to non-blocking: {:?}", err);
+                                    warn!("Failed to set stream to non-blocking: {err:?}");
                                     return;
                                 }
 
                                 let peer_port = match vsock_listener.local_addr() {
                                     Ok(listener_addr) => listener_addr.port(),
                                     Err(err) => {
-                                        warn!("Failed to get peer address: {:?}", err);
+                                        warn!("Failed to get peer address: {err:?}");
                                         return;
                                     }
                                 };
@@ -359,16 +361,16 @@ impl VhostUserVsockThread {
                                     stream_raw_fd,
                                     epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
                                 ) {
-                                    warn!("Failed to register with epoll: {:?}", err);
+                                    warn!("Failed to register with epoll: {err:?}");
                                 }
                             }
                             Err(err) => {
-                                warn!("Unable to accept new local connection: {:?}", err);
+                                warn!("Unable to accept new local connection: {err:?}");
                             }
                         }
                     } else {
                         conn.map(drop).unwrap_or_else(|err| {
-                            warn!("Error closing an incoming connection: {:?}", err);
+                            warn!("Error closing an incoming connection: {err:?}");
                         });
                     }
                 }
@@ -402,7 +404,7 @@ impl VhostUserVsockThread {
                         let peer_port = match Self::read_local_stream_port(unix_stream) {
                             Ok(port) => port,
                             Err(err) => {
-                                warn!("Error while parsing \"connect PORT\n\" command: {:?}", err);
+                                warn!("Error while parsing \"connect PORT\n\" command: {err:?}");
                                 return;
                             }
                         };
@@ -411,7 +413,7 @@ impl VhostUserVsockThread {
                         let local_port = match self.allocate_local_port() {
                             Ok(lp) => lp,
                             Err(err) => {
-                                warn!("Error while allocating local port: {:?}", err);
+                                warn!("Error while allocating local port: {err:?}");
                                 return;
                             }
                         };
@@ -615,7 +617,7 @@ impl VhostUserVsockThread {
                     }
                 }
                 Err(e) => {
-                    warn!("vsock: RX queue error: {:?}", e);
+                    warn!("vsock: RX queue error: {e:?}");
                     0
                 }
             };
@@ -647,7 +649,8 @@ impl VhostUserVsockThread {
         Ok(())
     }
 
-    /// Wrapper to process rx queue based on whether event idx is enabled or not.
+    /// Wrapper to process rx queue based on whether event idx is enabled or
+    /// not.
     fn process_unix_sockets(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
@@ -671,7 +674,8 @@ impl VhostUserVsockThread {
         Ok(())
     }
 
-    /// Wrapper to process raw vsock packets queue based on whether event idx is enabled or not.
+    /// Wrapper to process raw vsock packets queue based on whether event idx is
+    /// enabled or not.
     pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
         if event_idx {
             loop {
@@ -772,7 +776,8 @@ impl VhostUserVsockThread {
         Ok(())
     }
 
-    /// Wrapper to process tx queue based on whether event idx is enabled or not.
+    /// Wrapper to process tx queue based on whether event idx is enabled or
+    /// not.
     pub fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<()> {
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
@@ -813,18 +818,21 @@ impl Drop for VhostUserVsockThread {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    #[cfg(feature = "backend_vsock")]
-    use crate::vhu_vsock::VsockProxyInfo;
-    use std::collections::HashMap;
-    use std::io::Read;
-    use std::io::Write;
-    use std::path::PathBuf;
+    use std::{
+        collections::HashMap,
+        io::{Read, Write},
+        path::PathBuf,
+    };
+
     use tempfile::tempdir;
     use vm_memory::GuestAddress;
     use vmm_sys_util::eventfd::EventFd;
     #[cfg(feature = "backend_vsock")]
     use vsock::{VsockStream, VMADDR_CID_LOCAL};
+
+    use super::*;
+    #[cfg(feature = "backend_vsock")]
+    use crate::vhu_vsock::VsockProxyInfo;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 

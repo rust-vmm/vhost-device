@@ -8,6 +8,8 @@
 
 ### Changed
 
+- [[#852]](https://github.com/rust-vmm/vhost-device/pull/852) Changed to 2021 Rust edition
+
 ### Fixed
 - [[#808]](https://github.com/rust-vmm/vhost-device/pull/808) pipewire: Fix rand module imports
 

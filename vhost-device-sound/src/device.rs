@@ -75,7 +75,7 @@ impl VhostUserSoundThread {
         queues_per_thread
     }
 
-    fn set_event_idx(&mut self, enabled: bool) {
+    const fn set_event_idx(&mut self, enabled: bool) {
         self.event_idx = enabled;
     }
 
@@ -282,7 +282,7 @@ impl VhostUserSoundThread {
                                 resp.code = VIRTIO_SND_S_NOT_SUPP.into()
                             }
                             _ => {
-                                log::error!("{}", err);
+                                log::error!("{err}");
                                 resp.code = VIRTIO_SND_S_IO_ERR.into()
                             }
                         }
@@ -316,7 +316,7 @@ impl VhostUserSoundThread {
                                 resp.code = VIRTIO_SND_S_BAD_MSG.into()
                             }
                             _ => {
-                                log::error!("{}", err);
+                                log::error!("{err}");
                                 resp.code = VIRTIO_SND_S_IO_ERR.into()
                             }
                         }
@@ -369,7 +369,7 @@ impl VhostUserSoundThread {
             let used_len = match u32::try_from(used_len) {
                 Ok(len) => len,
                 Err(len) => {
-                    log::warn!("used_len {} overflows u32", len);
+                    log::warn!("used_len {len} overflows u32");
                     u32::MAX
                 }
             };
@@ -676,6 +676,7 @@ impl VhostUserBackend for VhostUserSoundBackend {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
     use tempfile::tempdir;
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::{

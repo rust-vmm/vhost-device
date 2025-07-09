@@ -5,12 +5,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use std::{
+    io,
+    os::fd::{AsRawFd, RawFd},
+    path::PathBuf,
+};
+
 use evdev::{Device, FetchEventsSynced, InputId};
 #[cfg(not(test))]
 use nix::ioctl_read_buf;
-use std::io;
-use std::os::fd::{AsRawFd, RawFd};
-use std::path::PathBuf;
 
 /// Trait that operates on input event device.  This main purpose for this
 /// trait is to encapsulate a "Device" structure for accessing hardware

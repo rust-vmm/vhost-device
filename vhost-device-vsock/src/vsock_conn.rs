@@ -188,7 +188,8 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                                 self.stream.as_raw_fd(),
                                 epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
                             ) {
-                                // TODO: let's move this logic out of this func, and handle it properly
+                                // TODO: let's move this logic out of this func, and handle it
+                                // properly
                                 error!("epoll_register failed: {:?}, but proceed further.", e);
                             }
                         };
@@ -393,23 +394,27 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
 #[cfg(test)]
 mod tests {
-    use byteorder::{ByteOrder, LittleEndian};
+    use std::{
+        collections::VecDeque,
+        io::{Read, Result as IoResult},
+        ops::Deref,
+        sync::{Arc, Mutex},
+    };
 
-    use super::*;
-    use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
-    use std::collections::VecDeque;
-    use std::io::{Read, Result as IoResult};
-    use std::ops::Deref;
-    use std::sync::{Arc, Mutex};
+    use byteorder::{ByteOrder, LittleEndian};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{
-        desc::split::Descriptor as SplitDescriptor, desc::RawDescriptor, mock::MockSplitQueue,
+        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
+        mock::MockSplitQueue,
         DescriptorChain, Queue, QueueOwnedT,
     };
     use vm_memory::{
         Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard,
         GuestMemoryMmap,
     };
+
+    use super::*;
+    use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
 
@@ -534,9 +539,9 @@ mod tests {
 
         // Creates a socket pair
         //
-        // The read buffer of one socket is the write socket of the other (and vice versa).
-        // One socket can be passed to the backend while the other can be used to fake writes
-        // or to verify data that the backend wrote.
+        // The read buffer of one socket is the write socket of the other (and vice
+        // versa). One socket can be passed to the backend while the other can
+        // be used to fake writes or to verify data that the backend wrote.
         fn pair() -> (VsockDummySocket, VsockDummySocket) {
             let buf1 = Arc::new(Mutex::new(VecDeque::new()));
             let buf2 = Arc::new(Mutex::new(VecDeque::new()));
@@ -570,7 +575,8 @@ mod tests {
         ) -> std::result::Result<usize, vm_memory::VolatileMemoryError> {
             // VecDequeue has no fancy unsafe tricks that vm-memory can abstract.
             // One could do fairly efficient stuff using the moving From<Vec> imp...
-            // But this is just for tests, so lets clone, convert to Vec, append, convert back and replace.
+            // But this is just for tests, so lets clone, convert to Vec, append, convert
+            // back and replace.
             let mut write_buffer = self.write_buffer.lock().unwrap();
             let mut vec = Vec::from(write_buffer.clone());
             let n = vec.write_volatile(buf)?;

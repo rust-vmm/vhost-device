@@ -85,7 +85,8 @@ impl LocalTxBuf {
         // Increment head  by amount of data that has been flushed to the stream
         self.head += Wrapping(written as u32);
 
-        // If written length is less than the expected length we can try again in the future
+        // If written length is less than the expected length we can try again in the
+        // future
         if written < len {
             return Ok(written);
         }

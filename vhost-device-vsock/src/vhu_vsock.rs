@@ -12,7 +12,7 @@ use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
-    virtio_config::VIRTIO_F_NOTIFY_ON_EMPTY, virtio_config::VIRTIO_F_VERSION_1,
+    virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
     virtio_ring::VIRTIO_RING_F_EVENT_IDX,
 };
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le64};
@@ -21,8 +21,7 @@ use vmm_sys_util::{
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
-use crate::thread_backend::RawPktsQ;
-use crate::vhu_vsock_thread::*;
+use crate::{thread_backend::RawPktsQ, vhu_vsock_thread::*};
 
 pub(crate) type CidMap =
     HashMap<u64, (Arc<RwLock<RawPktsQ>>, Arc<RwLock<HashSet<String>>>, EventFd)>;
@@ -65,9 +64,11 @@ pub(crate) const VSOCK_OP_CREDIT_UPDATE: u16 = 6;
 /// Vsock packet operation ID - Flow control credit request
 pub(crate) const VSOCK_OP_CREDIT_REQUEST: u16 = 7;
 
-/// Vsock packet flags - `VSOCK_OP_SHUTDOWN`: Packet sender will receive no more data
+/// Vsock packet flags - `VSOCK_OP_SHUTDOWN`: Packet sender will receive no more
+/// data
 pub(crate) const VSOCK_FLAGS_SHUTDOWN_RCV: u32 = 1;
-/// Vsock packet flags - `VSOCK_OP_SHUTDOWN`: Packet sender will send no more data
+/// Vsock packet flags - `VSOCK_OP_SHUTDOWN`: Packet sender will send no more
+/// data
 pub(crate) const VSOCK_FLAGS_SHUTDOWN_SEND: u32 = 2;
 
 // Queue mask to select vrings.
@@ -396,11 +397,13 @@ impl VhostUserBackend for VhostUserVsockBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::convert::TryInto;
+
     use tempfile::tempdir;
     use vhost_user_backend::VringT;
     use vm_memory::GuestAddress;
+
+    use super::*;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
     const QUEUE_SIZE: usize = 1024;

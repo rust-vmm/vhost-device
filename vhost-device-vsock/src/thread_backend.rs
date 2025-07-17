@@ -130,13 +130,14 @@ impl ReadVolatile for StreamType {
 
                 let dst = guard.as_ptr().cast::<libc::c_void>();
 
-                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to by `dst` is
-                // valid for writes of length `buf.len() by the invariants upheld by the constructor
-                // of `VolatileSlice`.
+                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to
+                // by `dst` is valid for writes of length `buf.len() by the
+                // invariants upheld by the constructor of `VolatileSlice`.
                 let bytes_read = unsafe { libc::read(fd, dst, buf.len()) };
 
                 if bytes_read < 0 {
-                    // We don't know if a partial read might have happened, so mark everything as dirty
+                    // We don't know if a partial read might have happened, so mark everything as
+                    // dirty
                     buf.bitmap().mark_dirty(0, buf.len());
 
                     Err(VolatileMemoryError::IOError(std::io::Error::last_os_error()))
@@ -165,9 +166,9 @@ impl WriteVolatile for StreamType {
 
                 let src = guard.as_ptr().cast::<libc::c_void>();
 
-                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to by `src` is
-                // valid for reads of length `buf.len() by the invariants upheld by the constructor
-                // of `VolatileSlice`.
+                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to
+                // by `src` is valid for reads of length `buf.len() by the
+                // invariants upheld by the constructor of `VolatileSlice`.
                 let bytes_written = unsafe { libc::write(fd, src, buf.len()) };
 
                 if bytes_written < 0 {
@@ -208,11 +209,14 @@ pub(crate) struct VsockThreadBackend {
     /// Set of allocated local ports.
     pub local_port_set: HashSet<u32>,
     tx_buffer_size: u32,
-    /// Maps the guest CID to the corresponding backend. Used for sibling VM communication.
+    /// Maps the guest CID to the corresponding backend. Used for sibling VM
+    /// communication.
     pub cid_map: Arc<RwLock<CidMap>>,
-    /// Queue of raw vsock packets received from sibling VMs to be sent to the guest.
+    /// Queue of raw vsock packets received from sibling VMs to be sent to the
+    /// guest.
     pub raw_pkts_queue: Arc<RwLock<RawPktsQ>>,
-    /// Set of groups assigned to the device which it is allowed to communicate with.
+    /// Set of groups assigned to the device which it is allowed to communicate
+    /// with.
     groups_set: Arc<RwLock<HashSet<String>>>,
 }
 
@@ -410,7 +414,8 @@ impl VsockThreadBackend {
         Ok(())
     }
 
-    /// Deliver a raw vsock packet sent from a sibling VM to the guest vsock driver.
+    /// Deliver a raw vsock packet sent from a sibling VM to the guest vsock
+    /// driver.
     ///
     /// Returns:
     /// - `Ok(())` if packet was successfully filled in
@@ -432,13 +437,16 @@ impl VsockThreadBackend {
         Ok(())
     }
 
-    /// Handle a new guest initiated connection, i.e from the peer, the guest driver.
+    /// Handle a new guest initiated connection, i.e from the peer, the guest
+    /// driver.
     ///
-    /// In case of proxying using unix domain socket, attempts to connect to a host side unix socket
-    /// listening on a path corresponding to the destination port as follows:
+    /// In case of proxying using unix domain socket, attempts to connect to a
+    /// host side unix socket listening on a path corresponding to the
+    /// destination port as follows:
     /// - "{self.host_sock_path}_{local_port}""
     ///
-    /// In case of proxying using vosck, attempts to connect to the {forward_cid, local_port}
+    /// In case of proxying using vosck, attempts to connect to the
+    /// {forward_cid, local_port}
     fn handle_new_guest_conn<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) {
         match &self.backend_info {
             BackendType::UnixDomainSocket(uds_path) => {
@@ -509,15 +517,17 @@ impl VsockThreadBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    #[cfg(feature = "backend_vsock")]
-    use crate::vhu_vsock::VsockProxyInfo;
-    use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
     use std::os::unix::net::UnixListener;
+
     use tempfile::tempdir;
     use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
     #[cfg(feature = "backend_vsock")]
     use vsock::{VsockListener, VMADDR_CID_ANY, VMADDR_CID_LOCAL};
+
+    use super::*;
+    #[cfg(feature = "backend_vsock")]
+    use crate::vhu_vsock::VsockProxyInfo;
+    use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;

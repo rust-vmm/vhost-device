@@ -262,11 +262,11 @@ pub struct FenceState {
 struct AssociatedScanouts(u32);
 
 impl AssociatedScanouts {
-    fn enable(&mut self, scanout_id: u32) {
+    const fn enable(&mut self, scanout_id: u32) {
         self.0 |= 1 << scanout_id;
     }
 
-    fn disable(&mut self, scanout_id: u32) {
+    const fn disable(&mut self, scanout_id: u32) {
         self.0 ^= 1 << scanout_id;
     }
 

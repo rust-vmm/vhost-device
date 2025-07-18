@@ -538,8 +538,7 @@ mod tests {
     fn backend_error_reporting_test() {
         let collector = FakeTargetCommandCollector::new();
         let fake_target = Box::new(FakeTarget::new(collector.clone(), |_, _| {
-            Err(crate::scsi::CmdError::DataIn(io::Error::new(
-                io::ErrorKind::Other,
+            Err(crate::scsi::CmdError::DataIn(io::Error::other(
                 "internal error",
             )))
         }));

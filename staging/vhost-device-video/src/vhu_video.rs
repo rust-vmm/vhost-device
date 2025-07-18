@@ -98,7 +98,7 @@ pub(crate) enum VuVideoError {
 
 impl convert::From<VuVideoError> for io::Error {
     fn from(e: VuVideoError) -> Self {
-        io::Error::new(io::ErrorKind::Other, e)
+        io::Error::other(e)
     }
 }
 

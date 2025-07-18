@@ -1192,7 +1192,7 @@ mod tests {
     // Test io_error conversion to gpu command decode error
     #[test]
     fn test_io_error() {
-        let io_error = io::Error::new(io::ErrorKind::Other, "Test IO error");
+        let io_error = io::Error::other("Test IO error");
         let gpu_error: GpuCommandDecodeError = io_error.into();
         match gpu_error {
             GpuCommandDecodeError::IO(_) => (),

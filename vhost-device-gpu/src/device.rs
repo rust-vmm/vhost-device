@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    io::{self, ErrorKind, Result as IoResult},
+    io::{self, Result as IoResult},
     os::fd::AsRawFd,
     sync::{self, Arc, Mutex},
 };
@@ -91,7 +91,7 @@ pub enum Error {
 
 impl From<Error> for io::Error {
     fn from(e: Error) -> Self {
-        Self::new(io::ErrorKind::Other, e)
+        Self::other(e)
     }
 }
 
@@ -567,10 +567,7 @@ impl VhostUserGpuBackendInner {
                 Some(virtio_gpu) => virtio_gpu,
                 None => {
                     let gpu_backend = self.gpu_backend.take().ok_or_else(|| {
-                        io::Error::new(
-                            ErrorKind::Other,
-                            "set_gpu_socket() not called, GpuBackend missing",
-                        )
+                        io::Error::other("set_gpu_socket() not called, GpuBackend missing")
                     })?;
 
                     // We currently pass the CONTROL_QUEUE vring to RutabagaVirtioGpu, because we

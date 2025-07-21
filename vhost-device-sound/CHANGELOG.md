@@ -3,6 +3,7 @@
 
 ### Added
 
+- [[#876]](https://github.com/rust-vmm/vhost-device/pull/876) Add GStreamer audio backend support
 - [[#806]](https://github.com/rust-vmm/vhost-device/pull/806) Add controls field in VirtioSoundConfig
 - [[#746]](https://github.com/rust-vmm/vhost-device/pull/746) Add new sampling rates 12000Hz and 24000Hz
 

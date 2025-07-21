@@ -29,6 +29,10 @@ pub enum Error {
     DescriptorWriteFailed,
     #[error("Could not disconnect stream")]
     CouldNotDisconnectStream,
+    #[error("Could not start stream")]
+    CouldNotStartStream,
+    #[error("Could not stop stream")]
+    CouldNotStopStream,
 }
 
 type Result<T> = std::result::Result<T, Error>;

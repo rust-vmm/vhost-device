@@ -12,9 +12,10 @@ edition = "2018"
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
-default = ["alsa-backend", "pw-backend"]
+default = ["alsa-backend", "pw-backend", "gst-backend"]
 alsa-backend = ["dep:alsa"]
 pw-backend = ["pw"]
+gst-backend = ["dep:gst", "dep:gst-app"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -32,6 +33,9 @@ vmm-sys-util = "0.14"
 [target.'cfg(target_env = "gnu")'.dependencies]
 alsa = { version = "0.9", optional = true }
 pw = { package = "pipewire", version = "0.8", optional = true }
+# GStreamer dependencies
+gst = { package = "gstreamer", version = "0.22", optional = true, features = ["v1_20"] }
+gst-app = { package = "gstreamer-app", version = "0.22", optional = true, features = ["v1_20"] }
 
 [dev-dependencies]
 rstest = "0.25.0"

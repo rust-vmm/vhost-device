@@ -8,6 +8,9 @@ mod null;
 #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
 mod pipewire;
 
+#[cfg(all(feature = "gst-backend", target_env = "gnu"))]
+mod gstreamer;
+
 use std::sync::{Arc, RwLock};
 
 #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
@@ -16,6 +19,8 @@ use self::null::NullBackend;
 #[cfg(all(feature = "pw-backend", target_env = "gnu"))]
 use self::pipewire::PwBackend;
 use crate::{stream::Stream, BackendType, Result, VirtioSndPcmSetParams};
+#[cfg(all(feature = "gst-backend", target_env = "gnu"))]
+use self::gstreamer::GStreamerBackend;
 
 pub trait AudioBackend {
     fn write(&self, stream_id: u32) -> Result<()>;
@@ -61,6 +66,10 @@ pub fn alloc_audio_backend(
         }
         #[cfg(all(feature = "alsa-backend", target_env = "gnu"))]
         BackendType::Alsa => Ok(Box::new(AlsaBackend::new(streams))),
+        #[cfg(all(feature = "gst-backend", target_env = "gnu"))]
+        BackendType::GStreamer => Ok(Box::new(
+            GStreamerBackend::new(streams),
+        )),
     }
 }
 

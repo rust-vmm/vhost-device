@@ -1,14 +1,28 @@
 use std::sync::{Arc, RwLock};
 
-use gst::prelude::*;
-use gst::{Pipeline};
+use gst::{Pipeline,prelude::*};
 use gst_app::{AppSink, AppSrc};
+use gst_audio::{AudioInfo, AudioFormat};
 
 use crate::{
     stream::{Error as StreamError, PCMState},
-    Stream,
-    Error, Result,VirtioSndPcmSetParams,
-}; // 假设你已有这些定义
+    virtio_sound::{
+        VirtioSndPcmSetParams, VIRTIO_SND_PCM_FMT_A_LAW, VIRTIO_SND_PCM_FMT_FLOAT,
+        VIRTIO_SND_PCM_FMT_FLOAT64, VIRTIO_SND_PCM_FMT_MU_LAW, VIRTIO_SND_PCM_FMT_S16,
+        VIRTIO_SND_PCM_FMT_S18_3, VIRTIO_SND_PCM_FMT_S20, VIRTIO_SND_PCM_FMT_S20_3,
+        VIRTIO_SND_PCM_FMT_S24, VIRTIO_SND_PCM_FMT_S24_3, VIRTIO_SND_PCM_FMT_S32,
+        VIRTIO_SND_PCM_FMT_S8, VIRTIO_SND_PCM_FMT_U16, VIRTIO_SND_PCM_FMT_U18_3,
+        VIRTIO_SND_PCM_FMT_U20, VIRTIO_SND_PCM_FMT_U20_3, VIRTIO_SND_PCM_FMT_U24,
+        VIRTIO_SND_PCM_FMT_U24_3, VIRTIO_SND_PCM_FMT_U32, VIRTIO_SND_PCM_FMT_U8,
+        VIRTIO_SND_PCM_RATE_11025, VIRTIO_SND_PCM_RATE_12000, VIRTIO_SND_PCM_RATE_16000,
+        VIRTIO_SND_PCM_RATE_176400, VIRTIO_SND_PCM_RATE_192000, VIRTIO_SND_PCM_RATE_22050,
+        VIRTIO_SND_PCM_RATE_24000, VIRTIO_SND_PCM_RATE_32000, VIRTIO_SND_PCM_RATE_384000,
+        VIRTIO_SND_PCM_RATE_44100, VIRTIO_SND_PCM_RATE_48000, VIRTIO_SND_PCM_RATE_5512,
+        VIRTIO_SND_PCM_RATE_64000, VIRTIO_SND_PCM_RATE_8000, VIRTIO_SND_PCM_RATE_88200,
+        VIRTIO_SND_PCM_RATE_96000,
+    },
+    Stream, Error, Result,
+}; 
 
 use super::AudioBackend;
 
@@ -22,7 +36,7 @@ pub struct GStreamerBackend {
 impl GStreamerBackend {
     pub fn new(stream_params: Arc<RwLock<Vec<Stream>>>) -> Self {
         // init GStreamer
-        log::trace!("Initializing GStreamer backend");
+        log::debug!("Initializing GStreamer backend");
 
         gst::init().expect("Failed to initialize GStreamer");
 
@@ -61,19 +75,6 @@ impl GStreamerBackend {
         gst::Element::link_many(&[appsrc.upcast_ref(), &audioconvert, &audioresample, &autoaudiosink])
             .expect("Failed to link elements");
 
-        // set appsrc caps to PCM audio format (a test)
-        let audio_caps = gst::Caps::builder("audio/x-raw")
-            .field("format", &"S16LE")
-            .field("channels", &2i32)
-            .field("rate", &48000i32)
-            .build();
-        appsrc.set_caps(Some(&audio_caps));
-        // appsrc.set_property_format(gst::Format::Time);
-
-        pipeline
-            .set_state(gst::State::Playing)
-            .expect("Unable to set pipeline to playing");
-
         GStreamerBackend {
             stream_params: stream_params,
             appsrc,
@@ -109,7 +110,7 @@ impl AudioBackend for GStreamerBackend {
     }
 
     fn read(&self, stream_id: u32) -> Result<()> {
-        log::trace!("PipewireBackend read stream_id {}", stream_id);
+        log::debug!("PipewireBackend read stream_id {}", stream_id);
         if !matches!(
             self.stream_params.read().unwrap()[stream_id as usize].state,
             PCMState::Start | PCMState::Prepare
@@ -123,9 +124,9 @@ impl AudioBackend for GStreamerBackend {
     }
 
     fn set_parameters(&self, stream_id: u32, request: VirtioSndPcmSetParams) -> Result<()> {
-        log::trace!("Setting parameters for stream {}", stream_id);
-        log::trace!("Request: {:?}", request);
-        log::trace!("Stream parameters: {:?}", self.stream_params);
+        log::debug!("Setting parameters for stream {}", stream_id);
+        log::debug!("Request: {:?}", request);
+        log::debug!("Stream parameters: {:?}", self.stream_params);
         let stream_clone = self.stream_params.clone();
         let mut stream_params = stream_clone.write().unwrap();
         if let Some(st) = stream_params.get_mut(stream_id as usize) {
@@ -145,24 +146,94 @@ impl AudioBackend for GStreamerBackend {
         } else {
             return Err(Error::StreamWithIdNotFound(stream_id));
         }
-        log::trace!("Stream parameters after set: {:?}", stream_params);
+        log::debug!("Stream parameters after set: {:?}", stream_params);
 
         Ok(())
     }
-    fn prepare(&self, _stream_id: u32) -> Result<()> {
-        log::trace!("Preparing stream {}", _stream_id);
+    fn prepare(&self, stream_id: u32) -> Result<()> {
+        log::debug!("Preparing stream {}", stream_id);
+        let prepare_result = self
+            .stream_params
+            .write()
+            .unwrap()
+            .get_mut(stream_id as usize)
+            .ok_or(Error::StreamWithIdNotFound(stream_id))?
+            .state
+            .prepare();
+        if let Err(err) = prepare_result {
+            log::error!("Stream {} prepare {}", stream_id, err);
+            return Err(Error::Stream(err));
+        } else {
+            log::debug!("Stream {} prepared successfully", stream_id);
+            let stream_params = self.stream_params.read().unwrap();
+            let params = &stream_params[stream_id as usize].params;
+        
+            let channels = params.channels as u32;
+            let format = match params.format {
+                VIRTIO_SND_PCM_FMT_MU_LAW => AudioFormat::Encoded, // TODO
+                VIRTIO_SND_PCM_FMT_A_LAW => AudioFormat::Encoded,  // TODO
+                VIRTIO_SND_PCM_FMT_S8 => AudioFormat::S8,
+                VIRTIO_SND_PCM_FMT_U8 => AudioFormat::U8,
+                VIRTIO_SND_PCM_FMT_S16 => AudioFormat::S16le,
+                VIRTIO_SND_PCM_FMT_U16 => AudioFormat::U16le,
+                VIRTIO_SND_PCM_FMT_S18_3 => AudioFormat::S18le, // TODO
+                VIRTIO_SND_PCM_FMT_U18_3 => AudioFormat::U18le, // TODO
+                VIRTIO_SND_PCM_FMT_S20 => AudioFormat::S20le,
+                VIRTIO_SND_PCM_FMT_U20 => AudioFormat::U20le,
+                VIRTIO_SND_PCM_FMT_S20_3 => AudioFormat::S20le, // TODO
+                VIRTIO_SND_PCM_FMT_U20_3 => AudioFormat::U20le, // TODO
+                VIRTIO_SND_PCM_FMT_S24 => AudioFormat::S24le,
+                VIRTIO_SND_PCM_FMT_U24 => AudioFormat::U24le,
+                VIRTIO_SND_PCM_FMT_S24_3 => AudioFormat::S24le, // TODO
+                VIRTIO_SND_PCM_FMT_U24_3 => AudioFormat::U24le, // TODO
+                VIRTIO_SND_PCM_FMT_S32 => AudioFormat::S32le,
+                VIRTIO_SND_PCM_FMT_U32 => AudioFormat::U32le,
+                VIRTIO_SND_PCM_FMT_FLOAT => AudioFormat::F32le,
+                VIRTIO_SND_PCM_FMT_FLOAT64 => AudioFormat::F64le,
+                _ => AudioFormat::Unknown,
+            };
+
+            let rate = match params.rate {
+                VIRTIO_SND_PCM_RATE_5512 => 5512,
+                VIRTIO_SND_PCM_RATE_8000 => 8000,
+                VIRTIO_SND_PCM_RATE_11025 => 11025,
+                VIRTIO_SND_PCM_RATE_16000 => 16000,
+                VIRTIO_SND_PCM_RATE_22050 => 22050,
+                VIRTIO_SND_PCM_RATE_32000 => 32000,
+                VIRTIO_SND_PCM_RATE_44100 => 44100,
+                VIRTIO_SND_PCM_RATE_48000 => 48000,
+                VIRTIO_SND_PCM_RATE_64000 => 64000,
+                VIRTIO_SND_PCM_RATE_88200 => 88200,
+                VIRTIO_SND_PCM_RATE_96000 => 96000,
+                VIRTIO_SND_PCM_RATE_176400 => 176400,
+                VIRTIO_SND_PCM_RATE_192000 => 192000,
+                VIRTIO_SND_PCM_RATE_384000 => 384000,
+                VIRTIO_SND_PCM_RATE_12000 => 12000,
+                VIRTIO_SND_PCM_RATE_24000 => 24000,
+                _ => 44100,
+            };
+
+            let audio_info = AudioInfo::builder(format, rate, channels)
+                .build()
+                .expect("Failed to create AudioInfo");
+
+            let caps = audio_info.to_caps().expect("Failed to convert AudioInfo to Caps");
+            self.appsrc.set_caps(Some(&caps));
+
+        }
         Ok(())
     }
-    fn release(&self, _stream_id: u32) -> Result<()> {
-        log::trace!("Releasing stream {}", _stream_id);
+
+    fn release(&self, stream_id: u32) -> Result<()> {
+        log::debug!("Releasing stream {}", stream_id);
         Ok(())
     }
-    fn start(&self, _stream_id: u32) -> Result<()> {
-        log::trace!("Starting stream {}", _stream_id);
+    fn start(&self, stream_id: u32) -> Result<()> {
+        log::debug!("Starting stream {}", stream_id);
         Ok(())
     }
-    fn stop(&self, _stream_id: u32) -> Result<()> {
-        log::trace!("Stopping stream {}", _stream_id);
+    fn stop(&self, stream_id: u32) -> Result<()> {
+        log::debug!("Stopping stream {}", stream_id);
         Ok(())
     }
 

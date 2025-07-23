@@ -15,7 +15,7 @@ xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 default = ["alsa-backend", "pw-backend", "gst-backend"]
 alsa-backend = ["dep:alsa"]
 pw-backend = ["pw"]
-gst-backend = ["dep:gst", "dep:gst-app"]
+gst-backend = ["dep:gst", "dep:gst-app", "dep:gst-audio"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
@@ -36,6 +36,7 @@ pw = { package = "pipewire", version = "0.8", optional = true }
 # GStreamer dependencies
 gst = { package = "gstreamer", version = "0.22", optional = true, features = ["v1_20"] }
 gst-app = { package = "gstreamer-app", version = "0.22", optional = true, features = ["v1_20"] }
+gst-audio = {package = "gstreamer-audio", version = "0.22", optional = true, features = ["v1_20"] }
 
 [dev-dependencies]
 rstest = "0.25.0"

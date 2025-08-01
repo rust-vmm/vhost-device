@@ -306,7 +306,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cB
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {

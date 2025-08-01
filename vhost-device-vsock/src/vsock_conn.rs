@@ -252,7 +252,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                     Some(buf) => {
                         if let Err(err) = self.send_bytes(buf) {
                             // TODO: Terminate this connection
-                            dbg!("err:{:?}", err);
+                            log::debug!("err:{err:?}");
                             return Ok(());
                         }
                     }
@@ -318,12 +318,12 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                 if e.kind() == ErrorKind::WouldBlock {
                     0
                 } else {
-                    dbg!("send_bytes error: {:?}", e);
+                    log::debug!("send_bytes error: {e:?}");
                     return Err(Error::StreamWrite);
                 }
             }
             Err(e) => {
-                dbg!("send_bytes error: {:?}", e);
+                log::debug!("send_bytes error: {e:?}");
                 return Err(Error::StreamWrite);
             }
         };

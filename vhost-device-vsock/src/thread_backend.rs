@@ -508,7 +508,7 @@ impl VsockThreadBackend {
     /// Enqueue RST packets to be sent to guest.
     fn enq_rst(&mut self) {
         // TODO
-        dbg!("New guest conn error: Enqueue RST");
+        log::debug!("New guest conn error: Enqueue RST");
     }
 }
 

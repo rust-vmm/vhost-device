@@ -473,7 +473,7 @@ mod tests {
         ));
         mem.write(&header, SplitDescriptor::from(head_desc).addr())
             .unwrap();
-        assert!(virt_queue.desc_table().store(0, head_desc).is_ok());
+        virt_queue.desc_table().store(0, head_desc).unwrap();
         next_addr += head_params.head_len as u64;
 
         // Put the descriptor index 0 in the first available ring position.
@@ -500,8 +500,8 @@ mod tests {
             ));
             mem.write(&data, SplitDescriptor::from(data_desc).addr())
                 .unwrap();
-            assert!(virt_queue.desc_table().store(i + 1, data_desc).is_ok());
-            next_addr += head_data_len as u64;
+            virt_queue.desc_table().store(i + 1, data_desc).unwrap();
+            next_addr += u64::from(head_data_len);
         }
 
         // Create descriptor chain from pre-filled memory
@@ -625,7 +625,7 @@ mod tests {
     fn test_vsock_conn_init() {
         // new locally inititated connection
         let mut dummy_file = VsockDummySocket::new();
-        assert!(dummy_file.flush().is_ok());
+        dummy_file.flush().unwrap();
         let mut conn_local = VsockConnection::new_local_init(
             dummy_file,
             VSOCK_HOST_CID,
@@ -761,14 +761,14 @@ mod tests {
         // VSOCK_OP_REQUEST: new local conn request
         conn_local.rx_queue.enqueue(RxOps::Request);
         let op_req = conn_local.recv_pkt(&mut pkt);
-        assert!(op_req.is_ok());
+        op_req.unwrap();
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(pkt.op(), VSOCK_OP_REQUEST);
 
         // VSOCK_OP_RST: reset if connection not established
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_rst = conn_local.recv_pkt(&mut pkt);
-        assert!(op_rst.is_ok());
+        op_rst.unwrap();
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(pkt.op(), VSOCK_OP_RST);
 
@@ -777,7 +777,7 @@ mod tests {
         conn_local.rx_queue.enqueue(RxOps::Rw);
         conn_local.fwd_cnt = Wrapping(1024);
         let op_credit_update = conn_local.recv_pkt(&mut pkt);
-        assert!(op_credit_update.is_ok());
+        op_credit_update.unwrap();
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(pkt.op(), VSOCK_OP_CREDIT_REQUEST);
         assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
@@ -786,7 +786,7 @@ mod tests {
         conn_local.peer_buf_alloc = 65536;
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_zero_read_shutdown = conn_local.recv_pkt(&mut pkt);
-        assert!(op_zero_read_shutdown.is_ok());
+        op_zero_read_shutdown.unwrap();
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(conn_local.rx_cnt, Wrapping(0));
         assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
@@ -801,20 +801,20 @@ mod tests {
         host_socket.write_all(payload).unwrap();
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_zero_read = conn_local.recv_pkt(&mut pkt);
-        assert!(op_zero_read.is_ok());
+        op_zero_read.unwrap();
         assert_eq!(pkt.op(), VSOCK_OP_RW);
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(conn_local.rx_cnt, Wrapping(payload.len() as u32));
         assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
         assert_eq!(pkt.len(), 5);
         let buf = &mut [0u8; 5];
-        assert!(pkt.data_slice().unwrap().read_slice(buf, 0).is_ok());
+        pkt.data_slice().unwrap().read_slice(buf, 0).unwrap();
         assert_eq!(buf, b"hello");
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
         conn_local.rx_queue.enqueue(RxOps::Response);
         let op_response = conn_local.recv_pkt(&mut pkt);
-        assert!(op_response.is_ok());
+        op_response.unwrap();
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(pkt.op(), VSOCK_OP_RESPONSE);
         assert!(conn_local.connect);
@@ -823,7 +823,7 @@ mod tests {
         conn_local.rx_queue.enqueue(RxOps::CreditUpdate);
         let op_credit_update = conn_local.recv_pkt(&mut pkt);
         assert!(!conn_local.rx_queue.pending_rx());
-        assert!(op_credit_update.is_ok());
+        op_credit_update.unwrap();
         assert_eq!(pkt.op(), VSOCK_OP_CREDIT_UPDATE);
         assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
 
@@ -861,7 +861,7 @@ mod tests {
 
         // check if peer credit information is updated currently
         let credit_check = conn_local.send_pkt(&pkt);
-        assert!(credit_check.is_ok());
+        credit_check.unwrap();
         assert_eq!(conn_local.peer_buf_alloc, 65536);
         assert_eq!(conn_local.peer_fwd_cnt, Wrapping(1024));
 
@@ -869,7 +869,7 @@ mod tests {
         pkt.set_op(VSOCK_OP_RESPONSE);
         assert_eq!(conn_local.peer_port, 5001);
         let peer_response = conn_local.send_pkt(&pkt);
-        assert!(peer_response.is_ok());
+        peer_response.unwrap();
         assert!(conn_local.connect);
         let mut resp_buf = vec![0; 8];
         host_socket.read_exact(&mut resp_buf).unwrap();
@@ -878,9 +878,9 @@ mod tests {
         // VSOCK_OP_RW
         pkt.set_op(VSOCK_OP_RW);
         let buf = b"hello";
-        assert!(pkt.data_slice().unwrap().write_slice(buf, 0).is_ok());
+        pkt.data_slice().unwrap().write_slice(buf, 0).unwrap();
         let rw_response = conn_local.send_pkt(&pkt);
-        assert!(rw_response.is_ok());
+        rw_response.unwrap();
         let mut resp_buf = vec![0; 5];
         host_socket.read_exact(&mut resp_buf).unwrap();
         assert_eq!(resp_buf, b"hello");
@@ -888,14 +888,14 @@ mod tests {
         // VSOCK_OP_CREDIT_REQUEST
         pkt.set_op(VSOCK_OP_CREDIT_REQUEST);
         let credit_response = conn_local.send_pkt(&pkt);
-        assert!(credit_response.is_ok());
+        credit_response.unwrap();
         assert_eq!(conn_local.rx_queue.peek().unwrap(), RxOps::CreditUpdate);
 
         // VSOCK_OP_SHUTDOWN
         pkt.set_op(VSOCK_OP_SHUTDOWN);
         pkt.set_flags(VSOCK_FLAGS_SHUTDOWN_RCV | VSOCK_FLAGS_SHUTDOWN_SEND);
         let shutdown_response = conn_local.send_pkt(&pkt);
-        assert!(shutdown_response.is_ok());
+        shutdown_response.unwrap();
         assert!(conn_local.rx_queue.contains(RxOps::Reset.bitmask()));
     }
 }

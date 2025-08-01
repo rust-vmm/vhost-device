@@ -861,40 +861,36 @@ mod tests {
 
         let dummy_fd = EventFd::new(0).unwrap();
 
-        assert!(VhostUserVsockThread::epoll_register(
+        VhostUserVsockThread::epoll_register(
             epoll_fd,
             dummy_fd.as_raw_fd(),
-            epoll::Events::EPOLLOUT
+            epoll::Events::EPOLLOUT,
         )
-        .is_ok());
-        assert!(VhostUserVsockThread::epoll_modify(
+        .unwrap();
+        VhostUserVsockThread::epoll_modify(epoll_fd, dummy_fd.as_raw_fd(), epoll::Events::EPOLLIN)
+            .unwrap();
+        VhostUserVsockThread::epoll_unregister(epoll_fd, dummy_fd.as_raw_fd()).unwrap();
+        VhostUserVsockThread::epoll_register(
             epoll_fd,
             dummy_fd.as_raw_fd(),
-            epoll::Events::EPOLLIN
+            epoll::Events::EPOLLIN,
         )
-        .is_ok());
-        assert!(VhostUserVsockThread::epoll_unregister(epoll_fd, dummy_fd.as_raw_fd()).is_ok());
-        assert!(VhostUserVsockThread::epoll_register(
-            epoll_fd,
-            dummy_fd.as_raw_fd(),
-            epoll::Events::EPOLLIN
-        )
-        .is_ok());
+        .unwrap();
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
         vring.set_queue_ready(true);
 
-        assert!(t.process_tx(&vring, false).is_ok());
-        assert!(t.process_tx(&vring, true).is_ok());
+        t.process_tx(&vring, false).unwrap();
+        t.process_tx(&vring, true).unwrap();
         // add backend_rxq to avoid that RX processing is skipped
         t.thread_backend
             .backend_rxq
             .push_back(ConnMapKey::new(0, 0));
-        assert!(t.process_rx(&vring, false).is_ok());
-        assert!(t.process_rx(&vring, true).is_ok());
-        assert!(t.process_raw_pkts(&vring, false).is_ok());
-        assert!(t.process_raw_pkts(&vring, true).is_ok());
+        t.process_rx(&vring, false).unwrap();
+        t.process_rx(&vring, true).unwrap();
+        t.process_raw_pkts(&vring, false).unwrap();
+        t.process_raw_pkts(&vring, true).unwrap();
 
         VhostUserVsockThread::vring_handle_event(EventData {
             vring: vring.clone(),

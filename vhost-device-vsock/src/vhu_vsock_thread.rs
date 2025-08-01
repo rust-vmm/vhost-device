@@ -456,7 +456,7 @@ impl VhostUserVsockThread {
                                 .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
                         }
                         Err(e) => {
-                            dbg!("Error: {:?}", e);
+                            log::debug!("Error: {e:?}");
                         }
                     }
                     return;
@@ -743,7 +743,7 @@ impl VhostUserVsockThread {
             ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
-                    dbg!("vsock: error reading TX packet: {:?}", e);
+                    log::debug!("vsock: error reading TX packet: {e:?}");
                     continue;
                 }
             };

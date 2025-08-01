@@ -35,3 +35,6 @@ nix = { version = "0.30", features = ["ioctl"] }
 assert_matches = "1.5"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
 vm-memory = { version = "0.16", features = ["backend-mmap", "backend-atomic"] }
+
+[lints]
+workspace = true

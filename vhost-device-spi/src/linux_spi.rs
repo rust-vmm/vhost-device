@@ -58,7 +58,7 @@ pub fn spi_ioc_message(n: u32) -> u64 {
     if n * 32 < (1 << _IOC_SIZEBITS) {
         size = n * 32;
     }
-    (SPI_IOC_MESSAGE_BASE | (size << _IOC_SIZESHIFT)) as u64
+    u64::from(SPI_IOC_MESSAGE_BASE | (size << _IOC_SIZESHIFT))
 }
 
 bitflags! {

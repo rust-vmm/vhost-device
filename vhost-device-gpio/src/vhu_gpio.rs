@@ -421,7 +421,8 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut for VhostUserGpi
                     .config()
                     .as_slice()
                     .as_ptr()
-                    .offset(offset as isize) as *const _ as *const _,
+                    .offset(offset as isize)
+                    .cast::<u8>(),
                 size as usize,
             )
             .to_vec()
@@ -1157,7 +1158,7 @@ mod tests {
             // reading its content from byte array.
             unsafe {
                 from_raw_parts(
-                    &config as *const _ as *const _,
+                    (&raw const config).cast::<u8>(),
                     size_of::<VirtioGpioConfig>(),
                 )
                 .to_vec()

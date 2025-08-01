@@ -25,3 +25,6 @@ vmm-sys-util = "0.14"
 [dev-dependencies]
 assert_matches = "1.5"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
+
+[lints]
+workspace = true

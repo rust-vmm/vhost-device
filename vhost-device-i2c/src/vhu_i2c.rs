@@ -306,7 +306,7 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cB
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(&mut self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
@@ -407,7 +407,7 @@ mod tests {
         vq.desc_table()
             .store(index, RawDescriptor::from(desc_out))
             .unwrap();
-        next_addr += desc_out.len() as u64;
+        next_addr += u64::from(desc_out.len());
         index += 1;
 
         // Buf descriptor: optional
@@ -430,7 +430,7 @@ mod tests {
             vq.desc_table()
                 .store(index, RawDescriptor::from(desc_buf))
                 .unwrap();
-            next_addr += desc_buf.len() as u64;
+            next_addr += u64::from(desc_buf.len());
             index += 1;
         }
 

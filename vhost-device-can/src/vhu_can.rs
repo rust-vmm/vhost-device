@@ -637,7 +637,8 @@ impl VhostUserBackendMut for VhostUserCanBackend {
                     .config()
                     .as_slice()
                     .as_ptr()
-                    .offset(offset as isize) as *const _ as *const _,
+                    .offset(offset as isize)
+                    .cast::<u8>(),
                 size as usize,
             )
             .to_vec()

@@ -298,7 +298,7 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
         // access up to the size of the struct.
         let config_slice = unsafe {
             slice::from_raw_parts(
-                &config as *const virtio_scsi_config as *const u8,
+                (&raw const config).cast::<u8>(),
                 mem::size_of::<virtio_scsi_config>(),
             )
         };

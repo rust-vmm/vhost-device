@@ -64,7 +64,7 @@ macro_rules! ioctl_read_buf {
             for item in data.iter_mut() {
                 *item = $nr as u8;
             }
-            Ok(data.len() as i32)
+            Ok(data.len().try_into().unwrap())
         }
     )
 }

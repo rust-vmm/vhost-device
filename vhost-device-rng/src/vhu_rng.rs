@@ -232,7 +232,7 @@ impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBacke
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        dbg!(self.event_idx = enabled);
+        self.event_idx = enabled;
     }
 
     fn update_memory(
@@ -369,7 +369,7 @@ mod tests {
             };
 
             let desc = RawDescriptor::from(SplitDescriptor::new(
-                (0x100 * (i + 1)) as u64,
+                u64::from(0x100 * (i + 1)),
                 0x200,
                 desc_flags,
                 i + 1,
@@ -579,7 +579,7 @@ mod tests {
 
         assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
         assert_eq!(backend.get_config(0, 0), vec![]);
-        assert!(backend.update_memory(mem).is_ok());
+        backend.update_memory(mem).unwrap();
 
         backend.set_event_idx(true);
         assert!(backend.event_idx);

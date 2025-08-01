@@ -147,7 +147,7 @@ mod tests {
 
         // push data into empty tx buffer
         let res_push = loc_tx_buf.push(&data);
-        assert!(res_push.is_ok());
+        res_push.unwrap();
         assert_eq!(loc_tx_buf.head, Wrapping(0));
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE));
 
@@ -158,7 +158,7 @@ mod tests {
         // head and tail wrap at full
         loc_tx_buf.head = Wrapping(CONN_TX_BUF_SIZE);
         let res_push = loc_tx_buf.push(&data);
-        assert!(res_push.is_ok());
+        res_push.unwrap();
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE * 2));
 
         // only tail wraps at full
@@ -168,7 +168,7 @@ mod tests {
         loc_tx_buf.head = Wrapping(2);
         loc_tx_buf.tail = Wrapping(CONN_TX_BUF_SIZE - 2);
         let res_push = loc_tx_buf.push(&data);
-        assert!(res_push.is_ok());
+        res_push.unwrap();
         assert_eq!(loc_tx_buf.head, Wrapping(2));
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE + 2));
         assert_eq!(loc_tx_buf.buf[0..2], buf[2..4]);
@@ -197,7 +197,7 @@ mod tests {
 
         // flush data of CONN_TX_BUF_SIZE amount
         let res_push = loc_tx_buf.push(&data);
-        assert!(res_push.is_ok());
+        res_push.unwrap();
         let res_flush = loc_tx_buf.flush_to(&mut cmp_vec);
         if let Ok(n) = res_flush {
             assert_eq!(loc_tx_buf.head, Wrapping(n as u32));
@@ -215,7 +215,7 @@ mod tests {
         loc_tx_buf.head = Wrapping(0);
         loc_tx_buf.tail = Wrapping(0);
         let res_push = loc_tx_buf.push(&data);
-        assert!(res_push.is_ok());
+        res_push.unwrap();
         cmp_vec.clear();
         loc_tx_buf.head = Wrapping(CONN_TX_BUF_SIZE / 2);
         loc_tx_buf.tail = Wrapping(CONN_TX_BUF_SIZE + (CONN_TX_BUF_SIZE / 2));

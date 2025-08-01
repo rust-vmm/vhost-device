@@ -407,7 +407,7 @@ mod tests {
         vq.desc_table()
             .store(index, RawDescriptor::from(desc_out))
             .unwrap();
-        next_addr += desc_out.len() as u64;
+        next_addr += u64::from(desc_out.len());
         index += 1;
 
         // Buf descriptor: optional
@@ -430,7 +430,7 @@ mod tests {
             vq.desc_table()
                 .store(index, RawDescriptor::from(desc_buf))
                 .unwrap();
-            next_addr += desc_buf.len() as u64;
+            next_addr += u64::from(desc_buf.len());
             index += 1;
         }
 

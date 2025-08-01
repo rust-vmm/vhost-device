@@ -293,7 +293,7 @@ mod tests {
             VRING_DESC_F_NEXT as u16,
             index + 1,
         );
-        next_addr += desc_out.len() as u64;
+        next_addr += u64::from(desc_out.len());
         index += 1;
 
         mem.write_obj::<VirtioFooOutHdr>(out_hdr, desc_out.addr())
@@ -308,7 +308,7 @@ mod tests {
                 (VRING_DESC_F_WRITE | VRING_DESC_F_NEXT) as u16,
                 index + 1,
             );
-            next_addr += desc_buf.len() as u64;
+            next_addr += u64::from(desc_buf.len());
 
             mem.write(buf, desc_buf.addr()).unwrap();
             descriptors.push(desc_buf);

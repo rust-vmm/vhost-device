@@ -160,7 +160,7 @@ impl CanController {
 
     pub fn read_can_socket(controller: Arc<RwLock<CanController>>) -> Result<()> {
         let can_name = &controller.read().unwrap().can_name.clone();
-        dbg!("Start reading from {} socket!", &can_name);
+        log::debug!("Start reading from {can_name} socket!");
         let socket = match CanFdSocket::open(can_name) {
             Ok(socket) => socket,
             Err(_) => {
@@ -182,7 +182,7 @@ impl CanController {
         loop {
             // If the status variable is false then break and exit.
             if !controller.read().unwrap().status {
-                dbg!("exit read can thread");
+                log::debug!("exit read can thread");
                 return Ok(());
             }
 

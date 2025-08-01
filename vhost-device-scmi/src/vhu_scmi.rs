@@ -158,7 +158,7 @@ impl VuScmiBackend {
         let eventfd_list = self.scmi_handler.get_device_eventfd_list();
         for (device_notify_fd, device_event) in eventfd_list {
             handlers[0]
-                .register_listener(device_notify_fd, EventSet::IN, device_event as u64)
+                .register_listener(device_notify_fd, EventSet::IN, u64::from(device_event))
                 .unwrap();
         }
     }

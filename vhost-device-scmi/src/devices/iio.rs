@@ -442,7 +442,7 @@ impl SensorT for IIOSensor {
             return Err(ScmiDeviceError::GenericError);
         }
 
-        let sample_byte = (scan_type.realbits as f64 / 8_f64).ceil() as usize;
+        let sample_byte = (f64::from(scan_type.realbits) / 8_f64).ceil() as usize;
         let sample_buffer_len = sample_byte * self.axes.len();
         let mut buffer = vec![0u8; sample_buffer_len];
         let mut file = self.sensor().notify_dev.as_ref().unwrap();
@@ -467,7 +467,7 @@ impl SensorT for IIOSensor {
                         let value =
                             i16::from_le_bytes(buffer[i * 2..i * 2 + 2].try_into().unwrap());
                         let value_i64 = self
-                            .deal_axis_raw_data(value as i64, &self.axes[i])
+                            .deal_axis_raw_data(i64::from(value), &self.axes[i])
                             .unwrap();
                         let sensor_value_low = (value_i64 & 0xffff_ffff) as i32;
                         let sensor_value_high = (value_i64 >> 32) as i32;
@@ -607,10 +607,10 @@ impl IIOSensor {
                 custom_exponent -= 1;
                 // Calculate the resolution of scale
                 custom_resolution =
-                    (scale * 10i32.pow(-custom_exponent as u32) as f64).trunc() as u64;
+                    (scale * f64::from(10i32.pow(-custom_exponent as u32))).trunc() as u64;
             } else {
                 custom_resolution =
-                    (scale / 10i32.pow(custom_exponent as u32) as f64).trunc() as u64;
+                    (scale / f64::from(10i32.pow(custom_exponent as u32))).trunc() as u64;
             }
             // The SCMI exponent (unit_exponent + custom_exponent) can have max. 5 bits:
             custom_exponent = min(15 - unit_exponent, custom_exponent);

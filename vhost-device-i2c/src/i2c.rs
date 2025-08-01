@@ -242,7 +242,8 @@ impl SmbusMsg {
                             // Special Read requests, reqs[0].len can be 0 or 1 only.
                             Err(Error::MessageLengthInvalid("read", 3))
                         } else {
-                            data.word = reqs[0].buf[1] as u16 | ((reqs[0].buf[2] as u16) << 8);
+                            data.word =
+                                u16::from(reqs[0].buf[1]) | (u16::from(reqs[0].buf[2]) << 8);
                             Ok(SmbusMsg {
                                 read_write,
                                 command: reqs[0].buf[0],

@@ -563,26 +563,26 @@ mod tests {
             Error::EmptyBackendRxQ.to_string()
         );
 
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
 
         packet.set_type(VSOCK_TYPE_STREAM);
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
 
         packet.set_src_cid(CID);
         packet.set_dst_cid(VSOCK_HOST_CID);
         packet.set_dst_port(VSOCK_PEER_PORT);
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
 
         packet.set_op(VSOCK_OP_REQUEST);
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
 
         packet.set_op(VSOCK_OP_RW);
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
 
         packet.set_op(VSOCK_OP_RST);
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
 
-        assert!(vtp.recv_pkt(&mut packet).is_ok());
+        vtp.recv_pkt(&mut packet).unwrap();
 
         // TODO: it is a nop for now
         vtp.enq_rst();
@@ -714,7 +714,7 @@ mod tests {
             .unwrap()
             .copy_from(&[0xCAu8, 0xFEu8, 0xBAu8, 0xBEu8]);
 
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
         assert!(sibling_backend.threads[0]
             .lock()
             .unwrap()
@@ -722,7 +722,7 @@ mod tests {
             .pending_raw_pkts());
 
         packet.set_dst_cid(SIBLING2_CID);
-        assert!(vtp.send_pkt(&packet).is_ok());
+        vtp.send_pkt(&packet).unwrap();
         // packet should be discarded since sibling2 is not in the same group
         assert!(!sibling2_backend.threads[0]
             .lock()
@@ -737,12 +737,12 @@ mod tests {
             // SAFETY: Safe as recvd_hdr_raw and recvd_data_raw are guaranteed to be valid.
             unsafe { VsockPacket::new(recvd_hdr_raw, Some(recvd_data_raw)).unwrap() };
 
-        assert!(sibling_backend.threads[0]
+        sibling_backend.threads[0]
             .lock()
             .unwrap()
             .thread_backend
             .recv_raw_pkt(&mut recvd_packet)
-            .is_ok());
+            .unwrap();
 
         assert_eq!(recvd_packet.type_(), VSOCK_TYPE_STREAM);
         assert_eq!(recvd_packet.src_cid(), CID);

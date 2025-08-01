@@ -37,3 +37,6 @@ serde = { version = "1", features = ["derive"] }
 assert_matches = "1.5"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
 tempfile = "3.20.0"
+
+[lints]
+workspace = true

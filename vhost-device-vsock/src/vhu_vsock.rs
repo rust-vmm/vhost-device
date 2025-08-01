@@ -434,7 +434,7 @@ mod tests {
         vrings[1].set_queue_info(0x1100, 0x1200, 0x1300).unwrap();
         vrings[1].set_queue_ready(true);
 
-        assert!(backend.update_memory(mem).is_ok());
+        backend.update_memory(mem).unwrap();
 
         let queues_per_thread = backend.queues_per_thread();
         assert_eq!(queues_per_thread.len(), 1);
@@ -450,16 +450,16 @@ mod tests {
         exit.unwrap().write(1).unwrap();
 
         let ret = backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
+        ret.unwrap();
 
         let ret = backend.handle_event(TX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
+        ret.unwrap();
 
         let ret = backend.handle_event(EVT_QUEUE_EVENT, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
+        ret.unwrap();
 
         let ret = backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
-        assert!(ret.is_ok());
+        ret.unwrap();
     }
 
     #[test]

@@ -42,3 +42,6 @@ vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] 
 [target.'cfg(target_env = "gnu")'.dev-dependencies]
 rand = { version = "0.9.2" }
 rusty-fork = { version = "0.3.0" }
+
+[lints]
+workspace = true

@@ -778,9 +778,9 @@ impl ScmiHandler {
                         // message_type = 0x3 [9:8]
                         // protocol_id=0x15; [17:10]
                         // 0x1 | (0x3<<8) | (0x15<<10)
-                        let notify_header: MessageHeader = (SENSOR_UPDATE as u32)
+                        let notify_header: MessageHeader = u32::from(SENSOR_UPDATE)
                             | ((MessageType::Notification as u32) << 8)
-                            | ((SENSOR_PROTOCOL_ID as u32) << 10);
+                            | (u32::from(SENSOR_PROTOCOL_ID) << 10);
 
                         Some(ScmiResponse::from(
                             notify_header,
@@ -1564,12 +1564,12 @@ mod tests {
         for iteration in 0..2 {
             for sensor_id in 0..2 {
                 let notification = handler.notify(NOTIFY_ALLOW_START_FD + sensor_id).unwrap();
-                let notify_header: MessageHeader = (SENSOR_UPDATE as u32)
+                let notify_header: MessageHeader = u32::from(SENSOR_UPDATE)
                     | ((MessageType::Notification as u32) << 8)
-                    | ((SENSOR_PROTOCOL_ID as u32) << 10);
+                    | (u32::from(SENSOR_PROTOCOL_ID) << 10);
                 let mut result = vec![];
                 result.push(MessageValue::Unsigned(0));
-                result.push(MessageValue::Unsigned(sensor_id as u32));
+                result.push(MessageValue::Unsigned(u32::from(sensor_id)));
                 for i in 0..3 {
                     result.push(MessageValue::Signed(iteration + 100 * i));
                     result.push(MessageValue::Signed(0));

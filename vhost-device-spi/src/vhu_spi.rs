@@ -1423,7 +1423,7 @@ mod tests {
             // reading its content from byte array.
             unsafe {
                 from_raw_parts(
-                    &dummy_config as *const _ as *const _,
+                    (&raw const dummy_config).cast::<u8>(),
                     size_of::<VirtioSpiConfig>(),
                 )
                 .to_vec()

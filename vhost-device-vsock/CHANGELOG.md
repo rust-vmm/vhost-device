@@ -2,17 +2,27 @@
 ## Unreleased
 
 ### Added
-- [#755](https://github.com/rust-vmm/vhost-device/pull/755) Advertise `VhostUserProtocolFeatures::MQ` protocol feature
-- [#698](https://github.com/rust-vmm/vhost-device/pull/698) vsock: add mdoc page
-- [#706](https://github.com/rust-vmm/vhost-device/pull/706) Support proxying using vsock
 
 ### Changed
 
 ### Fixed
-- [#800](https://github.com/rust-vmm/vhost-device/pull/800) Disable EPOLLOUT if triggered while txbuf is empty
-- [#838](https://github.com/rust-vmm/vhost-device/pull/838) Fix handling of data in the tx queue
 
 ### Deprecated
+
+## v0.3.0
+
+### Added
+- [#698](https://github.com/rust-vmm/vhost-device/pull/698) vsock: add mdoc page
+- [#706](https://github.com/rust-vmm/vhost-device/pull/706) Support proxying using vsock
+- [#755](https://github.com/rust-vmm/vhost-device/pull/755) Advertise `VhostUserProtocolFeatures::MQ` protocol feature
+- [#790](https://github.com/rust-vmm/vhost-device/pull/790) vsock/tests: clarify the vsock_loopback requirement
+
+### Changed
+- [#819](https://github.com/rust-vmm/vhost-device/pull/819) vsock: Use PathBuf for socket paths instead of Strings
+
+### Fixed
+- [#800](https://github.com/rust-vmm/vhost-device/pull/800) Disable EPOLLOUT if triggered while txbuf is empty
+- [#838](https://github.com/rust-vmm/vhost-device/pull/838) Fix handling of data in the tx queue
 
 ## v0.2.0
 

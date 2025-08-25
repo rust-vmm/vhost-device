@@ -2,7 +2,7 @@
   "tests": [
     {
       "test_name": "build-gnu",
-      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release",
+      "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 RUSTFLAGS=\"-D warnings\" cargo build --release",
       "platform": [
         "x86_64",
         "aarch64",
@@ -23,7 +23,7 @@
     },
     {
       "test_name": "unittests-gnu",
-      "command": "cargo test --all-features --workspace",
+      "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 cargo test --all-features --workspace",
       "platform": [
         "x86_64",
         "aarch64",
@@ -46,7 +46,7 @@
     },
     {
       "test_name": "unittests-gnu-release",
-      "command": "cargo test --release --all-features --workspace",
+      "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 cargo test --release --all-features --workspace",
       "platform": [
         "x86_64",
         "aarch64",
@@ -69,7 +69,7 @@
     },
     {
       "test_name": "clippy",
-      "command": "cargo clippy --workspace --bins --examples --benches --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
+      "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 cargo clippy --workspace --bins --examples --benches --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
       "platform": [
         "x86_64",
         "aarch64",
@@ -78,7 +78,7 @@
     },
     {
       "test_name": "check-warnings",
-      "command": "RUSTFLAGS=\"-D warnings\" cargo check --all-targets --all-features --workspace",
+      "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 RUSTFLAGS=\"-D warnings\" cargo check --all-targets --all-features --workspace",
       "platform": [
         "x86_64",
         "aarch64",
@@ -87,7 +87,7 @@
     },
     {
       "test_name": "coverage",
-      "command": "pytest $(find . -type f -name \"test_coverage.py\")",
+      "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 pytest $(find . -type f -name \"test_coverage.py\")",
       "docker_plugin": {
         "privileged": true
       },

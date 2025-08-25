@@ -670,7 +670,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
         trace!("transfer_write ctx_id {ctx_id}, resource_id {resource_id}, {transfer:?}");
 
         self.rutabaga
-            .transfer_write(ctx_id, resource_id, transfer)?;
+            .transfer_write(ctx_id, resource_id, transfer, None)?;
         Ok(OkNoData)
     }
 

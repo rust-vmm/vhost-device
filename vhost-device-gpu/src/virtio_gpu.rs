@@ -6,7 +6,7 @@
 use std::{
     collections::BTreeMap,
     io::IoSliceMut,
-    os::fd::FromRawFd,
+    os::fd::{AsFd, FromRawFd, RawFd},
     result::Result,
     sync::{Arc, Mutex},
 };
@@ -14,13 +14,15 @@ use std::{
 use libc::c_void;
 use log::{debug, error, trace, warn};
 use rutabaga_gfx::{
-    ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder, RutabagaComponentType,
-    RutabagaFence, RutabagaFenceHandler, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
+    Resource3DInfo, ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder,
+    RutabagaComponentType, RutabagaFence, RutabagaFenceHandler, RutabagaHandle,
+    RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D, RUTABAGA_HANDLE_TYPE_MEM_DMABUF,
 };
 use vhost::vhost_user::{
     gpu_message::{
-        VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest,
-        VhostUserGpuScanout, VhostUserGpuUpdate,
+        VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuDMABUFScanout,
+        VhostUserGpuDMABUFScanout2, VhostUserGpuEdidRequest, VhostUserGpuScanout,
+        VhostUserGpuUpdate,
     },
     GpuBackend,
 };
@@ -64,7 +66,7 @@ fn sglist_to_rutabaga_iovecs(
     Ok(rutabaga_iovecs)
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Rectangle {
     pub x: u32,
     pub y: u32,
@@ -262,12 +264,14 @@ pub struct FenceState {
 struct AssociatedScanouts(u32);
 
 impl AssociatedScanouts {
-    const fn enable(&mut self, scanout_id: u32) {
+    #[allow(clippy::missing_const_for_fn)]
+    fn enable(&mut self, scanout_id: u32) {
         self.0 |= 1 << scanout_id;
     }
 
-    const fn disable(&mut self, scanout_id: u32) {
-        self.0 ^= 1 << scanout_id;
+    #[allow(clippy::missing_const_for_fn)]
+    fn disable(&mut self, scanout_id: u32) {
+        self.0 &= !(1 << scanout_id);
     }
 
     const fn has_any_enabled(self) -> bool {
@@ -279,7 +283,7 @@ impl AssociatedScanouts {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 pub struct VirtioGpuResource {
     id: u32,
     width: u32,
@@ -288,6 +292,8 @@ pub struct VirtioGpuResource {
     /// resource. Resource could be used for multiple scanouts (the displays
     /// are mirrored).
     scanouts: AssociatedScanouts,
+    pub info_3d: Option<Resource3DInfo>,
+    pub handle: Option<Arc<RutabagaHandle>>,
 }
 
 impl VirtioGpuResource {
@@ -312,6 +318,8 @@ impl VirtioGpuResource {
             width,
             height,
             scanouts: AssociatedScanouts::default(),
+            info_3d: None,
+            handle: None,
         }
     }
 }
@@ -326,6 +334,7 @@ pub struct RutabagaVirtioGpu {
     pub(crate) resources: BTreeMap<u32, VirtioGpuResource>,
     pub(crate) fence_state: Arc<Mutex<FenceState>>,
     pub(crate) scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS as usize],
+    pub(crate) component_type: RutabagaComponentType,
 }
 
 const READ_RESOURCE_BYTES_PER_PIXEL: u32 = 4;
@@ -383,27 +392,33 @@ impl RutabagaVirtioGpu {
         })
     }
 
-    fn configure_rutabaga_builder(gpu_config: &GpuConfig) -> RutabagaBuilder {
+    fn configure_rutabaga_builder(
+        gpu_config: &GpuConfig,
+    ) -> (RutabagaBuilder, RutabagaComponentType) {
         let component = match gpu_config.gpu_mode() {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
             #[cfg(feature = "gfxstream")]
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
 
-        RutabagaBuilder::new(component, gpu_config.capsets().bits())
+        let builder = RutabagaBuilder::new(component, gpu_config.capsets().bits())
             .set_use_egl(gpu_config.flags().use_egl)
             .set_use_glx(gpu_config.flags().use_glx)
             .set_use_gles(gpu_config.flags().use_gles)
             .set_use_surfaceless(gpu_config.flags().use_surfaceless)
             // Since vhost-user-gpu is out-of-process this is the only type of blob resource that
             // could work, so this is always enabled
-            .set_use_external_blob(true)
+            .set_use_external_blob(true);
+
+        (builder, component)
     }
 
     pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
-        let rutabaga = Self::configure_rutabaga_builder(gpu_config)
+        let (builder, component_type) = Self::configure_rutabaga_builder(gpu_config);
+
+        let rutabaga = builder
             .build(fence, None)
             .expect("Rutabaga initialization failed!");
 
@@ -413,6 +428,7 @@ impl RutabagaVirtioGpu {
             resources: BTreeMap::default(),
             fence_state,
             scanouts: Default::default(),
+            component_type,
         }
     }
 
@@ -436,7 +452,7 @@ impl RutabagaVirtioGpu {
 
     fn read_2d_resource(
         &mut self,
-        resource: VirtioGpuResource,
+        resource: &VirtioGpuResource,
         output: &mut [u8],
     ) -> Result<(), String> {
         let minimal_buffer_size = resource.calculate_size()?;
@@ -503,63 +519,199 @@ impl VirtioGpu for RutabagaVirtioGpu {
         resource_id: u32,
         rect: Rectangle,
     ) -> VirtioGpuResult {
-        let scanout = self
-            .scanouts
-            .get_mut(scanout_id as usize)
-            .ok_or(ErrInvalidScanoutId)?;
+        let scanout_idx = scanout_id as usize;
 
-        // If a resource is already associated with this scanout, make sure to disable
-        // this scanout for that resource
-        if let Some(resource_id) = scanout.as_ref().map(|scanout| scanout.resource_id) {
-            let resource = self
-                .resources
-                .get_mut(&resource_id)
-                .ok_or(ErrInvalidResourceId)?;
+        match self.component_type {
+            RutabagaComponentType::VirglRenderer => {
+                // Basic Validation of scanout_id
+                if scanout_idx >= VIRTIO_GPU_MAX_SCANOUTS as usize {
+                    return Err(ErrInvalidScanoutId);
+                }
 
-            resource.scanouts.disable(scanout_id);
-        }
+                // Handle existing scanout to disable it if necessary
+                let current_scanout_resource_id =
+                    self.scanouts[scanout_idx].as_ref().map(|s| s.resource_id);
+                if let Some(old_resource_id) = current_scanout_resource_id {
+                    if old_resource_id != resource_id {
+                        if let Some(old_resource) = self.resources.get_mut(&old_resource_id) {
+                            old_resource.scanouts.disable(scanout_id);
+                        }
+                    }
+                }
 
-        // Virtio spec: "The driver can use resource_id = 0 to disable a scanout."
-        if resource_id == 0 {
-            *scanout = None;
-            debug!("Disabling scanout scanout_id={scanout_id}");
-            self.gpu_backend
-                .set_scanout(&VhostUserGpuScanout {
-                    scanout_id,
-                    width: 0,
-                    height: 0,
-                })
-                .map_err(|e| {
-                    error!("Failed to set_scanout: {e:?}");
+                // Virtio spec: "The driver can use resource_id = 0 to disable a scanout."
+                if resource_id == 0 {
+                    // Update internal state to reflect disabled scanout
+                    self.scanouts[scanout_idx] = None;
+                    debug!("Disabling scanout scanout_id={scanout_id}");
+
+                    // Send VHOST_USER_GPU_DMABUF_SCANOUT message with FD = -1
+                    // QEMU's C code uses DMABUF_SCANOUT (not DMABUF_SCANOUT2) for disable with -1
+                    // FD.
+                    self.gpu_backend
+                        .set_dmabuf_scanout(
+                            &VhostUserGpuDMABUFScanout {
+                                scanout_id,
+                                x: 0,
+                                y: 0,
+                                width: 0,
+                                height: 0,
+                                fd_width: 0,
+                                fd_height: 0,
+                                fd_stride: 0,
+                                fd_flags: 0,
+                                fd_drm_fourcc: 0,
+                            },
+                            None::<&RawFd>, /* Send None for the FD, which translates to -1 in
+                                             * the backend */
+                        )
+                        .map_err(|e| {
+                            error!("Failed to send DMABUF scanout disable message: {e:?}");
+                            ErrUnspec
+                        })?;
+                    return Ok(OkNoData);
+                }
+
+                // --- Handling non-zero resource_id (Enable/Update Scanout) ---
+
+                // Get the resource from your internal map
+                let resource = self
+                    .resources
+                    .get_mut(&resource_id)
+                    .ok_or(ErrInvalidResourceId)?;
+
+                // Extract the DMABUF information (handle and info_3d)
+                let handle = resource.handle.as_ref().ok_or_else(|| {
+                    error!("resource {} has no handle", resource_id);
                     ErrUnspec
                 })?;
-            return Ok(OkNoData);
-        }
 
-        debug!("Enabling scanout scanout_id={scanout_id}, resource_id={resource_id}: {rect:?}");
+                if handle.handle_type != RUTABAGA_HANDLE_TYPE_MEM_DMABUF {
+                    error!(
+                        "resource {} handle is not a DMABUF (got type = {})",
+                        resource_id, handle.handle_type
+                    );
+                    return Err(ErrUnspec);
+                }
 
-        // QEMU doesn't like (it lags) when we call set_scanout while the scanout is
-        // enabled
-        if scanout.is_none() {
-            self.gpu_backend
-                .set_scanout(&VhostUserGpuScanout {
+                // Borrow the 3D info directly; no DmabufTextureInfo wrapper.
+                let info_3d = resource.info_3d.as_ref().ok_or_else(|| {
+                    error!("resource {resource_id} has handle but no info_3d");
+                    ErrUnspec
+                })?;
+
+                // Clone the fd we’ll pass to the backend.
+                let fd = handle.os_handle.try_clone().map_err(|e| {
+                    error!(
+                        "Failed to clone DMABUF FD for resource {}: {:?}",
+                        resource_id, e
+                    );
+                    ErrUnspec
+                })?;
+
+                debug!(
+                    "Exported DMABUF texture info: width={}, height={}, strides={}, fourcc={}, modifier={}",
+                    info_3d.width, info_3d.height, info_3d.strides[0], info_3d.drm_fourcc, info_3d.modifier
+                );
+
+                // Construct VhostUserGpuDMABUFScanout Message
+                let dmabuf_scanout_payload = VhostUserGpuDMABUFScanout {
                     scanout_id,
+                    x: rect.x,
+                    y: rect.y,
                     width: rect.width,
                     height: rect.height,
-                })
-                .map_err(|e| {
-                    error!("Failed to set_scanout: {e:?}");
-                    ErrUnspec
-                })?;
+                    fd_width: info_3d.width,
+                    fd_height: info_3d.height,
+                    fd_stride: info_3d.strides[0],
+                    fd_flags: 0,
+                    fd_drm_fourcc: info_3d.drm_fourcc,
+                };
+
+                // Determine which message type to send based on modifier support
+                let frontend_supports_dmabuf2 = info_3d.modifier != 0;
+
+                if frontend_supports_dmabuf2 {
+                    let dmabuf_scanout2_msg = VhostUserGpuDMABUFScanout2 {
+                        dmabuf_scanout: dmabuf_scanout_payload,
+                        modifier: info_3d.modifier,
+                    };
+                    self.gpu_backend
+                        .set_dmabuf_scanout2(&dmabuf_scanout2_msg, Some(&fd.as_fd()))
+                        .map_err(|e| {
+                            error!("Failed to send VHOST_USER_GPU_DMABUF_SCANOUT2: {e:?}");
+                            ErrUnspec
+                        })?;
+                } else {
+                    // Fallback to DMABUF_SCANOUT if DMABUF2 isn't supported or modifier is 0
+                    self.gpu_backend
+                        .set_dmabuf_scanout(&dmabuf_scanout_payload, Some(&fd.as_fd()))
+                        .map_err(|e| {
+                            error!("Failed to send VHOST_USER_GPU_DMABUF_SCANOUT: {e:?}");
+                            ErrUnspec
+                        })?;
+                }
+
+                debug!(
+                    "Sent DMABUF scanout for resource {} using fd {:?}",
+                    resource_id,
+                    fd.as_fd()
+                );
+
+                // Update internal state to associate resource with scanout
+                resource.scanouts.enable(scanout_id);
+                self.scanouts[scanout_idx] = Some(VirtioGpuScanout { resource_id });
+            }
+
+            #[cfg(feature = "gfxstream")]
+            RutabagaComponentType::Gfxstream => {
+                if resource_id == 0 {
+                    self.scanouts[scanout_idx] = None;
+                    debug!("Disabling scanout scanout_id={scanout_id}");
+
+                    self.gpu_backend
+                        .set_scanout(&VhostUserGpuScanout {
+                            scanout_id,
+                            width: 0,
+                            height: 0,
+                        })
+                        .map_err(|e| {
+                            error!("Failed to disable scanout: {e:?}");
+                            ErrUnspec
+                        })?;
+
+                    return Ok(OkNoData);
+                }
+
+                let resource = self
+                    .resources
+                    .get_mut(&resource_id)
+                    .ok_or(ErrInvalidResourceId)?;
+
+                debug!(
+                    "Enabling legacy scanout scanout_id={scanout_id}, resource_id={resource_id}: {rect:?}"
+                );
+
+                self.gpu_backend
+                    .set_scanout(&VhostUserGpuScanout {
+                        scanout_id,
+                        width: rect.width,
+                        height: rect.height,
+                    })
+                    .map_err(|e| {
+                        error!("Failed to legacy set_scanout: {e:?}");
+                        ErrUnspec
+                    })?;
+
+                resource.scanouts.enable(scanout_id);
+                self.scanouts[scanout_idx] = Some(VirtioGpuScanout { resource_id });
+            }
+
+            _ => {
+                error!("Unsupported backend type");
+                return Err(ErrUnspec);
+            }
         }
-
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-
-        resource.scanouts.enable(scanout_id);
-        *scanout = Some(VirtioGpuScanout { resource_id });
         Ok(OkNoData)
     }
 
@@ -571,11 +723,34 @@ impl VirtioGpu for RutabagaVirtioGpu {
         self.rutabaga
             .resource_create_3d(resource_id, resource_create_3d)?;
 
-        let resource = VirtioGpuResource::new(
-            resource_id,
-            resource_create_3d.width,
-            resource_create_3d.height,
-        );
+        // Try to export a handle for this resource.
+        let handle_opt: Option<Arc<RutabagaHandle>> =
+            self.rutabaga.export_blob(resource_id).map(Arc::new).ok();
+
+        // Only trust query() when we have a DMABUF handle.
+        let info_3d_opt: Option<Resource3DInfo> = if let Some(h) = handle_opt.as_ref() {
+            if h.handle_type == RUTABAGA_HANDLE_TYPE_MEM_DMABUF {
+                self.rutabaga.query(resource_id).ok()
+            } else {
+                log::warn!(
+                    "export_blob for resource {} returned non-DMABUF handle type: {:?}",
+                    resource_id,
+                    h.handle_type
+                );
+                None
+            }
+        } else {
+            None
+        };
+
+        let resource = VirtioGpuResource {
+            id: resource_id,
+            width: resource_create_3d.width,
+            height: resource_create_3d.height,
+            scanouts: AssociatedScanouts::default(),
+            info_3d: info_3d_opt,
+            handle: handle_opt,
+        };
 
         debug_assert!(
             !self.resources.contains_key(&resource_id),
@@ -613,49 +788,77 @@ impl VirtioGpu for RutabagaVirtioGpu {
             return Ok(OkNoData);
         }
 
-        let resource = *self
+        let resource = self
             .resources
             .get(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
+            .ok_or(ErrInvalidResourceId)?
+            .clone();
 
         for scanout_id in resource.scanouts.iter_enabled() {
-            let resource_size = resource.calculate_size().map_err(|e| {
-                error!(
-                    "Resource {id} size calculation failed: {e}",
-                    id = resource.id
-                );
-                ErrUnspec
-            })?;
+            match self.component_type {
+                RutabagaComponentType::VirglRenderer => {
+                    // For VirglRenderer, use update_dmabuf_scanout
+                    self.gpu_backend
+                        .update_dmabuf_scanout(&VhostUserGpuUpdate {
+                            scanout_id,
+                            x: 0,
+                            y: 0,
+                            width: resource.width,
+                            height: resource.height,
+                        })
+                        .map_err(|e| {
+                            error!("Failed to update_dmabuf_scanout: {e:?}");
+                            ErrUnspec
+                        })?;
+                }
 
-            let mut data = vec![0; resource_size];
+                #[cfg(feature = "gfxstream")]
+                RutabagaComponentType::Gfxstream => {
+                    // Gfxstream expects image memory transfer (read + send)
+                    let resource_size = resource.calculate_size().map_err(|e| {
+                        error!("Invalid resource size for flushing: {e:?}");
+                        ErrUnspec
+                    })?;
 
-            // Gfxstream doesn't support transfer_read for portion of the resource. So we
-            // always read the whole resource, even if the guest specified to
-            // flush only a portion of it.
-            //
-            // The function stream_renderer_transfer_read_iov seems to ignore the stride and
-            // transfer_box parameters and expects the provided buffer to fit the whole
-            // resource.
-            if let Err(e) = self.read_2d_resource(resource, &mut data) {
-                log::error!("Failed to read resource {resource_id} for scanout {scanout_id}: {e}");
-                continue;
+                    let mut data = vec![0; resource_size];
+
+                    // Gfxstream doesn't support transfer_read for portion of the resource. So we
+                    // always read the whole resource, even if the guest specified to
+                    // flush only a portion of it.
+                    //
+                    // The function stream_renderer_transfer_read_iov seems to ignore the stride and
+                    // transfer_box parameters and expects the provided buffer to fit the whole
+                    // resource.
+                    if let Err(e) = self.read_2d_resource(&resource, &mut data) {
+                        error!(
+                            "Failed to read resource {} for scanout {}: {}",
+                            resource_id, scanout_id, e
+                        );
+                        continue;
+                    }
+
+                    self.gpu_backend
+                        .update_scanout(
+                            &VhostUserGpuUpdate {
+                                scanout_id,
+                                x: 0,
+                                y: 0,
+                                width: resource.width,
+                                height: resource.height,
+                            },
+                            &data,
+                        )
+                        .map_err(|e| {
+                            error!("Failed to update_scanout: {e:?}");
+                            ErrUnspec
+                        })?;
+                }
+
+                _ => {
+                    error!("flush_resource: unsupported component_type");
+                    return Err(ErrUnspec);
+                }
             }
-
-            self.gpu_backend
-                .update_scanout(
-                    &VhostUserGpuUpdate {
-                        scanout_id,
-                        x: 0,
-                        y: 0,
-                        width: resource.width,
-                        height: resource.height,
-                    },
-                    &data,
-                )
-                .map_err(|e| {
-                    error!("Failed to update_scanout: {e:?}");
-                    ErrUnspec
-                })?;
         }
 
         Ok(OkNoData)
@@ -670,7 +873,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
         trace!("transfer_write ctx_id {ctx_id}, resource_id {resource_id}, {transfer:?}");
 
         self.rutabaga
-            .transfer_write(ctx_id, resource_id, transfer)?;
+            .transfer_write(ctx_id, resource_id, transfer, None)?;
         Ok(OkNoData)
     }
 
@@ -734,7 +937,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
             return Err(ErrInvalidParameter);
         }
 
-        self.read_2d_resource(*cursor_resource, &mut data[..])
+        self.read_2d_resource(&cursor_resource.clone(), &mut data[..])
             .map_err(|e| {
                 error!("Failed to read resource of cursor: {e}");
                 ErrUnspec
@@ -939,14 +1142,24 @@ mod tests {
         GpuBackend::from_stream(backend)
     }
 
-    fn new_gpu() -> RutabagaVirtioGpu {
-        let config = GpuConfig::new(
-            GpuMode::VirglRenderer,
-            Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
-            GpuFlags::default(),
-        )
-        .unwrap();
-        let builder = RutabagaVirtioGpu::configure_rutabaga_builder(&config);
+    fn new_gpu(component_type: RutabagaComponentType) -> RutabagaVirtioGpu {
+        let (gpu_mode, capsets) = match component_type {
+            RutabagaComponentType::VirglRenderer => (
+                GpuMode::VirglRenderer,
+                Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
+            ),
+            #[cfg(feature = "gfxstream")]
+            RutabagaComponentType::Gfxstream => (
+                GpuMode::Gfxstream,
+                Some(GpuCapset::GFXSTREAM_GLES),
+            ),
+            _ => panic!("Unsupported component type for test"),
+        };
+
+        let config = GpuConfig::new(gpu_mode, capsets, GpuFlags::default()).unwrap();
+
+        let (builder, actual_component_type) =
+            RutabagaVirtioGpu::configure_rutabaga_builder(&config);
         let rutabaga = builder.build(RutabagaHandler::new(|_| {}), None).unwrap();
         RutabagaVirtioGpu {
             rutabaga,
@@ -954,6 +1167,7 @@ mod tests {
             resources: BTreeMap::default(),
             fence_state: Arc::new(Mutex::new(FenceState::default())),
             scanouts: Default::default(),
+            component_type: actual_component_type,
         }
     }
 
@@ -997,7 +1211,7 @@ mod tests {
     rusty_fork_test! {
         #[test]
         fn test_update_cursor_fails() {
-            let mut virtio_gpu = new_gpu();
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
 
             let cursor_pos = VhostUserGpuCursorPos {
                 scanout_id: 1,
@@ -1031,7 +1245,7 @@ mod tests {
 
         #[test]
         fn test_move_cursor_fails() {
-            let mut virtio_gpu = new_gpu();
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
             let cursor_pos = VhostUserGpuCursorPos {
                 scanout_id: 1,
                 x: 123,
@@ -1049,7 +1263,7 @@ mod tests {
 
         #[test]
         fn test_process_fence() {
-            let mut virtio_gpu = new_gpu();
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
             let fence = RutabagaFence {
                 flags: 0,
                 fence_id: 0,
@@ -1074,13 +1288,13 @@ mod tests {
 
         #[test]
         fn test_event_poll() {
-            let virtio_gpu = new_gpu();
+            let virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
             virtio_gpu.event_poll();
         }
 
         #[test]
         fn test_create_and_unref_resources() {
-            let mut virtio_gpu = new_gpu();
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
 
             // No resources exists, cannot unref anything:
             assert!(virtio_gpu.resources.is_empty());
@@ -1099,8 +1313,110 @@ mod tests {
         }
 
         #[test]
+        fn test_set_scanout_validation() {
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
+
+            // Invalid scanout ID (larger than max)
+            let rect = Rectangle { x: 0, y: 0, width: 640, height: 480 };
+            let result = virtio_gpu.set_scanout(VIRTIO_GPU_MAX_SCANOUTS + 1, 1, rect.clone());
+            assert_matches!(result, Err(ErrInvalidScanoutId));
+
+            // Disabling scanout with resource_id = 0 (no resource needed)
+            let result = virtio_gpu.set_scanout(0, 0, rect.clone());
+            // Fails because backend connection is a dummy, but still exercises disable path
+            assert_matches!(result, Err(ErrUnspec));
+
+            // Enabling scanout with non-existent resource
+            let result = virtio_gpu.set_scanout(0, 123, rect.clone());
+            assert_matches!(result, Err(ErrInvalidResourceId));
+
+            // Create a valid resource, but it will be missing handle/info_3d
+            virtio_gpu.resource_create_3d(1, CREATE_RESOURCE_2D_720P).unwrap();
+
+            // Try to set scanout with a resource that has no exported DMABUF handle
+            let result = virtio_gpu.set_scanout(0, 1, rect.clone());
+            assert_matches!(result, Err(ErrUnspec));
+        }
+
+        #[cfg(feature = "gfxstream")]
+        #[test]
+        fn test_set_scanout_with_gfxstream_backend() {
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::Gfxstream);
+            let rect = Rectangle { x: 0, y: 0, width: 1280, height: 720 };
+
+            // Create a simple valid resource (no DMABUF needed for gfxstream)
+            let mut res = VirtioGpuResource::new(1, 1280, 720);
+            res.info_3d = Some(Resource3DInfo {
+                width: 1280,
+                height: 720,
+                strides: [5120, 0, 0, 0],
+                offsets: [0, 0, 0, 0],
+                drm_fourcc: 0x34325241,
+                modifier: 0,
+                guest_cpu_mappable: true,
+            });
+            let result = virtio_gpu.set_scanout(VIRTIO_GPU_MAX_SCANOUTS + 1, 1, rect.clone());
+            assert_matches!(result, Err(ErrInvalidResourceId));
+
+            // Disabling scanout with resource_id = 0 (no resource needed)
+            let result = virtio_gpu.set_scanout(0, 0, rect.clone());
+            // Fails because backend connection is a dummy, but still exercises disable path
+            assert_matches!(result, Err(ErrUnspec));
+
+            // Enabling scanout with non-existent resource
+            let result = virtio_gpu.set_scanout(0, 123, rect.clone());
+            assert_matches!(result, Err(ErrInvalidResourceId));
+            virtio_gpu.resources.insert(1, res);
+
+            // Try to set scanout with a resource that has no exported DMABUF handle
+            let result = virtio_gpu.set_scanout(0, 1, rect.clone());
+            assert_matches!(result, Err(ErrUnspec));
+
+            // Resource 1 should have scanout 0 disabled
+            assert!(((virtio_gpu.resources.get(&1).unwrap().scanouts.0 >> 0) & 1) == 0);
+        }
+
+        #[test]
+        fn test_set_scanout_switches_resource_and_disables_old() {
+            let mut gpu = new_gpu(RutabagaComponentType::VirglRenderer);
+            let rect = Rectangle { x: 0, y: 0, width: 64, height: 64 };
+
+            // Helper: create a resource with dummy DMABUF + info_3d
+            fn make_resource(id: u32) -> VirtioGpuResource {
+                let file = tempfile::tempfile().unwrap();
+                let raw_fd = file.as_fd().try_clone_to_owned().unwrap();
+                let handle = Arc::new(RutabagaHandle {
+                    os_handle: raw_fd.into(),
+                    handle_type: RUTABAGA_HANDLE_TYPE_MEM_DMABUF,
+                });
+                let mut res = VirtioGpuResource::new(id, 64, 64);
+                res.handle = Some(handle);
+                res.info_3d = Some(Resource3DInfo {
+                    width: 64,
+                    height: 64,
+                    strides: [256, 0, 0, 0],
+                    offsets: [0, 0, 0, 0],
+                    drm_fourcc: 0x34325241, // 'AR24'
+                    modifier: 0,
+                    guest_cpu_mappable: false,
+                });
+                res
+            }
+
+            // Insert resources
+            gpu.resources.insert(1, make_resource(1));
+
+            // First bind scanout 0 -> resource 1
+            let _ = gpu.set_scanout(0, 1, rect.clone());
+
+            // Resource 1 should have scanout 0 disabled
+            assert!(((gpu.resources.get(&1).unwrap().scanouts.0 >> 0) & 1) == 0);
+
+        }
+
+        #[test]
         fn test_gpu_capset() {
-            let virtio_gpu = new_gpu();
+            let virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
 
             let capset_info = virtio_gpu.get_capset_info(0);
             assert_matches!(capset_info, Ok(OkCapsetInfo { .. }));
@@ -1115,7 +1431,7 @@ mod tests {
 
         #[test]
         fn test_gpu_submit_command_fails() {
-            let mut virtio_gpu = new_gpu();
+            let mut virtio_gpu = new_gpu(RutabagaComponentType::VirglRenderer);
             let mut cmd_buf = [0; 10];
             let fence_ids: Vec<u64> = Vec::with_capacity(0);
             virtio_gpu

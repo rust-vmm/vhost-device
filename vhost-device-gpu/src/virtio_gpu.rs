@@ -262,12 +262,14 @@ pub struct FenceState {
 struct AssociatedScanouts(u32);
 
 impl AssociatedScanouts {
-    const fn enable(&mut self, scanout_id: u32) {
+    #[allow(clippy::missing_const_for_fn)]
+    fn enable(&mut self, scanout_id: u32) {
         self.0 |= 1 << scanout_id;
     }
 
-    const fn disable(&mut self, scanout_id: u32) {
-        self.0 ^= 1 << scanout_id;
+    #[allow(clippy::missing_const_for_fn)]
+    fn disable(&mut self, scanout_id: u32) {
+        self.0 &= !(1 << scanout_id);
     }
 
     const fn has_any_enabled(self) -> bool {

@@ -18,7 +18,7 @@ xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 byteorder = "1"
 clap = { version = "4.5",  features = ["derive"] }
 env_logger = "0.11"
-epoll = "4.3.2"
+epoll = "4.4.0"
 log = "0.4"
 thiserror = "2.0"
 vhost = { version = "0.14", features = ["vhost-user-backend"] }
@@ -30,13 +30,13 @@ vm-memory = "0.16.1"
 vmm-sys-util = "0.14"
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.0", optional = true }
-libc = { version = "0.2.174", optional = true }
+libc = { version = "0.2.175", optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 assert_matches = "1.5"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
-tempfile = "3.20.0"
+tempfile = "3.21.0"
 
 [lints]
 workspace = true

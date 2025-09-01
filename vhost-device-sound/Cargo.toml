@@ -30,12 +30,12 @@ vmm-sys-util = "0.14"
 
 # Make alsa and pipewire backends available only on gnu
 [target.'cfg(target_env = "gnu")'.dependencies]
-alsa = { version = "0.9", optional = true }
+alsa = { version = "0.10", optional = true }
 pw = { package = "pipewire", version = "0.8", optional = true }
 
 [dev-dependencies]
 rstest = "0.26.1"
-tempfile = "3.20"
+tempfile = "3.21"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }
 

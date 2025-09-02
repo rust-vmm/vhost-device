@@ -1505,7 +1505,7 @@ mod tests {
 
             backend.set_gpu_socket(gpu_backend).unwrap();
 
-            // Unfortunately there is no way to crate a VringEpollHandler directly (the ::new is not public)
+            // Unfortunately, there is no way to create a VringEpollHandler directly (the ::new is not public)
             // So we create a daemon to create the epoll handler for us here
             let daemon = VhostUserDaemon::new(
                 "vhost-device-gpu-backend".to_string(),

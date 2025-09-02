@@ -3,15 +3,21 @@
 
 ### Added
 
-- [[#798]](https://github.com/rust-vmm/vhost-device/pull/798) scmi: extended sensor attributes support
-
 ### Changed
 
 ### Fixed
 
-- [[#798]](https://github.com/rust-vmm/vhost-device/pull/798) Fix the wrong value number of remaining sensor axis descriptor.
-
 ### Deprecated
+
+## v0.4.0
+
+### Added
+
+- [[#798]](https://github.com/rust-vmm/vhost-device/pull/798) scmi: extended sensor attributes support
+
+### Fixed
+
+- [[#798]](https://github.com/rust-vmm/vhost-device/pull/798) Fix the wrong value number of remaining sensor axis descriptor.
 
 ## v0.3.0
 

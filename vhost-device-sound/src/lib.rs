@@ -19,6 +19,7 @@ use std::{convert::TryFrom, io::Error as IoError, mem::size_of, path::PathBuf, s
 pub use args::BackendType;
 pub use stream::Stream;
 use thiserror::Error as ThisError;
+use vhost::vhost_user::Listener;
 use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
 use virtio_sound::*;
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32};
@@ -314,13 +315,28 @@ pub fn start_backend_server(config: SoundConfig) {
 
     let mut daemon = VhostUserDaemon::new(
         String::from("vhost-device-sound"),
-        backend,
+        Arc::clone(&backend),
         GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )
     .unwrap();
 
     log::trace!("Starting daemon.");
-    daemon.serve(socket).unwrap();
+
+    let mut listener = Listener::new(socket, true).unwrap();
+
+    daemon.start(&mut listener).unwrap();
+    let result = daemon.wait();
+
+    backend.send_exit_event();
+
+    if !matches!(
+        result,
+        Err(vhost_user_backend::Error::HandleRequest(
+            vhost::vhost_user::Error::Disconnected | vhost::vhost_user::Error::PartialMessage
+        ))
+    ) {
+        result.unwrap();
+    }
 }
 
 #[cfg(test)]

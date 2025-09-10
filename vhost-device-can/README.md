@@ -12,28 +12,27 @@ This program is tested with QEMU's `vhost-user-device-pci` device.
 Examples' section below.
 
 ## Synopsis
+
 ```
-**vhost-device-can** [*OPTIONS*]
-````
+vhost-device-can [OPTIONS] --socket-path <SOCKET> --can-devices <CAN_DEVICES>
+```
 
 ## Options
-
-.. program:: vhost-device-can
-
-.. option:: -h, --help
+```text
+ -h, --help
 
   Print help.
 
-.. option:: -s, --socket-path=PATH
+ -s, --socket-path=PATH
 
   Location of vhost-user Unix domain sockets, this path will be suffixed with
   0,1,2..socket_count-1.
 
-.. option:: -c, --socket-count=INT
+ -c, --socket-count=INT
 
   Number of guests (sockets) to attach to, default set to 1.
 
-.. option:: -d, --can-devices='CAN/FD interfaces'
+ -d, --can-devices='CAN/FD interfaces'
 
   CAN/FD device list at the host OS in the format:
       <can-_X_0> [<can_in_X_1>] ... [<can_in_X_N-1>]
@@ -42,6 +41,7 @@ Examples' section below.
           provided via *socket_count* parameter.
 
       Example: --can-devices "can0 can1 can2"
+```
 
 ## Features
 This device is still work-in-progress (WIP) and on [virtio-spec v1.4](https://github.com/oasis-tcs/virtio-spec/blob/virtio-1.4/device-types/can/) is based

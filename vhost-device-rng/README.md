@@ -19,37 +19,40 @@ machine managers.  Please see below for working examples.
 
 ## Synopsis
 
-**vhost-device-rng** [*OPTIONS*]
+```shell
+vhost-device-rng [OPTIONS] --socket-path <SOCKET>
+```
 
 ## Options
+```text
+ vhost-device-rng
 
-.. program:: vhost-device-rng
-
-.. option:: -h, --help
+ -h, --help
 
   Print help.
 
-.. option:: -s, --socket-path=PATH
+ -s, --socket-path=PATH
 
   Location of vhost-user Unix domain sockets, this path will be suffixed with
   0,1,2..socket_count-1.
 
-.. option:: -f, --filename
+ -f, --filename
   Random number generator source file, defaults to /dev/urandom.
 
-.. option:: -c, --socket-count=INT
+ -c, --socket-count=INT
 
   Number of guests (sockets) to attach to, default set to 1.
 
-.. option:: -p, --period
+ -p, --period
 
   Rate, in milliseconds, at which the RNG hardware can generate random data.
   Used in conjunction with the --max-bytes option.
 
-.. option:: -m, --max-bytes
+ -m, --max-bytes
 
   In conjunction with the --period parameter, provides the maximum number of byte
   per milliseconds a RNG device can generate.
+```
 
 ## Examples
 

@@ -1099,10 +1099,12 @@ impl VirtioGpu for RutabagaVirtioGpu {
 #[cfg(test)]
 mod tests {
     use std::{
-        env::set_var,
         os::unix::net::UnixStream,
         sync::{Arc, Mutex},
     };
+
+    #[cfg(feature = "gfxstream")]
+    use std::env::set_var;
 
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;

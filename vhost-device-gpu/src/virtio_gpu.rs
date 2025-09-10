@@ -18,11 +18,12 @@ use rutabaga_gfx::{
     RutabagaComponentType, RutabagaFence, RutabagaFenceHandler, RutabagaHandle,
     RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D, RUTABAGA_HANDLE_TYPE_MEM_DMABUF,
 };
+#[cfg(feature = "gfxstream")]
+use vhost::vhost_user::gpu_message::VhostUserGpuScanout;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuDMABUFScanout,
-        VhostUserGpuDMABUFScanout2, VhostUserGpuEdidRequest, VhostUserGpuScanout,
-        VhostUserGpuUpdate,
+        VhostUserGpuDMABUFScanout2, VhostUserGpuEdidRequest, VhostUserGpuUpdate,
     },
     GpuBackend,
 };

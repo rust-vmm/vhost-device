@@ -325,7 +325,7 @@ impl VsockArgs {
 
                         #[cfg(not(feature = "backend_vsock"))]
                         let backend_info = match p.uds_path {
-                            Some(path) => BackendType::UnixDomainSocket(path.trim().to_string()),
+                            Some(path) => BackendType::UnixDomainSocket(path),
                             _ => return Some(Err(CliError::ConfigParse)),
                         };
 
@@ -384,7 +384,7 @@ impl TryFrom<VsockArgs> for Vec<VsockConfig> {
 
                     #[cfg(not(feature = "backend_vsock"))]
                     let backend_info = match p.uds_path {
-                        Some(path) => BackendType::UnixDomainSocket(path.trim().to_string()),
+                        Some(path) => BackendType::UnixDomainSocket(path),
                         _ => return Err(CliError::ConfigParse),
                     };
 
@@ -1111,7 +1111,7 @@ mod tests {
         assert_matches!(error, CliError::NoArgsProvided);
         assert_eq!(format!("{error:?}"), "NoArgsProvided");
 
-        let args = VsockArgs::from_args_unix(0, "", "", 0, 0, "");
+        let args = VsockArgs::from_args_unix(0, &PathBuf::new(), &PathBuf::new(), 0, 0, "");
         assert_eq!(format!("{args:?}"), "VsockArgs { param: Some(VsockParam { guest_cid: 0, socket: \"\", uds_path: Some(\"\"), tx_buffer_size: 0, queue_size: 0, groups: \"\" }), vm: None, config: None }");
 
         let param = args.param.unwrap().clone();
@@ -1119,8 +1119,8 @@ mod tests {
 
         let config = ConfigFileVsockParam {
             guest_cid: None,
-            socket: String::new(),
-            uds_path: Some(String::new()),
+            socket: PathBuf::new(),
+            uds_path: Some(PathBuf::new()),
             tx_buffer_size: None,
             queue_size: None,
             groups: None,

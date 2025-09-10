@@ -256,11 +256,8 @@ pub fn start_backend(socket_path: &Path, config: GpuConfig) -> Result<(), StartE
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    #[cfg(feature = "gfxstream")]
     use assert_matches::assert_matches;
-    use clap::ValueEnum;
+    use std::path::Path;
 
     use super::*;
 

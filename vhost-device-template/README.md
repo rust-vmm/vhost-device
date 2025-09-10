@@ -6,28 +6,32 @@ backend.
 
 ## Synopsis
 
-**vhost-device-template** [*OPTIONS*]
+```console
+vhost-device-template [OPTIONS]
+```
 
 ## Options
 
-.. program:: vhost-device-template
+```text
+ vhost-device-template
 
-.. option:: -h, --help
+ -h, --help
 
   Print help.
 
-.. option:: -s, --socket-path=PATH
+ -s, --socket-path=PATH
 
   Location of vhost-user Unix domain socket. This supports a single socket /
   guest.
+```
 
 ## Examples
 
 The daemon should be started first:
 
-::
-
+```console
   host# vhost-device-template --socket-path=vfoo.sock
+```
 
 ## License
 

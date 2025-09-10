@@ -43,7 +43,7 @@ vhost-device-spi [OPTIONS]
 For testing the device the required dependencies are:
 - Linux:
     - Integrate *virtio-spi* driver:
-        - https://lwn.net/Articles/966715/
+        - [[PATCH v9 0/3] Virtio SPI Linux driver](https://lore.kernel.org/all/20250828093451.2401448-1-quic_haixcui@quicinc.com/)
     - Set `CONFIG_SPI_VIRTIO=y`
 - QEMU:
     - Integrate vhost-user-spi QEMU device:

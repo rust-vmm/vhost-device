@@ -52,16 +52,13 @@ For testing the device the required dependencies are:
 ### Test the device
 First start the daemon on the host machine::
 
-````suggestion
 ```console
 vhost-device-spi --socket-path=vspi.sock --socket-count=1 --device "/dev/spidev0.0"
 ```
-````
 
 The QEMU invocation needs to create a chardev socket the device spi
 use to communicate as well as share the guests memory over a memfd.
 
-````suggestion
 ```console
 qemu-system-aarch64 -m 1G \
     -chardev socket,path=/home/root/vspi.sock0,id=vspi \
@@ -70,7 +67,6 @@ qemu-system-aarch64 -m 1G \
     -numa node,memdev=mem \
     ...
 ```
-````
 
 ## License
 

@@ -12,26 +12,29 @@ Examples section below.
 
 ## Synopsis
 
-**vhost-device-gpio** [*OPTIONS*]
+```shell
+vhost-device-gpio [OPTIONS] --socket-path <SOCKET_PATH> --device-list <DEVICE_LIST>
+```
 
 ## Options
 
-.. program:: vhost-device-gpio
+```text
+ vhost-device-gpio
 
-.. option:: -h, --help
+ -h, --help
 
   Print help.
 
-.. option:: -s, --socket-path=PATH
+ -s, --socket-path=PATH
 
   Location of vhost-user Unix domain sockets, this path will be suffixed with
   0,1,2..socket_count-1.
 
-.. option:: -c, --socket-count=INT
+ -c, --socket-count=INT
 
   Number of guests (sockets) to attach to, default set to 1.
 
-.. option:: -l, --device-list=GPIO-DEVICES
+ -l, --device-list=GPIO-DEVICES
 
   GPIO device list at the host OS in the format:
       <device1>[:<device2>]
@@ -42,6 +45,7 @@ Examples section below.
   number of devices in the device-list must match the number of sockets in the
   --socket-count. For example, the GPIO device 0 will be allocated to the guest
   with "<socket-path>0" path.
+```
 
 ## MockGpioDevice support
 

@@ -32,6 +32,15 @@
       ]
     },
     {
+      "test_name": "staging: unittests-gnu-no-defaults",
+      "command": "cd staging && cargo test --no-default-features --workspace",
+      "soft_fail": "true",
+      "platform": [
+        "x86_64",
+        "aarch64"
+      ]
+    },
+    {
       "test_name": "staging: unittests-musl",
       "command": "cd staging && cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl",
       "soft_fail": "true",

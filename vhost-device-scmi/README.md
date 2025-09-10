@@ -10,21 +10,24 @@ the Examples section below.
 
 ## Synopsis
 
-**vhost-device-scmi** [*OPTIONS*]
+```console
+vhost-device-scmi [OPTIONS] --socket-path <SOCKET_PATH>
+```
 
 ## Options
 
-.. program:: vhost-device-scmi
+```text
+ vhost-device-scmi
 
-.. option:: -h, --help
+ -h, --help
 
   Print help.
 
-.. option:: -s, --socket-path=PATH
+ -s, --socket-path=PATH
 
   Location of the vhost-user Unix domain sockets.
 
-.. option:: -d, --device=SPEC
+ -d, --device=SPEC
 
   SCMI device specification in the format `ID,PROPERTY=VALUE,...`.  
   For example: `-d iio,path=/sys/bus/iio/devices/iio:device0,channel=in_accel`.  
@@ -32,6 +35,7 @@ the Examples section below.
   If no device is specified then no device will be provided to the
   guest OS but VirtIO SCMI will be still available there.
   Use `--help-devices` to list help on all the available devices.
+```
 
 You can set `RUST_LOG` environment variable to `debug` to get maximum
 messages on the standard error output.

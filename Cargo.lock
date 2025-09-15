@@ -247,12 +247,6 @@ checksum = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9"
 
 [[package]]
 name = "cfg_aliases"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
-
-[[package]]
-name = "cfg_aliases"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
@@ -376,7 +370,7 @@ dependencies = [
  "document-features",
  "mio",
  "parking_lot",
- "rustix 1.0.3",
+ "rustix 1.1.2",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -505,7 +499,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -874,9 +868,9 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.9.3"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe7db12097d22ec582439daf8618b8fdd1a7bef6270e9af3b1ebcd30893cf413"
+checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
 name = "litrs"
@@ -922,6 +916,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mesa3d_util"
+version = "0.1.73"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad6e3627f79c204d829628a8fdf46ea3e5368cd22e8c9d824acdc5c885d84813"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "log",
+ "remain",
+ "rustix 1.1.2",
+ "thiserror 1.0.69",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1012,26 +1021,13 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
-dependencies = [
- "bitflags 2.9.3",
- "cfg-if",
- "cfg_aliases 0.1.1",
- "libc",
- "memoffset",
-]
-
-[[package]]
-name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
  "bitflags 2.9.3",
  "cfg-if",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
  "libc",
  "memoffset",
 ]
@@ -1044,7 +1040,7 @@ checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
  "bitflags 2.9.3",
  "cfg-if",
- "cfg_aliases 0.2.1",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -1173,7 +1169,7 @@ version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
- "zerocopy 0.8.25",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1397,20 +1393,20 @@ dependencies = [
  "errno 0.3.10",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "rustix"
-version = "1.0.3"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e56a18552996ac8d29ecc3b190b4fdbb2d91ca4ec396de7bbffaf43f3d637e96"
+checksum = "cd15f8a2c5551a84d56efdc1cd049089e409ac19a3072d5037a17fd70719ff3e"
 dependencies = [
  "bitflags 2.9.3",
  "errno 0.3.10",
  "libc",
- "linux-raw-sys 0.9.3",
- "windows-sys 0.52.0",
+ "linux-raw-sys 0.11.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1433,22 +1429,21 @@ dependencies = [
 
 [[package]]
 name = "rutabaga_gfx"
-version = "0.1.5"
+version = "0.1.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2acd02427a8910f1913170f0452fd8367ba4f530fa3c479bf247b7c988934dd6"
+checksum = "597a202409cb82262eb714af51ab49fccc5bb7b2f3b87f7e1610d609b0a3c2e1"
 dependencies = [
  "anyhow",
  "cfg-if",
  "libc",
  "log",
- "nix 0.28.0",
+ "mesa3d_util",
  "pkg-config",
  "remain",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "winapi",
- "zerocopy 0.7.35",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1704,7 +1699,7 @@ dependencies = [
  "fastrand",
  "getrandom",
  "once_cell",
- "rustix 1.0.3",
+ "rustix 1.1.2",
  "windows-sys 0.60.2",
 ]
 
@@ -1927,7 +1922,7 @@ dependencies = [
  "libc",
  "uuid",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.14.0",
 ]
 
 [[package]]
@@ -1946,7 +1941,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -1967,7 +1962,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -1986,7 +1981,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2009,7 +2004,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2027,7 +2022,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2050,7 +2045,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2071,7 +2066,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2089,7 +2084,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2109,7 +2104,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2131,7 +2126,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2150,7 +2145,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2168,7 +2163,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
 ]
 
 [[package]]
@@ -2192,7 +2187,7 @@ dependencies = [
  "virtio-queue",
  "virtio-vsock",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.15.0",
  "vsock",
 ]
 
@@ -2208,7 +2203,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.14.0",
 ]
 
 [[package]]
@@ -2226,7 +2221,7 @@ dependencies = [
  "log",
  "virtio-bindings",
  "vm-memory",
- "vmm-sys-util",
+ "vmm-sys-util 0.14.0",
 ]
 
 [[package]]
@@ -2250,7 +2245,7 @@ dependencies = [
  "bitflags 2.9.3",
  "libc",
  "thiserror 1.0.69",
- "vmm-sys-util",
+ "vmm-sys-util 0.14.0",
  "winapi",
 ]
 
@@ -2259,6 +2254,16 @@ name = "vmm-sys-util"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d21f366bf22bfba3e868349978766a965cbe628c323d58e026be80b8357ab789"
+dependencies = [
+ "bitflags 1.3.2",
+ "libc",
+]
+
+[[package]]
+name = "vmm-sys-util"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "506c62fdf617a5176827c2f9afbcf1be155b03a9b4bf9617a60dbc07e3a1642f"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
@@ -2593,32 +2598,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
-dependencies = [
- "byteorder",
- "zerocopy-derive 0.7.35",
-]
-
-[[package]]
-name = "zerocopy"
 version = "0.8.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1702d9583232ddb9174e01bb7c15a2ab8fb1bc6f227aa1233858c351a3ba0cb"
 dependencies = [
- "zerocopy-derive 0.8.25",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.7.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.87",
+ "zerocopy-derive",
 ]
 
 [[package]]

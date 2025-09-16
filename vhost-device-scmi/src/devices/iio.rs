@@ -171,7 +171,7 @@ enum IioEndian {
 }
 
 /// Representation of an IIO channel axis's scan type.
-/// It is read from sysfs "scan_element/<channel>_type"
+/// It is read from sysfs "scan_element/\<channel>_type"
 ///
 /// Used also for scalar values.
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -250,18 +250,18 @@ struct Axis {
     /// Axis unit exponent, see [UnitMapping::unit_exponent] and [UNIT_MAPPING].
     unit_exponent: i8,
     /// Additional exponent to apply to the axis values.  It is computed from
-    /// the axis value scaling (see [IIOSensor::custom_exponent] to provide a
-    /// sufficiently accurate SCMI value that is represented by an integer (not
-    /// a float) + decadic exponent.
+    /// the axis value scaling (see [IIOSensor::custom_exponent_and_resolution]
+    /// to provide a sufficiently accurate SCMI value that is represented by an
+    /// integer (not a float) + decadic exponent.
     custom_exponent: i8,
     /// This is an extended attribute field. It reports the resolution of the
-    /// sensor axis. The representation is in [custom_resolution] x
-    /// 10^[custom_exponent] format. This field is present only if Bit[8] of
-    /// axis_attributes_low is set to 1.
+    /// sensor axis. The representation is in [Self::custom_resolution] x
+    /// 10^[Self::custom_exponent] format. This field is present only if
+    /// `Bit[8]` of axis_attributes_low is set to 1.
     custom_resolution: u64,
     /// Channel scan type, necessary if the sensor supports notifications.
     /// The data from /dev/iio:deviceX will be formatted according to this.
-    /// The ChanScanType is parsed from "scan_elements/<channel>_type"
+    /// The ChanScanType is parsed from "scan_elements/\<channel>_type"
     scan_type: Option<ChanScanType>,
 }
 

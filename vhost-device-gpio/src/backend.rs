@@ -69,7 +69,7 @@ struct GpioArgs {
     socket_count: usize,
 
     /// List of GPIO devices, one for each guest, in the format
-    /// [s]<N1>[:[s]<N2>].
+    /// `[s]<N1>[:[s]<N2>]`.
     #[clap(short = 'l', long)]
     device_list: String,
 }

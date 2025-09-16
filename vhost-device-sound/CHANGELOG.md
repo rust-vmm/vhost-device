@@ -5,6 +5,22 @@
 
 ### Changed
 
+- [[#907]](https://github.com/rust-vmm/vhost-device/pull/907)
+  `vhost_device_sound::start_backend_server` now mutably borrows a
+  `vhost::vhost_user::Listener`, so the socket isn't removed and
+  re-created between each connection, and there's no longer a short
+  window of time where there's no socket for clients to connect to.
+
+  As a consequence of this change:
+
+  - `vhost_device_sound::SoundConfig::new` no longer takes a `socket` argument.
+  - `vhost_device_sound::SoundConfig::get_socket_path` has been removed.
+  - `vhost_device_sound::SoundConfig` no longer implements
+    `From<vhost_device_sound::args::SoundArgs>` (since the `socket`
+    argument should be handled separately).
+  - `vhost_device_sound::start_backend_server` now additionally takes
+    a `listener` argument.
+
 ### Fixed
 
 ### Deprecated

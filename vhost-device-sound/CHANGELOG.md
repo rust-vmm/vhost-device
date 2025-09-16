@@ -3,6 +3,9 @@
 
 ### Added
 
+- [[#909]](https://github.com/rust-vmm/vhost-device/pull/909)
+  `vhost-device-sound` now supports a `--socket-fd` argument.
+
 ### Changed
 
 - [[#907]](https://github.com/rust-vmm/vhost-device/pull/907)

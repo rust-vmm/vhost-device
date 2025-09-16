@@ -2,6 +2,9 @@
 // Stefano Garzarella <sgarzare@redhat.com>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use std::os::unix::net::UnixListener;
+use std::os::unix::prelude::*;
+
 use clap::Parser;
 use vhost::vhost_user::Listener;
 use vhost_device_sound::{args::SoundArgs, start_backend_server, SoundConfig};
@@ -11,7 +14,15 @@ fn main() {
 
     let args = SoundArgs::parse();
     let config = SoundConfig::new(false, args.backend);
-    let mut listener = Listener::new(args.socket, true).unwrap();
+
+    let mut listener = if let Some(fd) = args.socket_fd {
+        // SAFETY: user has assured us this is safe.
+        unsafe { UnixListener::from_raw_fd(fd) }.into()
+    } else if let Some(path) = args.socket {
+        Listener::new(path, true).unwrap()
+    } else {
+        unreachable!()
+    };
 
     loop {
         start_backend_server(&mut listener, config.clone());

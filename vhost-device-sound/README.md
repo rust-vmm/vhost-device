@@ -15,6 +15,10 @@ generated with help2man target/debug/vhost-device-sound |mandoc
      --socket <SOCKET>
             vhost-user Unix domain socket path
 
+     --socket-fd <FD>
+            listening vhost-user Unix domain socket file descriptor
+            (e.g. from a service manager)
+
      --backend <BACKEND>
             audio backend to be used [possible values: null, pipewire, alsa, gstreamer]
 

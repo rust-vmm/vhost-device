@@ -682,8 +682,6 @@ impl VhostUserBackend for VhostUserSoundBackend {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use tempfile::tempdir;
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::{
@@ -696,8 +694,6 @@ mod tests {
 
     use super::*;
     use crate::BackendType;
-
-    const SOCKET_PATH: &str = "vsound.socket";
 
     fn setup_descs(descs: &[RawDescriptor]) -> (VringRwLock, GuestMemoryAtomic<GuestMemoryMmap>) {
         let mem = GuestMemoryAtomic::new(
@@ -739,7 +735,7 @@ mod tests {
     #[test]
     fn test_sound_thread_success() {
         crate::init_logger();
-        let config = SoundConfig::new(PathBuf::from(SOCKET_PATH), false, BackendType::Null);
+        let config = SoundConfig::new(false, BackendType::Null);
 
         let chmaps = Arc::new(RwLock::new(vec![]));
         let jacks = Arc::new(RwLock::new(vec![]));
@@ -849,7 +845,7 @@ mod tests {
     #[test]
     fn test_sound_thread_failure() {
         crate::init_logger();
-        let config = SoundConfig::new(PathBuf::from(SOCKET_PATH), false, BackendType::Null);
+        let config = SoundConfig::new(false, BackendType::Null);
 
         let chmaps = Arc::new(RwLock::new(vec![]));
         let jacks = Arc::new(RwLock::new(vec![]));
@@ -938,8 +934,7 @@ mod tests {
     fn test_sound_backend() {
         crate::init_logger();
         let test_dir = tempdir().expect("Could not create a temp test directory.");
-        let socket_path = test_dir.path().join(SOCKET_PATH);
-        let config = SoundConfig::new(socket_path, false, BackendType::Null);
+        let config = SoundConfig::new(false, BackendType::Null);
         let backend = VhostUserSoundBackend::new(config).expect("Could not create backend.");
 
         assert_eq!(backend.num_queues(), NUM_QUEUES as usize);
@@ -1017,9 +1012,7 @@ mod tests {
         crate::init_logger();
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let socket_path = test_dir.path().join("sound_failures.socket");
-
-        let config = SoundConfig::new(socket_path, false, BackendType::Null);
+        let config = SoundConfig::new(false, BackendType::Null);
         let backend = VhostUserSoundBackend::new(config);
 
         let backend = backend.unwrap();

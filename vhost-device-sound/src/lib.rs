@@ -14,7 +14,7 @@ pub mod device;
 pub mod stream;
 pub mod virtio_sound;
 
-use std::{convert::TryFrom, io::Error as IoError, mem::size_of, path::PathBuf, sync::Arc};
+use std::{convert::TryFrom, io::Error as IoError, mem::size_of, sync::Arc};
 
 pub use args::BackendType;
 pub use stream::Stream;
@@ -212,37 +212,20 @@ impl TryFrom<Le32> for ControlMessageKind {
 /// This structure is the public API through which an external program
 /// is allowed to configure the backend.
 pub struct SoundConfig {
-    /// vhost-user Unix domain socket
-    socket: PathBuf,
     /// use multiple threads to handle the virtqueues
     multi_thread: bool,
     /// audio backend variant
     audio_backend: BackendType,
 }
 
-impl From<args::SoundArgs> for SoundConfig {
-    fn from(cmd_args: args::SoundArgs) -> Self {
-        let args::SoundArgs { socket, backend } = cmd_args;
-
-        Self::new(socket, false, backend)
-    }
-}
-
 impl SoundConfig {
     /// Create a new instance of the SoundConfig struct, containing the
     /// parameters to be fed into the sound-backend server.
-    pub const fn new(socket: PathBuf, multi_thread: bool, audio_backend: BackendType) -> Self {
+    pub const fn new(multi_thread: bool, audio_backend: BackendType) -> Self {
         Self {
-            socket,
             multi_thread,
             audio_backend,
         }
-    }
-
-    /// Return the path of the unix domain socket which is listening to
-    /// requests from the guest.
-    pub fn get_socket_path(&self) -> PathBuf {
-        self.socket.clone()
     }
 
     pub const fn get_audio_backend(&self) -> BackendType {
@@ -308,9 +291,8 @@ impl Drop for IOMessage {
 
 /// This is the public API through which an external program starts the
 /// vhost-device-sound backend server.
-pub fn start_backend_server(config: SoundConfig) {
+pub fn start_backend_server(listener: &mut Listener, config: SoundConfig) {
     log::trace!("Using config {:?}.", &config);
-    let socket = config.get_socket_path();
     let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
 
     let mut daemon = VhostUserDaemon::new(
@@ -322,9 +304,7 @@ pub fn start_backend_server(config: SoundConfig) {
 
     log::trace!("Starting daemon.");
 
-    let mut listener = Listener::new(socket, true).unwrap();
-
-    daemon.start(&mut listener).unwrap();
+    daemon.start(listener).unwrap();
     let result = daemon.wait();
 
     backend.send_exit_event();
@@ -350,10 +330,9 @@ mod tests {
 
     #[test]
     fn test_sound_server() {
-        const SOCKET_PATH: &str = "vsound.socket";
         crate::init_logger();
 
-        let config = SoundConfig::new(PathBuf::from(SOCKET_PATH), false, BackendType::Null);
+        let config = SoundConfig::new(false, BackendType::Null);
 
         let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
         let daemon = VhostUserDaemon::new(

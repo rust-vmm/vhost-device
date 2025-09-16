@@ -152,7 +152,7 @@ union I2cSmbusData {
     byte: u8,
     word: u16,
 
-    /// block[0] is used for length, and one more for user-space compatibility
+    /// `block[0]` is used for length, and one more for user-space compatibility
     block: [u8; I2C_SMBUS_BLOCK_MAX + 2],
 }
 

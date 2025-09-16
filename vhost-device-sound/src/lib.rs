@@ -77,9 +77,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Direction {
-    /// [`VIRTIO_SND_D_OUTPUT`](crate::virtio_sound::VIRTIO_SND_D_OUTPUT)
+    /// [`VIRTIO_SND_D_OUTPUT`]
     Output = VIRTIO_SND_D_OUTPUT,
-    /// [`VIRTIO_SND_D_INPUT`](crate::virtio_sound::VIRTIO_SND_D_INPUT)
+    /// [`VIRTIO_SND_D_INPUT`]
     Input = VIRTIO_SND_D_INPUT,
 }
 

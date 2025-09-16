@@ -323,7 +323,7 @@ impl Request {
     }
 
     #[inline]
-    /// Returns the length of the sound data [`virtio_queue::Descriptor`].
+    /// Returns the length of the sound data [`virtio_queue::desc::RawDescriptor`].
     pub const fn len(&self) -> usize {
         self.len
     }

@@ -395,6 +395,7 @@ impl RutabagaVirtioGpu {
 
     fn configure_rutabaga_builder(
         gpu_config: &GpuConfig,
+        fence: RutabagaFenceHandler,
     ) -> (RutabagaBuilder, RutabagaComponentType) {
         let component = match gpu_config.gpu_mode() {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
@@ -402,9 +403,8 @@ impl RutabagaVirtioGpu {
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
 
-        let builder = RutabagaBuilder::new(component, gpu_config.capsets().bits())
+        let builder = RutabagaBuilder::new(gpu_config.capsets().bits(), fence)
             .set_use_egl(gpu_config.flags().use_egl)
-            .set_use_glx(gpu_config.flags().use_glx)
             .set_use_gles(gpu_config.flags().use_gles)
             .set_use_surfaceless(gpu_config.flags().use_surfaceless)
             // Since vhost-user-gpu is out-of-process this is the only type of blob resource that
@@ -417,11 +417,9 @@ impl RutabagaVirtioGpu {
     pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
-        let (builder, component_type) = Self::configure_rutabaga_builder(gpu_config);
+        let (builder, component_type) = Self::configure_rutabaga_builder(gpu_config, fence);
 
-        let rutabaga = builder
-            .build(fence, None)
-            .expect("Rutabaga initialization failed!");
+        let rutabaga = builder.build().expect("Rutabaga initialization failed!");
 
         Self {
             rutabaga,
@@ -434,7 +432,7 @@ impl RutabagaVirtioGpu {
     }
 
     fn result_from_query(&self, resource_id: u32) -> GpuResponse {
-        let Ok(query) = self.rutabaga.query(resource_id) else {
+        let Ok(query) = self.rutabaga.resource3d_info(resource_id) else {
             return OkNoData;
         };
         let mut plane_info = Vec::with_capacity(4);
@@ -728,10 +726,10 @@ impl VirtioGpu for RutabagaVirtioGpu {
         let handle_opt: Option<Arc<RutabagaHandle>> =
             self.rutabaga.export_blob(resource_id).map(Arc::new).ok();
 
-        // Only trust query() when we have a DMABUF handle.
+        // Only trust resource3d_info() when we have a DMABUF handle.
         let info_3d_opt: Option<Resource3DInfo> = if let Some(h) = handle_opt.as_ref() {
             if h.handle_type == RUTABAGA_HANDLE_TYPE_MEM_DMABUF {
-                self.rutabaga.query(resource_id).ok()
+                self.rutabaga.resource3d_info(resource_id).ok()
             } else {
                 log::warn!(
                     "export_blob for resource {} returned non-DMABUF handle type: {:?}",
@@ -1098,19 +1096,17 @@ impl VirtioGpu for RutabagaVirtioGpu {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "gfxstream")]
+    use std::env::set_var;
     use std::{
         os::unix::net::UnixStream,
         sync::{Arc, Mutex},
     };
 
-    #[cfg(feature = "gfxstream")]
-    use std::env::set_var;
-
     use assert_matches::assert_matches;
     use rusty_fork::rusty_fork_test;
-    use rutabaga_gfx::{
-        RutabagaFence, RutabagaHandler, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D,
-    };
+    use rutabaga_gfx::{RutabagaFence, RUTABAGA_PIPE_BIND_RENDER_TARGET, RUTABAGA_PIPE_TEXTURE_2D};
+    use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
     use crate::{protocol::VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM, GpuCapset, GpuFlags};
@@ -1161,9 +1157,21 @@ mod tests {
 
         let config = GpuConfig::new(gpu_mode, capsets, GpuFlags::default()).unwrap();
 
+        // Mock memory
+        let mem = GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        );
+        let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+
+        let fence_state = Arc::new(Mutex::new(FenceState::default()));
+        let fence = RutabagaVirtioGpu::create_fence_handler(vring, fence_state);
+        // Test creating a fence with the `RutabagaFence` that can be used to determine
+        // when the previous command completed.
         let (builder, actual_component_type) =
-            RutabagaVirtioGpu::configure_rutabaga_builder(&config);
-        let rutabaga = builder.build(RutabagaHandler::new(|_| {}), None).unwrap();
+            RutabagaVirtioGpu::configure_rutabaga_builder(&config, fence);
+        let rutabaga = builder.build().unwrap();
         RutabagaVirtioGpu {
             rutabaga,
             gpu_backend: dummy_gpu_backend(),
@@ -1360,7 +1368,6 @@ mod tests {
                 offsets: [0, 0, 0, 0],
                 drm_fourcc: 0x34325241,
                 modifier: 0,
-                guest_cpu_mappable: true,
             });
             let result = virtio_gpu.set_scanout(VIRTIO_GPU_MAX_SCANOUTS + 1, 1, rect.clone());
             assert_matches!(result, Err(ErrInvalidResourceId));
@@ -1405,7 +1412,6 @@ mod tests {
                     offsets: [0, 0, 0, 0],
                     drm_fourcc: 0x34325241, // 'AR24'
                     modifier: 0,
-                    guest_cpu_mappable: false,
                 });
                 res
             }

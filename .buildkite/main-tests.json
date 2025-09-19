@@ -22,6 +22,10 @@
       "command": "cargo fmt --all -- --check --config format_code_in_doc_comments=true"
     },
     {
+      "test_name": "doc",
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --all-features --no-deps"
+    },
+    {
       "test_name": "unittests-gnu",
       "command": "CROSVM_USE_SYSTEM_VIRGLRENDERER=1 CROSVM_USE_SYSTEM_MINIGBM=1 cargo test --all-features --workspace",
       "platform": [

@@ -3,6 +3,7 @@
 
 ### Added
 
+- [[#876]](https://github.com/rust-vmm/vhost-device/pull/876) Add GStreamer audio backend support
 - [[#806]](https://github.com/rust-vmm/vhost-device/pull/806) Add controls field in VirtioSoundConfig
 - [[#746]](https://github.com/rust-vmm/vhost-device/pull/746) Add new sampling rates 12000Hz and 24000Hz
 
@@ -13,6 +14,10 @@
 ### Fixed
 - [[#808]](https://github.com/rust-vmm/vhost-device/pull/808) pipewire: Fix rand module imports
 - [[#884]](https://github.com/rust-vmm/vhost-device/pull/884) vhost-device-sound/pipewire: fix wrong format
+
+### Limitations
+
+- GStreamer backend: 20-bit PCM formats (VIRTIO_SND_PCM_FMT_S20/U20) are not directly supported by GStreamer and are automatically converted to 24/32-bit formats
 
 ### Deprecated
 

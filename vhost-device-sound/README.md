@@ -16,7 +16,7 @@ generated with help2man target/debug/vhost-device-sound |mandoc
             vhost-user Unix domain socket path
 
      --backend <BACKEND>
-            audio backend to be used [possible values: null, pipewire, alsa]
+            audio backend to be used [possible values: null, pipewire, alsa, gstreamer]
 
      -h, --help
             Print help

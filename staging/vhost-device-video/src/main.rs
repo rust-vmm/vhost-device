@@ -37,7 +37,7 @@ struct VideoArgs {
     #[clap(short, long)]
     socket_path: PathBuf,
 
-    /// Path to the video device file. Defaults to /dev/video0.
+    /// Path to the video device file. Defaults to `/dev/video0`.
     #[clap(short = 'd', long, default_value = "/dev/video0")]
     v4l2_device: PathBuf,
 

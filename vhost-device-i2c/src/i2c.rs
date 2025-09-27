@@ -90,7 +90,7 @@ const I2C_FUNC_SMBUS_ALL: u64 =
 /// I2C protocol definitions
 pub(crate) const I2C_M_RD: u16 = 0x0001; // read data, from slave to master
 
-/// Copied (partially) from Linux's include/uapi/linux/i2c.h
+/// Copied (partially) from Linux's `include/uapi/linux/i2c.h`
 ///
 /// I2cMsg - an I2C transaction segment beginning with START
 ///
@@ -185,7 +185,7 @@ pub(crate) struct SmbusMsg {
 }
 
 impl SmbusMsg {
-    /// Based on Linux's drivers/i2c/i2c-core-smbus.c:i2c_smbus_xfer_emulated().
+    /// Based on Linux's `drivers/i2c/i2c-core-smbus.c:i2c_smbus_xfer_emulated()`.
     ///
     /// These smbus related functions try to reverse what Linux does, only
     /// support basic modes (up to word transfer).

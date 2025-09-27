@@ -95,7 +95,7 @@ pub(crate) struct VuRngBackend<T: ReadVolatile> {
 }
 
 impl<T: ReadVolatile> VuRngBackend<T> {
-    /// Create a new virtio rng device that gets random data from /dev/urandom.
+    /// Create a new virtio rng device that gets random data from `/dev/urandom`.
     pub fn new(
         rng_source: Arc<Mutex<T>>,
         period_ms: u128,

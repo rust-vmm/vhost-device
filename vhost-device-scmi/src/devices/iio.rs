@@ -190,7 +190,7 @@ impl ChanScanType {
     /// The channel scan type follows the rule
     /// If repeat > 1, "%s:%c%d/%dX%d>>%u\n"
     /// Else, "%s:%c%d/%d>>%u\n".
-    /// For more details, see kernel "drivers/iio/industrialio-buffer.c"
+    /// For more details, see kernel `drivers/iio/industrialio-buffer.c`
     fn new(value: String) -> Option<ChanScanType> {
         let error_message = "Error format from iio device!";
         let endianness = match &value[0..2] {
@@ -260,7 +260,7 @@ struct Axis {
     /// `Bit[8]` of axis_attributes_low is set to 1.
     custom_resolution: u64,
     /// Channel scan type, necessary if the sensor supports notifications.
-    /// The data from /dev/iio:deviceX will be formatted according to this.
+    /// The data from `/dev/iio:deviceX` will be formatted according to this.
     /// The ChanScanType is parsed from "scan_elements/\<channel>_type"
     scan_type: Option<ChanScanType>,
 }

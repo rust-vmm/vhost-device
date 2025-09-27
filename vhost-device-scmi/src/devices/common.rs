@@ -239,7 +239,7 @@ pub struct Sensor {
     notify_enabled: bool,
     /// If this sensor supports notifying the frontend actively, it should
     /// record notification device file here. (e.g. For iio device, the file
-    /// is /dev/iio:deviceX)
+    /// is `/dev/iio:deviceX`)
     pub notify_dev: Option<File>,
 
     /// Sensor id, to identify the sensor in notification lookup.

@@ -39,7 +39,7 @@ pub struct SpiIocTransfer {
 }
 
 /// Linux SPI definitions
-/// IOCTL commands, refer Linux's Documentation/spi/spidev.rst for further
+/// IOCTL commands, refer Linux's `Documentation/spi/spidev.rst` for further
 /// details.
 const _IOC_SIZEBITS: u32 = 14;
 const _IOC_SIZESHIFT: u32 = 16;

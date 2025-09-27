@@ -131,7 +131,7 @@ pub(crate) struct VuVideoBackend {
 }
 
 impl VuVideoBackend {
-    /// Create a new virtio video device for /dev/video<num>.
+    /// Create a new virtio video device for `/dev/video<num>`.
     pub fn new(video_path: &Path, video_backend: BackendType) -> Result<Self> {
         let backend = Arc::new(RwLock::new(video_backends::alloc_video_backend(
             video_backend,

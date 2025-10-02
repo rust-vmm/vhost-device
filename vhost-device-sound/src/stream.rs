@@ -29,6 +29,10 @@ pub enum Error {
     DescriptorWriteFailed,
     #[error("Could not disconnect stream")]
     CouldNotDisconnectStream,
+    #[error("Could not start stream")]
+    CouldNotStartStream,
+    #[error("Could not stop stream")]
+    CouldNotStopStream,
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -323,7 +327,8 @@ impl Request {
     }
 
     #[inline]
-    /// Returns the length of the sound data [`virtio_queue::desc::RawDescriptor`].
+    /// Returns the length of the sound data
+    /// [`virtio_queue::desc::RawDescriptor`].
     pub const fn len(&self) -> usize {
         self.len
     }

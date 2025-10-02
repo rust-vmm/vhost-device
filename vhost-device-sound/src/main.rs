@@ -55,6 +55,10 @@ mod tests {
         all(feature = "alsa-backend", target_env = "gnu"),
         case::alsa("alsa", BackendType::Alsa)
     )]
+    #[cfg_attr(
+        all(feature = "gst-backend", target_env = "gnu"),
+        case::gstreamer("gstreamer", BackendType::GStreamer)
+    )]
     fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
         let args: SoundArgs = Parser::parse_from([
             "",

@@ -12,6 +12,7 @@
 
 ### Fixed
 - [[#808]](https://github.com/rust-vmm/vhost-device/pull/808) pipewire: Fix rand module imports
+- [[#884]](https://github.com/rust-vmm/vhost-device/pull/884) vhost-device-sound/pipewire: fix wrong format
 
 ### Deprecated
 

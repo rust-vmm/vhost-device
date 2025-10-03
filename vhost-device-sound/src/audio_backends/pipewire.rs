@@ -319,7 +319,7 @@ impl AudioBackend for PwBackend {
             };
 
             let mut audio_info = AudioInfoRaw::new();
-            audio_info.set_format(AudioFormat::S16LE);
+            audio_info.set_format(AudioFormat(info.format));
             audio_info.set_rate(info.rate);
             audio_info.set_channels(info.channels);
             audio_info.set_position(pos);

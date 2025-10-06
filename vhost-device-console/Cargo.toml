@@ -28,7 +28,7 @@ vhost-user-backend = "0.20"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.16"
 vm-memory = "0.16.1"
-vmm-sys-util = "0.14"
+vmm-sys-util = "0.15"
 
 [dev-dependencies]
 assert_matches = "1.5"

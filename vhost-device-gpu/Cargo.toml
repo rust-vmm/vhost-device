@@ -32,7 +32,7 @@ vhost-user-backend = "0.20"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.16.0"
 vm-memory = "0.16.1"
-vmm-sys-util = "0.14.0"
+vmm-sys-util = "0.15.0"
 bitflags = "2.9.4"
 
 [dev-dependencies]

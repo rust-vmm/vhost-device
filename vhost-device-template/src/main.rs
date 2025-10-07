@@ -5,45 +5,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-mod vhu_foo;
-
-use std::{
-    path::PathBuf,
-    process::exit,
-    sync::{Arc, RwLock},
-    thread::{spawn, JoinHandle},
-};
+use std::{path::PathBuf, process::exit};
 
 use clap::Parser;
-use log::error;
-use thiserror::Error as ThisError;
-use vhost_user_backend::VhostUserDaemon;
-use vhu_foo::VhostUserFooBackend;
-use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
-type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug, ThisError)]
-/// Errors related to low level foo helpers
-pub(crate) enum Error {
-    #[error("Could not create backend: {0}")]
-    CouldNotCreateBackend(vhu_foo::Error),
-    #[error("Could not create daemon: {0}")]
-    CouldNotCreateDaemon(vhost_user_backend::Error),
-    #[error("Fatal error: {0}")]
-    ServeFailed(vhost_user_backend::Error),
-}
-
+use vhost_device_template::{start_backend, Error, FooConfiguration, Result};
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct FooArgs {
     /// Location of vhost-user Unix domain socket.
     #[clap(short, long, value_name = "SOCKET")]
-    socket_path: PathBuf,
-}
-
-#[derive(PartialEq, Debug)]
-struct FooConfiguration {
     socket_path: PathBuf,
 }
 
@@ -61,55 +31,12 @@ impl TryFrom<FooArgs> for FooConfiguration {
     }
 }
 
-#[derive(Copy, Clone)]
-pub(crate) struct FooInfo {
-    counter: u32,
-}
-
-impl FooInfo {
-    pub fn new() -> Self {
-        Self { counter: 0 }
-    }
-
-    pub fn counter(&mut self) -> u32 {
-        self.counter += 1;
-        self.counter
-    }
-}
-
-fn start_backend(args: FooArgs) -> Result<()> {
-    let config = FooConfiguration::try_from(args).unwrap();
-
-    let socket_path = config.socket_path.clone();
-    let info = FooInfo::new();
-
-    let handle: JoinHandle<Result<()>> = spawn(move || loop {
-        // There isn't much value in complicating code here to return an error from the
-        // threads, and so the code uses unwrap() instead. The panic on a thread
-        // won't cause trouble to the main() function and should be safe for the
-        // daemon.
-        let backend = Arc::new(RwLock::new(
-            VhostUserFooBackend::new(info).map_err(Error::CouldNotCreateBackend)?,
-        ));
-
-        let mut daemon = VhostUserDaemon::new(
-            String::from("vhost-device-template-backend"),
-            backend,
-            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-        )
-        .map_err(Error::CouldNotCreateDaemon)?;
-
-        daemon.serve(&socket_path).map_err(Error::ServeFailed)?;
-    });
-
-    handle.join().map_err(std::panic::resume_unwind).unwrap()
-}
-
 fn main() {
     env_logger::init();
 
-    if let Err(e) = start_backend(FooArgs::parse()) {
-        error!("{e}");
+    let config = FooConfiguration::try_from(FooArgs::parse()).unwrap();
+    if let Err(e) = start_backend(config) {
+        log::error!("{e}");
         exit(1);
     }
 }
@@ -117,8 +44,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-
-    use assert_matches::assert_matches;
 
     use super::*;
 
@@ -142,14 +67,5 @@ mod tests {
         };
 
         assert_eq!(config, expected_config);
-    }
-
-    #[test]
-    fn test_fail_listener() {
-        // This will fail the listeners and thread will panic.
-        let socket_name = Path::new("~/path/not/present/foo");
-        let cmd_args = FooArgs::from_args(socket_name);
-
-        assert_matches!(start_backend(cmd_args).unwrap_err(), Error::ServeFailed(_));
     }
 }

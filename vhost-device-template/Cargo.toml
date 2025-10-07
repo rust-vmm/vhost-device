@@ -5,18 +5,17 @@ authors = ["Viresh Kumar <viresh.kumar@linaro.org>"]
 description = "Template for a vhost backend device"
 repository = "https://github.com/rust-vmm/vhost-device"
 readme = "README.md"
-keywords = ["template", "vhost", "virt", "backend"]
+keywords = ["template", "vhost", "virtio", "backend"]
+categories = ["virtualization"]
 license = "Apache-2.0 OR BSD-3-Clause"
 edition = "2021"
 publish = false
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 
 [dependencies]
-clap = { version = "4.5",  features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 libc = "0.2"
 log = "0.4"

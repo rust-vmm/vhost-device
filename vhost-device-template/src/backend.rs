@@ -5,10 +5,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::{
-    convert,
-    io::{self, Result as IoResult},
-};
+use std::io::Result as IoResult;
 
 use log::{info, warn};
 use thiserror::Error as ThisError;
@@ -34,7 +31,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ThisError)]
 /// Errors related to vhost-device-foo daemon.
-pub(crate) enum Error {
+pub enum Error {
     #[error("Failed to handle event, didn't match EPOLLIN")]
     HandleEventNotEpollIn,
     #[error("Failed to handle unknown event")]
@@ -47,13 +44,13 @@ pub(crate) enum Error {
     EventFdFailed,
 }
 
-impl convert::From<Error> for io::Error {
+impl From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
-        io::Error::other(e)
+        std::io::Error::other(e)
     }
 }
 
-pub(crate) struct VhostUserFooBackend {
+pub struct VhostUserFooBackend {
     info: FooInfo,
     event_idx: bool,
     pub exit_event: EventFd,
@@ -469,7 +466,7 @@ mod tests {
                 .handle_event(0, EventSet::OUT, &[vring.clone()], 0)
                 .unwrap_err()
                 .kind(),
-            io::ErrorKind::Other
+            std::io::ErrorKind::Other
         );
 
         assert_eq!(
@@ -477,7 +474,7 @@ mod tests {
                 .handle_event(1, EventSet::IN, &[vring.clone()], 0)
                 .unwrap_err()
                 .kind(),
-            io::ErrorKind::Other
+            std::io::ErrorKind::Other
         );
 
         // Hit the loop part

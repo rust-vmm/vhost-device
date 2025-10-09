@@ -87,13 +87,13 @@ Configuration file example:
 vms:
     - guest_cid: 3
       socket: /tmp/vhost3.socket
-      uds_path: /tmp/vm3.sock
+      uds_path: /tmp/vm3.vsock
       tx_buffer_size: 65536
       queue_size: 1024
       groups: group1+groupA
     - guest_cid: 4
       socket: /tmp/vhost4.socket
-      uds_path: /tmp/vm4.sock
+      uds_path: /tmp/vm4.vsock
       tx_buffer_size: 32768
       queue_size: 256
       groups: group2+groupB

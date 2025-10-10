@@ -42,9 +42,9 @@ pub(crate) const VIRTIO_CAN_RX: u16 = 0x0101;
 pub const VIRTIO_CAN_F_CAN_CLASSIC: u16 = 0;
 pub const VIRTIO_CAN_F_CAN_FD: u16 = 1;
 pub const VIRTIO_CAN_S_CTRL_BUSOFF: u16 = 2; /* Controller BusOff */
+pub const VIRTIO_CAN_F_RTR_FRAMES: u16 = 2;
 #[allow(dead_code)]
-pub const VIRTIO_CAN_F_LATE_TX_ACK: u16 = 2;
-pub const VIRTIO_CAN_F_RTR_FRAMES: u16 = 3;
+pub const VIRTIO_CAN_F_LATE_TX_ACK: u16 = 3;
 
 /// Possible values of the status field
 pub const VIRTIO_CAN_RESULT_OK: u8 = 0x0;

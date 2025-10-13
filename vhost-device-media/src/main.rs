@@ -12,7 +12,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use ::virtio_media::protocol::VirtioMediaDeviceConfig;
 use clap::Parser;
-use log::debug;
+use log::{debug, error};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vhu_media::{BackendType, VuMediaBackend};
@@ -20,6 +20,7 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
+#[cfg(any(feature = "simple-capture", feature = "ffmpeg"))]
 pub(crate) const VIRTIO_V4L2_CARD_NAME_LEN: usize = 32;
 
 #[derive(Debug, ThisError)]
@@ -67,6 +68,7 @@ impl From<MediaArgs> for VuMediaConfig {
     }
 }
 
+#[cfg(feature = "simple-capture")]
 fn create_simple_capture_device_config() -> VirtioMediaDeviceConfig {
     use v4l2r::ioctl::Capabilities;
     let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
@@ -79,6 +81,7 @@ fn create_simple_capture_device_config() -> VirtioMediaDeviceConfig {
     }
 }
 
+#[cfg(feature = "v4l2-proxy")]
 fn create_v4l2_proxy_device_config(device_path: &PathBuf) -> VirtioMediaDeviceConfig {
     use virtio_media::v4l2r::ioctl::Capabilities;
 
@@ -109,6 +112,7 @@ fn create_v4l2_proxy_device_config(device_path: &PathBuf) -> VirtioMediaDeviceCo
     config
 }
 
+#[cfg(feature = "ffmpeg")]
 fn create_ffmpeg_decoder_config() -> VirtioMediaDeviceConfig {
     use v4l2r::ioctl::Capabilities;
     let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
@@ -125,6 +129,7 @@ fn create_ffmpeg_decoder_config() -> VirtioMediaDeviceConfig {
     }
 }
 
+#[cfg(feature = "simple-capture")]
 fn serve_simple_capture(media_config: &VuMediaConfig) -> Result<()> {
     let vu_media_backend = Arc::new(
         VuMediaBackend::new(
@@ -155,6 +160,7 @@ fn serve_simple_capture(media_config: &VuMediaConfig) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "v4l2-proxy")]
 fn serve_v4l2_proxy_daemon(media_config: &VuMediaConfig) -> Result<()> {
     let path = media_config.v4l2_device.clone();
     let vu_media_backend = Arc::new(
@@ -187,6 +193,7 @@ fn serve_v4l2_proxy_daemon(media_config: &VuMediaConfig) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "ffmpeg")]
 fn serve_ffmpeg_decoder(media_config: &VuMediaConfig) -> Result<()> {
     let vu_media_backend = Arc::new(
         VuMediaBackend::new(
@@ -222,8 +229,11 @@ pub(crate) fn start_backend(media_config: VuMediaConfig) -> Result<()> {
     loop {
         debug!("Starting backend");
         match media_config.backend {
+            #[cfg(feature = "simple-capture")]
             BackendType::SimpleCapture => serve_simple_capture(&media_config),
+            #[cfg(feature = "v4l2-proxy")]
             BackendType::V4l2Proxy => serve_v4l2_proxy_daemon(&media_config),
+            #[cfg(feature = "ffmpeg")]
             BackendType::FfmpegDecoder => serve_ffmpeg_decoder(&media_config),
         }?;
         debug!("Finishing backend");

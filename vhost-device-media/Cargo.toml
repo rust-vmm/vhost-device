@@ -11,6 +11,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = ["v4l2-proxy"]
+v4l2-proxy = ["v4l2r"]
+ffmpeg = ["v4l2r", "virtio-media-ffmpeg-decoder"]
+simple-capture = ["v4l2r"]
 
 [dependencies]
 bitflags = "2.6.0"
@@ -31,8 +35,8 @@ vm-memory = { workspace = true, features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { workspace = true }
 ref-cast = "1.0.23"
 virtio-media = { git = "https://github.com/chromeos/virtio-media", rev = "c6cc93a"}
-virtio-media-ffmpeg-decoder = { git = "https://github.com/chromeos/virtio-media/", package = "virtio-media-ffmpeg-decoder", rev = "c6cc93a"}
-v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "7b44138" }
+virtio-media-ffmpeg-decoder = { git = "https://github.com/chromeos/virtio-media/", package = "virtio-media-ffmpeg-decoder", rev = "c6cc93a", optional = true}
+v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "7b44138", optional = true }
 zerocopy = { version = "0.8.27", features = ["derive"] }
 
 [dev-dependencies]

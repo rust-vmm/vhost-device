@@ -149,14 +149,14 @@ Run the vhost-device-vsock device with vsock backend:
 ```
 vhost-device-vsock --guest-cid=<CID assigned to the guest> \
   --socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol> \
-  --forward-cid=<the vsock CID to which the connections from guest should be forwarded> \
+  --forward-cid=<the vsock CID to which the connections from the guest should be forwarded> \
   [--forward-listen=<port numbers separated by '+' for forwarding connections from host to guest> \
   [--tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>] \
   [--queue-size=<size of the vring queue>] \
 ```
 or
 ```
-vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,forward-cid=<the vsock CID to which the connections from guest should be forwarded>[,forward-listen=<port numbers separated by '+' for forwarding connections from host to guest>][,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,queue-size=<size of the vring queue>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
+vhost-device-vsock --vm guest_cid=<CID assigned to the guest>,socket=<path to the Unix socket to be created to communicate with the VMM via the vhost-user protocol>,forward-cid=<the vsock CID to which the connections from the guest should be forwarded>[,forward-listen=<port numbers separated by '+' for forwarding connections from host to guest>][,tx-buffer-size=<size of the buffer used for the TX virtqueue (guest->host packets)>][,queue-size=<size of the vring queue>][,groups=<list of group names to which the device belongs concatenated with '+' delimiter>]
 ```
 
 Specify the `--vm` argument multiple times to specify multiple devices like this:
@@ -211,7 +211,7 @@ qemu-system-x86_64 \
 ```sh
 shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
 ```
-or if you want to configure the TX buffer size and vring queue size
+Or, if you want to configure the TX buffer size and vring queue size:
 ```sh
 shell1$ vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket,tx-buffer-size=65536,queue-size=1024
 ```
@@ -265,10 +265,9 @@ guest$ nc --vsock 2 1234
 ### Sibling VM communication
 
 If you add multiple VMs with their devices configured with at least one common group name, they can communicate with
-each other. If you don't explicitly specify a group name, a default group will be assigned to the device with name
-`default`, and all such devices will be able to communicate with each other. Or you can choose a different list of
-group names for each device, and only devices with the at least one group in common will be able to communicate with
-each other.
+each other. If you don't explicitly specify a group name, a default group named `default` will be assigned to the device,
+and all such devices will be able to communicate with each other. You can choose a different list of group names for each
+device, and only devices with at least one group in common will be able to communicate with each other.
 
 For example, if you have two VMs with CID 3 and 4, you can run the following commands to make them communicate:
 
@@ -303,10 +302,10 @@ guest_cid4$ nc-vsock 3 1234
 
 The vsock backend is available under the `backend_vsock` feature (enabled by default). If you want to test a guest VM that
 has built-in applications which communicate with another VM over AF_VSOCK, you can forward the connections from the guest
-to the host machine instead of running a separate VM for easier testing using the forward-cid option. In such a case, you
-would run the corresponding applications that listen for or connect with applications in the guest VM using AF_VSOCK in the
-host instead of running the separate VM. For forwarding AF_VSOCK connections from the host, you can use the forward-listen
-option.
+to the host machine instead of running a separate VM. This makes testing easier by using the `--forward-cid` option.
+
+In this scenario, you run the corresponding applications on the host using AF_VSOCK instead of running a separate VM.
+For forwarding AF_VSOCK connections from the host to the guest, you can use the `--forward-listen` option.
 
 For example, if the guest VM that you want to test has an application that connects to the host on port 9000 upon boot and applications
 that listen on port 9001 and 9002 for connections, first run vhost-device-vsock:
@@ -355,17 +354,18 @@ host$ nc --vsock 1 9001
 ## Implementation Design
 
 The crate introduces a vhost-device-vsock device that enables communication between an
-application running in the guest i.e inside a VM and an application running on the
-host i.e outside the VM. The application running in the guest communicates over VM
-sockets i.e over AF_VSOCK sockets. The application running on the host connects to a
-unix socket on the host i.e communicates over AF_UNIX sockets when using the unix domain
-socket backend through the uds-path option or the application in the host listens or
-connects to vsock on the host i.e communicates over AF_VSOCK sockets when using the
-vsock backend through the forward-cid, forward-listen options. The main components of
-the crate are split into various files as described below:
+application running in the guest (inside a VM) and an application running on the
+host (outside the VM).
+
+The application running in the guest communicates over VM sockets (AF_VSOCK sockets).
+On the host side, the communication mechanism depends on the backend:
+- With the Unix domain socket backend (`--uds-path`), the host application communicates over AF_UNIX sockets
+- With the vsock backend (`--forward-cid`, `--forward-listen`), the host application communicates over AF_VSOCK sockets
+
+The main components of the crate are split into various files as described below:
 
 - [packet.rs](src/packet.rs)
-  - Introduces the **VsockPacket** structure that represents a single vsock packet
+  - Introduces the **VsockPacket** structure that represents a single vsock packet and its
   processing methods.
 - [rxops.rs](src/rxops.rs)
   - Introduces various vsock operations that are enqueued into the rxqueue to be sent to the
@@ -382,14 +382,14 @@ the crate are split into various files as described below:
   - Module to buffer data that is sent from the guest to the host. The module exposes a **LocalTxBuf**
   structure.
 - [vhost_user_vsock_thread.rs](src/vhost_user_vsock_thread.rs)
-  - Module exposes a **VhostUserVsockThread** structure. It also handles new host initiated
+  - Module exposes a **VhostUserVsockThread** structure. It also handles new host-initiated
   connections and provides interfaces for registering host connections with the epoll fd. Also
   provides interfaces for iterating through the rx and tx queues.
 - [vsock_conn.rs](src/vsock_conn.rs)
   - Module introduces a **VsockConnection** structure that represents a single vsock connection
   between the guest and the host. It also processes packets according to their type.
 - [vhu_vsock.rs](src/vhu_vsock.rs)
-  - exposes the main vhost user vsock backend interface.
+  - Exposes the main vhost-user vsock backend interface.
 
 ## Testing
 

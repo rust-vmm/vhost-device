@@ -1,5 +1,134 @@
 # vhost-device-vsock
 
+vhost-device-vsock is a vhost-user device implementation that emulates a virtio-vsock device, allowing guest applications to use AF_VSOCK sockets to communicate with host services or daemons. It enables bidirectional communication between applications running inside a virtual machine (guest) and applications running on the host or other VMs.
+
+The device acts as a bridge between the guest's vsock interface and the host, supporting multiple backend configurations to accommodate different use cases and host environments.
+
+## Backends
+
+vhost-device-vsock supports two different backends for host-side communication, allowing flexible integration depending on your use case. The backend is selected by the command-line options you provide:
+
+- **Unix Domain Socket backend**: enabled by using the `--uds-path` option
+- **VSOCK backend**: enabled by using the `--forward-cid` option
+
+### Unix Domain Socket Backend
+
+The Unix domain socket (UDS) backend is enabled by specifying the `--uds-path` option. It enables communication between the guest and host applications using AF_UNIX sockets on the host side. This backend implements a protocol based on [Firecracker's hybrid-vsock design](https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md#firecracker-virtio-vsock-design), providing a bridge between AF_VSOCK (guest) and AF_UNIX (host) socket domains.
+
+**How it works:**
+- Guest applications use AF_VSOCK sockets to communicate
+- vhost-device-vsock translates these connections to AF_UNIX sockets on the host
+- The main Unix socket is specified by `--uds-path` (e.g., `/tmp/vm4.vsock`)
+
+**Protocol for host applications:**
+
+1. **Host connecting to guest** (guest is listening):
+   - Connect to the main Unix socket specified by `--uds-path`
+   - Send a text command: `CONNECT <port>\n` where `<port>` is the guest port number
+   - If the guest is listening on that port, the connection is established
+   - The socket is then used for bidirectional data transfer
+
+   Example with netcat:
+   ```sh
+   # Guest is listening on port 1234:
+   guest$ nc --vsock -l 1234
+
+   # Host connects:
+   host$ nc -U /tmp/vm4.vsock
+   CONNECT 1234
+   # Now data can be sent/received
+   ```
+
+2. **Host listening for guest connections** (guest is connecting):
+   - Create a Unix socket at `<uds-path>_<port>` where `<port>` is the port number the guest will connect to
+   - When the guest connects to host CID (typically 2) on that port, vhost-device-vsock routes the connection to the corresponding Unix socket
+
+   Example with netcat:
+   ```sh
+   # Host listens on port 1234:
+   host$ nc -l -U /tmp/vm4.vsock_1234
+
+   # Guest connects to host CID 2, port 1234:
+   guest$ nc --vsock 2 1234
+   ```
+
+**When to use:**
+- When host applications are designed to work with Unix sockets
+- For simple guest-to-host communication scenarios
+- When you want to test vsock applications without requiring vsock support on the host (no need to load the vhost-vsock kernel module, which is required when using standard vsock in QEMU)
+- When you need a protocol compatible with Firecracker's vsock implementation
+
+**Example:**
+```sh
+vhost-device-vsock --vm guest-cid=4,uds-path=/tmp/vm4.vsock,socket=/tmp/vhost4.socket
+```
+
+In this configuration, guest applications using AF_VSOCK will have their connections forwarded to `/tmp/vm4.vsock` on the host, and host applications can use the protocol described above to communicate with the guest.
+
+### VSOCK Backend
+
+The vsock backend is enabled by specifying the `--forward-cid` option (available under the `backend_vsock` feature, enabled by default). It allows direct AF_VSOCK to AF_VSOCK communication. This backend is useful when you want to forward connections from the guest to another vsock-capable entity on the host, such as the host itself or another VM.
+
+**How it works:**
+- Guest applications use AF_VSOCK sockets to communicate
+- vhost-device-vsock forwards these connections to another AF_VSOCK address on the host
+- The target is specified using `--forward-cid` (typically CID 1 for the host)
+- Optionally, `--forward-listen` enables host-to-guest connections on specified ports
+
+**Protocol for host applications:**
+
+1. **Host listening for guest connections** (guest is connecting):
+   - The guest always connects to CID 2 (the host from guest's perspective)
+   - vhost-device-vsock forwards the connection to `--forward-cid` on the host (e.g., CID 1 for host loopback)
+   - Host application listens on the forward-cid using AF_VSOCK sockets
+   - The connection is established directly without any protocol commands
+
+   Example with netcat:
+   ```sh
+   # Host listens on CID 1 (loopback), port 9000:
+   host$ nc --vsock -l 1 9000
+
+   # Guest connects to CID 2 (host), port 9000:
+   guest$ nc --vsock 2 9000
+   # Now data can be sent/received
+   ```
+
+2. **Host connecting to guest** (guest is listening):
+   - Host application connects to `--forward-cid` on the specified port
+   - Ports must be listed in `--forward-listen` option
+   - vhost-device-vsock listens on these ports on the forward-cid and forwards connections to the guest via virtio-vsock
+   - This creates two separate vsock connections: host ↔ vhost-device-vsock (on forward-cid), and vhost-device-vsock ↔ guest (via virtio-vsock)
+
+   Example with netcat:
+   ```sh
+   # Guest is listening on port 9001:
+   guest$ nc --vsock -l 9001
+
+   # Host connects to CID 1 (forward-cid), port 9001:
+   host$ nc --vsock 1 9001
+   # vhost-device-vsock forwards this to guest CID 4, port 9001
+   # Now data can be sent/received
+   ```
+
+**When to use:**
+- When testing guest applications that need to communicate with vsock-enabled host services
+- When you want to forward guest connections to the host's vsock loopback (CID 1)
+- For bidirectional vsock communication between host and guest
+- When the host has native vsock support and you want end-to-end vsock connectivity
+
+**Example:**
+```sh
+vhost-device-vsock --vm guest-cid=4,forward-cid=1,forward-listen=9001+9002,socket=/tmp/vhost4.socket
+```
+
+In this configuration:
+- Guest-initiated connections are forwarded to the host (CID 1)
+- Host applications can connect to ports 9001 and 9002 on the guest
+
+**Requirements:**
+- The host must have vsock support (e.g., `vsock_loopback` kernel module loaded)
+- For testing, you can load the module with: `modprobe vsock_loopback`
+
 ## Usage
 
 Run the vhost-device-vsock device with unix domain socket backend:
@@ -179,7 +308,7 @@ would run the corresponding applications that listen for or connect with applica
 host instead of running the separate VM. For forwarding AF_VSOCK connections from the host, you can use the forward-listen
 option.
 
-For example, if the guest VM that you want to test has an application that connects to (CID 3, port 9000) upon boot and applications
+For example, if the guest VM that you want to test has an application that connects to the host on port 9000 upon boot and applications
 that listen on port 9001 and 9002 for connections, first run vhost-device-vsock:
 
 ```sh
@@ -197,10 +326,31 @@ shell2$ qemu-system-x86_64 \
           -device vhost-user-vsock-pci,chardev=char0
 ```
 
-After the guest VM boots, the application inside the guest connecting to (CID 3, port 9000) should successfully connect to the
-application running on the host. Assuming the applications listening on port 9001 and 9002 are running in the guest VM, you can
-now run the applications that connect to port 9001 and 9002 (you need to modify the CID they connect to be the host CID i.e. 1)
-on the host machine.
+After the guest VM boots, you can test the bidirectional communication:
+
+#### Guest connecting to host
+
+```sh
+# Host listens on CID 1 (loopback), port 9000:
+host$ nc --vsock -l 1 9000
+
+# Guest connects to CID 2 (host), port 9000:
+# vhost-device-vsock forwards to forward-cid (1) on the host
+guest$ nc --vsock 2 9000
+# Now data can be sent/received
+```
+
+#### Host connecting to guest
+
+```sh
+# Guest is listening on port 9001:
+guest$ nc --vsock -l 9001
+
+# Host connects to CID 1 (forward-cid), port 9001:
+# vhost-device-vsock forwards this to the guest
+host$ nc --vsock 1 9001
+# Now data can be sent/received
+```
 
 ## Testing
 

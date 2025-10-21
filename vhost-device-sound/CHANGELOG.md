@@ -3,6 +3,16 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Deprecated
+
+## v0.3.0
+
+### Added
+
 - [[#876]](https://github.com/rust-vmm/vhost-device/pull/876) Add GStreamer audio backend support
 - [[#806]](https://github.com/rust-vmm/vhost-device/pull/806) Add controls field in VirtioSoundConfig
 - [[#746]](https://github.com/rust-vmm/vhost-device/pull/746) Add new sampling rates 12000Hz and 24000Hz
@@ -10,6 +20,12 @@
 ### Changed
 
 - [[#852]](https://github.com/rust-vmm/vhost-device/pull/852) Changed to 2021 Rust edition
+- [[#792]](https://github.com/rust-vmm/vhost-device/pull/792) sound: move CLI arg types to lib submodule
+- [[#823]](https://github.com/rust-vmm/vhost-device/pull/823) sound: Use PathBuf for socket paths instead of Strings
+- [[#789]](https://github.com/rust-vmm/vhost-device/pull/789) sound/pipewire: add truncated exp backoff to tests and fork them
+- [[#788]](https://github.com/rust-vmm/vhost-device/pull/788) sound: Put AlsaTestHarness static in a LazyLock
+- [[#580]](https://github.com/rust-vmm/vhost-device/pull/580) sound: use descriptor_utils.rs to manipulate requests
+
 
 ### Fixed
 - [[#808]](https://github.com/rust-vmm/vhost-device/pull/808) pipewire: Fix rand module imports

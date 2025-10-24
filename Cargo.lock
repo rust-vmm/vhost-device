@@ -2199,6 +2199,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost-device-rtc"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "clap",
+ "env_logger",
+ "libc 0.2.182",
+ "log",
+ "nix 0.30.1",
+ "thiserror 2.0.18",
+ "vhost",
+ "vhost-user-backend",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-scmi"
 version = "0.4.0"
 dependencies = [

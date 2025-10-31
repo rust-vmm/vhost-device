@@ -14,21 +14,23 @@ use vhost_device_gpu::{start_backend, GpuCapset, GpuConfig, GpuConfigError, GpuF
 #[repr(u64)]
 pub enum CapsetName {
     /// [virglrenderer] OpenGL implementation, superseded by Virgl2
+    #[cfg(feature = "backend-virgl")]
     Virgl = GpuCapset::VIRGL.bits(),
 
     /// [virglrenderer] OpenGL implementation
+    #[cfg(feature = "backend-virgl")]
     Virgl2 = GpuCapset::VIRGL2.bits(),
 
     /// [gfxstream] Vulkan implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     GfxstreamVulkan = GpuCapset::GFXSTREAM_VULKAN.bits(),
 
     /// [gfxstream] OpenGL ES implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     GfxstreamGles = GpuCapset::GFXSTREAM_GLES.bits(),
 }
 
@@ -112,6 +114,7 @@ impl From<GpuFlagsArgs> for GpuFlags {
     }
 }
 
+/// Converts parsed CLI args into socket path and `GpuConfig`.
 pub fn config_from_args(args: GpuArgs) -> Result<(PathBuf, GpuConfig), GpuConfigError> {
     let flags = GpuFlags::from(args.flags);
     let capset = args.capset.map(capset_names_into_capset);
@@ -158,9 +161,9 @@ mod tests {
         }
 
         // Convert each CapsetName into GpuCapset
-        for capset_name in CapsetName::value_variants().iter().cloned() {
+        for capset_name in CapsetName::value_variants().iter().copied() {
             let resulting_capset: GpuCapset = capset_name.into(); // Would panic! if the definition is incorrect
-            assert_eq!(resulting_capset.bits(), capset_name as u64)
+            assert_eq!(resulting_capset.bits(), capset_name as u64);
         }
     }
 
@@ -201,6 +204,6 @@ mod tests {
             }
         );
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
-        assert_eq!(config.capsets(), GpuCapset::VIRGL | GpuCapset::VIRGL2)
+        assert_eq!(config.capsets(), GpuCapset::VIRGL | GpuCapset::VIRGL2);
     }
 }

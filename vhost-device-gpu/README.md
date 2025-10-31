@@ -90,23 +90,10 @@ Because blob resources are not yet supported, some capsets are limited:
 The device leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx)
 crate to provide rendering with virglrenderer and gfxstream.
 
-This crate supports two GPU backends: gfxstream (default) and virglrenderer.
-Both require the system-provided virglrenderer and minigbm libraries due to the dependence on rutabaga_gfx.
-
-Install the development packages for your distro, then build with:
-
-```session
-CROSVM_USE_SYSTEM_VIRGLRENDERER=1 \
-CROSVM_USE_SYSTEM_MINIGBM=1 \
-cargo build
-```
-
 gfxstream support is compiled by default, it can be disabled by not building with the `gfxstream` feature flag, for example:
 
 ```session
-CROSVM_USE_SYSTEM_VIRGLRENDERER=1 \
-CROSVM_USE_SYSTEM_MINIGBM=1 \
-cargo build --no-default-features
+$ cargo build --no-default-features
 ```
 
 With Virglrenderer, Rutabaga translates OpenGL API and Vulkan calls to an

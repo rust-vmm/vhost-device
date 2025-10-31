@@ -1,5 +1,3 @@
 # Add the list of code owners here (using their GitHub username)
-* @stsquad @vireshk @stefano-garzarella @epilys
-/vhost-device-gpu/ @dorindabassey
+* @stsquad @vireshk @stefano-garzarella @epilys @dorindabassey
 /vhost-device-scmi/ @mz-pdm
-/vhost-device-sound/ @dorindabassey

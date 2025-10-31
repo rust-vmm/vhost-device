@@ -1,44 +1,5 @@
 # vhost-device-vsock
 
-## Design
-
-The crate introduces a vhost-device-vsock device that enables communication between an
-application running in the guest i.e inside a VM and an application running on the
-host i.e outside the VM. The application running in the guest communicates over VM
-sockets i.e over AF_VSOCK sockets. The application running on the host connects to a
-unix socket on the host i.e communicates over AF_UNIX sockets when using the unix domain
-socket backend through the uds-path option or the application in the host listens or
-connects to vsock on the host i.e communicates over AF_VSOCK sockets when using the
-vsock backend through the forward-cid, forward-listen options. The main components of
-the crate are split into various files as described below:
-
-- [packet.rs](src/packet.rs)
-  - Introduces the **VsockPacket** structure that represents a single vsock packet
-  processing methods.
-- [rxops.rs](src/rxops.rs)
-  - Introduces various vsock operations that are enqueued into the rxqueue to be sent to the
-  guest. Exposes a **RxOps** structure.
-- [rxqueue.rs](src/rxqueue.rs)
-  - rxqueue contains the pending rx operations corresponding to that connection. The queue is
-  represented as a bitmap as we handle connection-oriented connections. The module contains
-  various queue manipulation methods. Exposes a **RxQueue** structure.
-- [thread_backend.rs](src/thread_backend.rs)
-  - Multiplexes connections between host and guest and calls into per connection methods that
-  are responsible for processing data and packets corresponding to the connection. Exposes a
-  **VsockThreadBackend** structure.
-- [txbuf.rs](src/txbuf.rs)
-  - Module to buffer data that is sent from the guest to the host. The module exposes a **LocalTxBuf**
-  structure.
-- [vhost_user_vsock_thread.rs](src/vhost_user_vsock_thread.rs)
-  - Module exposes a **VhostUserVsockThread** structure. It also handles new host initiated
-  connections and provides interfaces for registering host connections with the epoll fd. Also
-  provides interfaces for iterating through the rx and tx queues.
-- [vsock_conn.rs](src/vsock_conn.rs)
-  - Module introduces a **VsockConnection** structure that represents a single vsock connection
-  between the guest and the host. It also processes packets according to their type.
-- [vhu_vsock.rs](src/vhu_vsock.rs)
-  - exposes the main vhost user vsock backend interface.
-
 ## Usage
 
 Run the vhost-device-vsock device with unix domain socket backend:

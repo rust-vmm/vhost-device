@@ -1,5 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+//! # Implementation Design
+//!
+//! The crate introduces a vhost-device-vsock device that enables communication between an
+//! application running in the guest (inside a VM) and an application running on the
+//! host (outside the VM).
+//!
+//! The application running in the guest communicates over VM sockets (AF_VSOCK sockets).
+//! On the host side, the communication mechanism depends on the backend:
+//! - With the Unix domain socket backend (`--uds-path`), the host application communicates over AF_UNIX sockets
+//! - With the vsock backend (`--forward-cid`, `--forward-listen`), the host application communicates over AF_VSOCK sockets
+//!
+//! The main components of the crate are split into various files as described below:
+//!
+//! - [`rxops`]
+//!   - Introduces various vsock operations that are enqueued into the rxqueue to be sent to the
+//!     guest. Exposes a **RxOps** structure.
+//! - [`rxqueue`]
+//!   - rxqueue contains the pending rx operations corresponding to that connection. The queue is
+//!     represented as a bitmap as we handle connection-oriented connections. The module contains
+//!     various queue manipulation methods. Exposes a **RxQueue** structure.
+//! - [`thread_backend`]
+//!   - Multiplexes connections between host and guest and calls into per connection methods that
+//!     are responsible for processing data and packets corresponding to the connection. Exposes a
+//!     **VsockThreadBackend** structure.
+//! - [`txbuf`]
+//!   - Module to buffer data that is sent from the guest to the host. The module exposes a **LocalTxBuf**
+//!     structure.
+//! - [`vhu_vsock_thread`]
+//!   - Module exposes a **VhostUserVsockThread** structure. It also handles new host-initiated
+//!     connections and provides interfaces for registering host connections with the epoll fd. Also
+//!     provides interfaces for iterating through the rx and tx queues.
+//! - [`vsock_conn`]
+//!   - Module introduces a **VsockConnection** structure that represents a single vsock connection
+//!     between the guest and the host. It also processes packets according to their type.
+//! - [`vhu_vsock`]
+//!   - Exposes the main vhost-user vsock backend interface.
+
 mod rxops;
 mod rxqueue;
 mod thread_backend;

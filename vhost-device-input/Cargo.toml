@@ -26,15 +26,15 @@ vhost = { version = "0.14", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.20"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.16"
-vm-memory = "0.16.1"
-vmm-sys-util = "0.14"
+vm-memory = "0.17.1"
+vmm-sys-util = "0.15"
 evdev = "0.13"
 nix = { version = "0.30", features = ["ioctl"] }
 
 [dev-dependencies]
 assert_matches = "1.5"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
-vm-memory = { version = "0.16", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.17", features = ["backend-mmap", "backend-atomic"] }
 
 [lints]
 workspace = true

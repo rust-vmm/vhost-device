@@ -17,13 +17,13 @@ default = ["v4l2-decoder"]
 v4l2-decoder = ["v4l2r"]
 
 [dependencies]
-bitflags = "2.9.4"
+bitflags = "2.10.0"
 clap = { version = "4.5",  features = ["derive"] }
 env_logger = "0.11"
 epoll = "4.4"
 num_enum = "0.7"
 log = "0.4"
-libc = "0.2.176"
+libc = "0.2.177"
 thiserror = "2.0"
 futures-executor = { version = "0.3", features = ["thread-pool"] }
 vhost = { version = "0.14", features = ["vhost-user-backend"] }

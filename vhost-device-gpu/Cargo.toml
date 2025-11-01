@@ -25,7 +25,7 @@ libc = "0.2"
 log = "0.4"
 
 [target.'cfg(not(target_env = "musl"))'.dependencies]
-rutabaga_gfx = { version = "0.1.71", features = ["virgl_renderer"] }
+rutabaga_gfx = { version = "0.1.75", features = ["virgl_renderer"] }
 thiserror = "2.0.17"
 vhost = { version = "0.14.0", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.20"
@@ -33,12 +33,12 @@ virtio-bindings = "0.2.5"
 virtio-queue = "0.16.0"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.14.0"
-bitflags = "2.9.4"
+bitflags = "2.10.0"
 
 [dev-dependencies]
 assert_matches = "1.5"
 mockall = "0.13.0"
-rusty-fork = "0.3.0"
+rusty-fork = "0.3.1"
 tempfile = "3.23"
 virtio-queue = { version = "0.16", features = ["test-utils"] }
 vm-memory = { version = "0.16.1", features = ["backend-mmap", "backend-atomic"] }

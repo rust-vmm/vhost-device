@@ -56,6 +56,9 @@ A virtio-gpu device using the vhost-user protocol.
           [default: true]
           [possible values: true, false]
 
+  -p, --gpu-path <PATH>
+          GPU path (e.g. /dev/dri/renderD128), only available for virglrenderer backend
+
   -h, --help
           Print help (see a summary with '-h')
 

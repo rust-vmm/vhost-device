@@ -63,6 +63,11 @@ pub struct GpuArgs {
 
     #[clap(flatten)]
     pub flags: GpuFlagsArgs,
+
+    /// GPU path (e.g. /dev/dri/renderD128), only available for
+    /// virglrenderer backend.
+    #[clap(short = 'p', long, value_name = "PATH")]
+    pub gpu_path: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -115,7 +120,7 @@ impl From<GpuFlagsArgs> for GpuFlags {
 pub fn config_from_args(args: GpuArgs) -> Result<(PathBuf, GpuConfig), GpuConfigError> {
     let flags = GpuFlags::from(args.flags);
     let capset = args.capset.map(capset_names_into_capset);
-    let config = GpuConfig::new(args.gpu_mode, capset, flags)?;
+    let config = GpuConfig::new(args.gpu_mode, capset, flags, args.gpu_path)?;
     Ok((args.socket_path, config))
 }
 
@@ -186,6 +191,7 @@ mod tests {
                 use_gles: false,
                 use_surfaceless: false,
             },
+            gpu_path: None,
         };
 
         let (socket_path, config) = config_from_args(args).unwrap();

@@ -7,7 +7,9 @@ use std::{
     collections::BTreeMap,
     io::IoSliceMut,
     os::fd::{AsFd, FromRawFd, RawFd},
+    path::PathBuf,
     result::Result,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
@@ -16,7 +18,8 @@ use log::{debug, error, trace, warn};
 use rutabaga_gfx::{
     Resource3DInfo, ResourceCreate3D, ResourceCreateBlob, Rutabaga, RutabagaBuilder,
     RutabagaComponentType, RutabagaFence, RutabagaFenceHandler, RutabagaHandle,
-    RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D, RUTABAGA_HANDLE_TYPE_MEM_DMABUF,
+    RutabagaIntoRawDescriptor, RutabagaIovec, RutabagaPath, Transfer3D,
+    RUTABAGA_HANDLE_TYPE_MEM_DMABUF, RUTABAGA_PATH_TYPE_GPU,
 };
 #[cfg(feature = "gfxstream")]
 use vhost::vhost_user::gpu_message::VhostUserGpuScanout;
@@ -403,13 +406,25 @@ impl RutabagaVirtioGpu {
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
 
-        let builder = RutabagaBuilder::new(gpu_config.capsets().bits(), fence)
+        let mut builder = RutabagaBuilder::new(gpu_config.capsets().bits(), fence)
             .set_use_egl(gpu_config.flags().use_egl)
             .set_use_gles(gpu_config.flags().use_gles)
             .set_use_surfaceless(gpu_config.flags().use_surfaceless)
             // Since vhost-user-gpu is out-of-process this is the only type of blob resource that
             // could work, so this is always enabled
             .set_use_external_blob(true);
+
+        let mut rutabaga_paths = Vec::new();
+        if let Some(gpu_path) = gpu_config.gpu_path.as_ref() {
+            rutabaga_paths.push(RutabagaPath {
+                // PathBuf::from_str() never fails
+                path: PathBuf::from_str(gpu_path).unwrap(),
+                path_type: RUTABAGA_PATH_TYPE_GPU,
+            });
+        }
+        if !rutabaga_paths.is_empty() {
+            builder = builder.set_rutabaga_paths(Some(rutabaga_paths));
+        }
 
         (builder, component)
     }
@@ -1155,7 +1170,7 @@ mod tests {
             _ => panic!("Unsupported component type for test"),
         };
 
-        let config = GpuConfig::new(gpu_mode, capsets, GpuFlags::default()).unwrap();
+        let config = GpuConfig::new(gpu_mode, capsets, GpuFlags::default(), None).unwrap();
 
         // Mock memory
         let mem = GuestMemoryAtomic::new(

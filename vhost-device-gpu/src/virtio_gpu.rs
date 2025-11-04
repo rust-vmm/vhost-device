@@ -18,7 +18,7 @@ use rutabaga_gfx::{
     RutabagaComponentType, RutabagaFence, RutabagaFenceHandler, RutabagaHandle,
     RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D, RUTABAGA_HANDLE_TYPE_MEM_DMABUF,
 };
-#[cfg(feature = "gfxstream")]
+#[cfg(feature = "backend-gfxstream")]
 use vhost::vhost_user::gpu_message::VhostUserGpuScanout;
 use vhost::vhost_user::{
     gpu_message::{
@@ -399,7 +399,7 @@ impl RutabagaVirtioGpu {
     ) -> (RutabagaBuilder, RutabagaComponentType) {
         let component = match gpu_config.gpu_mode() {
             GpuMode::VirglRenderer => RutabagaComponentType::VirglRenderer,
-            #[cfg(feature = "gfxstream")]
+            #[cfg(feature = "backend-gfxstream")]
             GpuMode::Gfxstream => RutabagaComponentType::Gfxstream,
         };
 
@@ -662,7 +662,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
                 self.scanouts[scanout_idx] = Some(VirtioGpuScanout { resource_id });
             }
 
-            #[cfg(feature = "gfxstream")]
+            #[cfg(feature = "backend-gfxstream")]
             RutabagaComponentType::Gfxstream => {
                 if resource_id == 0 {
                     self.scanouts[scanout_idx] = None;
@@ -811,7 +811,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
                         })?;
                 }
 
-                #[cfg(feature = "gfxstream")]
+                #[cfg(feature = "backend-gfxstream")]
                 RutabagaComponentType::Gfxstream => {
                     // Gfxstream expects image memory transfer (read + send)
                     let resource_size = resource.calculate_size().map_err(|e| {
@@ -1096,7 +1096,7 @@ impl VirtioGpu for RutabagaVirtioGpu {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     use std::env::set_var;
     use std::{
         os::unix::net::UnixStream,
@@ -1148,7 +1148,7 @@ mod tests {
                 GpuMode::VirglRenderer,
                 Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
             ),
-            #[cfg(feature = "gfxstream")]
+            #[cfg(feature = "backend-gfxstream")]
             RutabagaComponentType::Gfxstream => {
                 (GpuMode::Gfxstream, Some(GpuCapset::GFXSTREAM_GLES))
             }
@@ -1349,7 +1349,7 @@ mod tests {
             assert_matches!(result, Err(ErrUnspec));
         }
 
-        #[cfg(feature = "gfxstream")]
+        #[cfg(feature = "backend-gfxstream")]
         #[test]
         fn test_set_scanout_with_gfxstream_backend() {
             set_var("EGL_PLATFORM", "surfaceless");   // no X/Wayland/GBM needed

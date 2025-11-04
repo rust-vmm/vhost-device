@@ -87,39 +87,34 @@ Because blob resources are not yet supported, some capsets are limited:
 - gfxstream-vulkan and gfxstream-gles support are exposed, but can practically only be used for display output, there is no hardware acceleration yet.
 ## Features
 
-The device leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx)
-crate to provide rendering with virglrenderer and gfxstream.
-
 This crate supports two GPU backends: gfxstream (default) and virglrenderer.
-Both require the system-provided virglrenderer and minigbm libraries due to the dependence on rutabaga_gfx.
+
+The **virglrenderer** backend uses the [virglrenderer-rs](https://crates.io/crates/virglrenderer-rs)
+crate, which provides Rust bindings to the native virglrenderer library. It translates
+OpenGL API and Vulkan calls to an intermediate representation and allows for OpenGL
+acceleration on the host.
+
+The **gfxstream** backend leverages the [rutabaga_gfx](https://crates.io/crates/rutabaga_gfx)
+crate. With gfxstream rendering mode, GLES and Vulkan calls are forwarded to the host
+with minimal modification.
 
 Install the development packages for your distro, then build with:
 
 ```session
-CROSVM_USE_SYSTEM_VIRGLRENDERER=1 \
-CROSVM_USE_SYSTEM_MINIGBM=1 \
-cargo build
+$ cargo build
 ```
 
 gfxstream support is compiled by default, it can be disabled by not building with the `backend-gfxstream` feature flag, for example:
 
 ```session
-CROSVM_USE_SYSTEM_VIRGLRENDERER=1 \
-CROSVM_USE_SYSTEM_MINIGBM=1 \
-cargo build --no-default-features
+$ cargo build --no-default-features
 ```
-
-With Virglrenderer, Rutabaga translates OpenGL API and Vulkan calls to an
-intermediate representation and allows for OpenGL acceleration on the host.
-
-With the gfxstream rendering mode, GLES and Vulkan calls are forwarded to the
-host with minimal modification.
 
 ## Examples
 
 First start the daemon on the host machine using either of the 2 gpu modes:
 
-1) `virglrenderer`
+1) `virglrenderer` (if the crate has been compiled with the feature `backend-virgl`)
 2) `gfxstream` (if the crate has been compiled with the feature `backend-gfxstream`)
 
 ```shell

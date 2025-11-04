@@ -71,6 +71,14 @@ pub const CONTROL_QUEUE: u16 = 0;
 pub const CURSOR_QUEUE: u16 = 1;
 pub const POLL_EVENT: u16 = 3;
 
+/// 3D resource creation parameters.  Also used to create 2D resource.
+///
+/// Constants based on Mesa's (internal) Gallium interface.  Not in the
+/// virtio-gpu spec, but should be since dumb resources can't work with
+/// gfxstream/virglrenderer without this.
+pub const VIRTIO_GPU_TEXTURE_2D: u32 = 2;
+pub const VIRTIO_GPU_BIND_RENDER_TARGET: u32 = 2;
+
 pub const VIRTIO_GPU_MAX_SCANOUTS: u32 = 16;
 
 /// `CHROMIUM(b/277982577)` success responses
@@ -383,6 +391,25 @@ pub struct virtio_gpu_resource_create_3d {
     pub nr_samples: Le32,
     pub flags: Le32,
     pub padding: Le32,
+}
+
+impl From<virtio_gpu_resource_create_2d> for virtio_gpu_resource_create_3d {
+    fn from(args: virtio_gpu_resource_create_2d) -> Self {
+        Self {
+            resource_id: args.resource_id,
+            target: VIRTIO_GPU_TEXTURE_2D.into(),
+            format: args.format,
+            bind: VIRTIO_GPU_BIND_RENDER_TARGET.into(),
+            width: args.width,
+            height: args.height,
+            depth: 1.into(),      // default for 2D
+            array_size: 1.into(), // default for 2D
+            last_level: 0.into(), // default mipmap
+            nr_samples: 0.into(), // default sample count
+            flags: 0.into(),
+            padding: 0.into(),
+        }
+    }
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by

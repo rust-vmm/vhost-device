@@ -11,7 +11,13 @@
 
 pub mod device;
 pub mod protocol;
-pub mod virtio_gpu;
+// Module for backends
+pub mod backend;
+// Module for the common renderer trait
+pub mod gpu_types;
+pub mod renderer;
+#[cfg(test)]
+pub(crate) mod testutils;
 
 use std::{
     fmt::{Display, Formatter},
@@ -23,6 +29,7 @@ use clap::ValueEnum;
 use log::info;
 #[cfg(feature = "backend-gfxstream")]
 use rutabaga_gfx::{RUTABAGA_CAPSET_GFXSTREAM_GLES, RUTABAGA_CAPSET_GFXSTREAM_VULKAN};
+#[cfg(feature = "backend-virgl")]
 use rutabaga_gfx::{RUTABAGA_CAPSET_VIRGL, RUTABAGA_CAPSET_VIRGL2};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
@@ -33,6 +40,7 @@ use crate::device::VhostUserGpuBackend;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GpuMode {
     #[value(name = "virglrenderer", alias("virgl-renderer"))]
+    #[cfg(feature = "backend-virgl")]
     VirglRenderer,
     #[cfg(feature = "backend-gfxstream")]
     Gfxstream,
@@ -41,6 +49,7 @@ pub enum GpuMode {
 impl Display for GpuMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(feature = "backend-virgl")]
             Self::VirglRenderer => write!(f, "virglrenderer"),
             #[cfg(feature = "backend-gfxstream")]
             Self::Gfxstream => write!(f, "gfxstream"),
@@ -52,8 +61,11 @@ bitflags! {
     /// A bitmask for representing supported gpu capability sets.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct GpuCapset: u64 {
+        #[cfg(feature = "backend-virgl")]
         const VIRGL = 1 << RUTABAGA_CAPSET_VIRGL as u64;
+        #[cfg(feature = "backend-virgl")]
         const VIRGL2 = 1 << RUTABAGA_CAPSET_VIRGL2 as u64;
+        #[cfg(feature = "backend-virgl")]
         const ALL_VIRGLRENDERER_CAPSETS = Self::VIRGL.bits() | Self::VIRGL2.bits();
 
         #[cfg(feature = "backend-gfxstream")]
@@ -75,7 +87,9 @@ impl Display for GpuCapset {
             first = false;
 
             match capset {
+                #[cfg(feature = "backend-virgl")]
                 Self::VIRGL => write!(f, "virgl"),
+                #[cfg(feature = "backend-virgl")]
                 Self::VIRGL2 => write!(f, "virgl2"),
                 #[cfg(feature = "backend-gfxstream")]
                 Self::GFXSTREAM_VULKAN => write!(f, "gfxstream-vulkan"),
@@ -139,6 +153,7 @@ pub enum GpuConfigError {
 }
 
 impl GpuConfig {
+    #[cfg(feature = "backend-virgl")]
     pub const DEFAULT_VIRGLRENDER_CAPSET_MASK: GpuCapset = GpuCapset::ALL_VIRGLRENDERER_CAPSETS;
 
     #[cfg(feature = "backend-gfxstream")]
@@ -146,6 +161,7 @@ impl GpuConfig {
 
     pub const fn get_default_capset_for_mode(gpu_mode: GpuMode) -> GpuCapset {
         match gpu_mode {
+            #[cfg(feature = "backend-virgl")]
             GpuMode::VirglRenderer => Self::DEFAULT_VIRGLRENDER_CAPSET_MASK,
             #[cfg(feature = "backend-gfxstream")]
             GpuMode::Gfxstream => Self::DEFAULT_GFXSTREAM_CAPSET_MASK,
@@ -154,6 +170,7 @@ impl GpuConfig {
 
     fn validate_capset(gpu_mode: GpuMode, capset: GpuCapset) -> Result<(), GpuConfigError> {
         let supported_capset_mask = match gpu_mode {
+            #[cfg(feature = "backend-virgl")]
             GpuMode::VirglRenderer => GpuCapset::ALL_VIRGLRENDERER_CAPSETS,
             #[cfg(feature = "backend-gfxstream")]
             GpuMode::Gfxstream => GpuCapset::ALL_GFXSTREAM_CAPSETS,
@@ -237,6 +254,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "backend-virgl")]
     fn test_gpu_config_create_default_virglrenderer() {
         let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::new_default()).unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
@@ -264,6 +282,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "backend-virgl")]
     fn test_gpu_config_valid_combination() {
         let config = GpuConfig::new(
             GpuMode::VirglRenderer,
@@ -304,12 +323,14 @@ mod tests {
 
     #[test]
     fn test_default_num_capsets() {
+        #[cfg(feature = "backend-virgl")]
         assert_eq!(GpuConfig::DEFAULT_VIRGLRENDER_CAPSET_MASK.num_capsets(), 2);
         #[cfg(feature = "backend-gfxstream")]
         assert_eq!(GpuConfig::DEFAULT_GFXSTREAM_CAPSET_MASK.num_capsets(), 2);
     }
 
     #[test]
+    #[cfg(feature = "backend-virgl")]
     fn test_capset_display_multiple() {
         let capset = GpuCapset::VIRGL | GpuCapset::VIRGL2;
         let output = capset.to_string();
@@ -327,6 +348,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "backend-virgl")]
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
         let socket_name = Path::new("/proc/-1/nonexistent");

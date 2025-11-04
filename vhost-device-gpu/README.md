@@ -64,7 +64,7 @@ A virtio-gpu device using the vhost-user protocol.
 ```
 
 _NOTE_: Option `-g, --gpu-mode` can only accept the `gfxstream` value if the
-crate has been built with the `gfxstream` feature, which is the default.
+crate has been built with the `backend-gfxstream` feature, which is the default.
 
 ## Limitations
 
@@ -101,7 +101,7 @@ CROSVM_USE_SYSTEM_MINIGBM=1 \
 cargo build
 ```
 
-gfxstream support is compiled by default, it can be disabled by not building with the `gfxstream` feature flag, for example:
+gfxstream support is compiled by default, it can be disabled by not building with the `backend-gfxstream` feature flag, for example:
 
 ```session
 CROSVM_USE_SYSTEM_VIRGLRENDERER=1 \
@@ -120,7 +120,7 @@ host with minimal modification.
 First start the daemon on the host machine using either of the 2 gpu modes:
 
 1) `virglrenderer`
-2) `gfxstream` (if the crate has been compiled with the feature `gfxstream`)
+2) `gfxstream` (if the crate has been compiled with the feature `backend-gfxstream`)
 
 ```shell
 host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virglrenderer

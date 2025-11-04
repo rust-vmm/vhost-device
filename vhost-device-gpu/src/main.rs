@@ -22,13 +22,13 @@ pub enum CapsetName {
     /// [gfxstream] Vulkan implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     GfxstreamVulkan = GpuCapset::GFXSTREAM_VULKAN.bits(),
 
     /// [gfxstream] OpenGL ES implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     GfxstreamGles = GpuCapset::GFXSTREAM_GLES.bits(),
 }
 

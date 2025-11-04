@@ -14,9 +14,11 @@ use vhost_device_gpu::{start_backend, GpuCapset, GpuConfig, GpuConfigError, GpuF
 #[repr(u64)]
 pub enum CapsetName {
     /// [virglrenderer] OpenGL implementation, superseded by Virgl2
+    #[cfg(feature = "backend-virgl")]
     Virgl = GpuCapset::VIRGL.bits(),
 
     /// [virglrenderer] OpenGL implementation
+    #[cfg(feature = "backend-virgl")]
     Virgl2 = GpuCapset::VIRGL2.bits(),
 
     /// [gfxstream] Vulkan implementation (partial support only){n}

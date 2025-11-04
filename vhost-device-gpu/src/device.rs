@@ -4,6 +4,41 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+/// Helper macro to manage the thread-local lazy initialization of GPU adapters.
+///
+/// This macro ensures that a GPU backend adapter (e.g., Gfxstream or Virgl) is
+/// instantiated only once per thread when the first event arrives (`lazy
+/// initialization`).
+macro_rules! handle_adapter {
+    ($adapter_type:ty, $tls_name:ident, $new_adapter:expr, $self:expr, $device_event:expr, $vrings:expr) => {{
+        thread_local! {
+            static $tls_name: RefCell<Option<$adapter_type>> = const { RefCell::new(None) };
+        }
+
+        let mut event_poll_fd = None;
+
+        $tls_name.with_borrow_mut(|maybe_renderer| {
+            let renderer = match maybe_renderer {
+                Some(renderer) => renderer,
+                None => {
+                    // Pass $vrings to the call
+                    let (control_vring, gpu_backend) = $self.extract_backend_and_vring($vrings)?;
+
+                    let renderer = $new_adapter(control_vring, gpu_backend);
+
+                    event_poll_fd = renderer.get_event_poll_fd();
+                    maybe_renderer.insert(renderer)
+                }
+            };
+
+            // Pass $device_event, renderer, and $vrings to the call
+            $self.handle_event($device_event, renderer, $vrings)
+        })?;
+
+        Ok(event_poll_fd)
+    }};
+}
+
 use std::{
     cell::RefCell,
     io::{self, Result as IoResult},
@@ -12,10 +47,7 @@ use std::{
 };
 
 use log::{debug, error, info, trace, warn};
-use rutabaga_gfx::{
-    ResourceCreate3D, RutabagaFence, Transfer3D, RUTABAGA_PIPE_BIND_RENDER_TARGET,
-    RUTABAGA_PIPE_TEXTURE_2D,
-};
+use rutabaga_gfx::RutabagaFence;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::{
     gpu_message::{VhostUserGpuCursorPos, VhostUserGpuEdidRequest},
@@ -40,17 +72,23 @@ use vmm_sys_util::{
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
+#[cfg(feature = "backend-gfxstream")]
+use crate::backend::gfxstream::GfxstreamAdapter;
+#[cfg(feature = "backend-virgl")]
+use crate::backend::virgl::VirglRendererAdapter;
 use crate::{
+    gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
     protocol::{
         virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_get_edid,
         virtio_gpu_resource_create_2d, virtio_gpu_resource_create_3d, virtio_gpu_transfer_host_3d,
         virtio_gpu_transfer_to_host_2d, virtio_gpu_update_cursor, GpuCommand,
         GpuCommandDecodeError, GpuResponse::ErrUnspec, GpuResponseEncodeError, VirtioGpuConfig,
         VirtioGpuResult, CONTROL_QUEUE, CURSOR_QUEUE, NUM_QUEUES, POLL_EVENT, QUEUE_SIZE,
-        VIRTIO_GPU_FLAG_FENCE, VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_MAX_SCANOUTS,
+        VIRTIO_GPU_BIND_RENDER_TARGET, VIRTIO_GPU_FLAG_FENCE, VIRTIO_GPU_FLAG_INFO_RING_IDX,
+        VIRTIO_GPU_MAX_SCANOUTS, VIRTIO_GPU_TEXTURE_2D,
     },
-    virtio_gpu::{RutabagaVirtioGpu, VirtioGpu, VirtioGpuRing},
-    GpuConfig,
+    renderer::Renderer,
+    GpuConfig, GpuMode,
 };
 
 type Result<T> = std::result::Result<T, Error>;
@@ -87,6 +125,8 @@ pub enum Error {
     EpollHandler(String),
     #[error("Failed register epoll listener: {0}")]
     RegisterEpollListener(io::Error),
+    #[error("Failed to create backend")]
+    BackendCreationFailed,
 }
 
 impl From<Error> for io::Error {
@@ -119,7 +159,6 @@ impl VhostUserGpuBackend {
             gpu_config.capsets(),
             gpu_config.flags()
         );
-
         let inner = VhostUserGpuBackendInner {
             virtio_cfg: VirtioGpuConfig {
                 events_read: 0.into(),
@@ -158,62 +197,63 @@ impl VhostUserGpuBackend {
 
 impl VhostUserGpuBackendInner {
     fn process_gpu_command(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         mem: &GuestMemoryMmap,
         hdr: virtio_gpu_ctrl_hdr,
         cmd: GpuCommand,
     ) -> VirtioGpuResult {
-        virtio_gpu.force_ctx_0();
+        renderer.force_ctx_0();
         debug!("process_gpu_command: {cmd:?}");
         match cmd {
-            GpuCommand::GetDisplayInfo => virtio_gpu.display_info(),
-            GpuCommand::GetEdid(req) => Self::handle_get_edid(virtio_gpu, req),
-            GpuCommand::ResourceCreate2d(req) => Self::handle_resource_create_2d(virtio_gpu, req),
-            GpuCommand::ResourceUnref(req) => virtio_gpu.unref_resource(req.resource_id.into()),
+            GpuCommand::GetDisplayInfo => renderer.display_info(),
+            GpuCommand::GetEdid(req) => Self::handle_get_edid(renderer, req),
+            GpuCommand::ResourceCreate2d(req) => Self::handle_resource_create_2d(renderer, req),
+            GpuCommand::ResourceUnref(req) => renderer.unref_resource(req.resource_id.into()),
             GpuCommand::SetScanout(req) => {
-                virtio_gpu.set_scanout(req.scanout_id.into(), req.resource_id.into(), req.r.into())
+                renderer.set_scanout(req.scanout_id.into(), req.resource_id.into(), req.r)
             }
             GpuCommand::ResourceFlush(req) => {
-                virtio_gpu.flush_resource(req.resource_id.into(), req.r.into())
+                renderer.flush_resource(req.resource_id.into(), req.r)
             }
-            GpuCommand::TransferToHost2d(req) => Self::handle_transfer_to_host_2d(virtio_gpu, req),
+            GpuCommand::TransferToHost2d(req) => Self::handle_transfer_to_host_2d(renderer, req),
             GpuCommand::ResourceAttachBacking(req, iovecs) => {
-                virtio_gpu.attach_backing(req.resource_id.into(), mem, iovecs)
+                renderer.attach_backing(req.resource_id.into(), mem, iovecs)
             }
             GpuCommand::ResourceDetachBacking(req) => {
-                virtio_gpu.detach_backing(req.resource_id.into())
+                renderer.detach_backing(req.resource_id.into())
             }
-            GpuCommand::UpdateCursor(req) => Self::handle_update_cursor(virtio_gpu, req),
-            GpuCommand::MoveCursor(req) => Self::handle_move_cursor(virtio_gpu, req),
+            GpuCommand::UpdateCursor(req) => Self::handle_update_cursor(renderer, req),
+            GpuCommand::MoveCursor(req) => Self::handle_move_cursor(renderer, req),
             GpuCommand::ResourceAssignUuid(_) => {
                 panic!("virtio_gpu: GpuCommand::ResourceAssignUuid unimplemented")
             }
-            GpuCommand::GetCapsetInfo(req) => virtio_gpu.get_capset_info(req.capset_index.into()),
+            GpuCommand::GetCapsetInfo(req) => renderer.get_capset_info(req.capset_index.into()),
             GpuCommand::GetCapset(req) => {
-                virtio_gpu.get_capset(req.capset_id.into(), req.capset_version.into())
+                renderer.get_capset(req.capset_id.into(), req.capset_version.into())
             }
-            GpuCommand::CtxCreate(req) => Self::handle_ctx_create(virtio_gpu, hdr, req),
-            GpuCommand::CtxDestroy(_) => virtio_gpu.destroy_context(hdr.ctx_id.into()),
+            GpuCommand::CtxCreate(req) => Self::handle_ctx_create(renderer, hdr, req),
+            GpuCommand::CtxDestroy(_) => renderer.destroy_context(hdr.ctx_id.into()),
             GpuCommand::CtxAttachResource(req) => {
-                virtio_gpu.context_attach_resource(hdr.ctx_id.into(), req.resource_id.into())
+                renderer.context_attach_resource(hdr.ctx_id.into(), req.resource_id.into())
             }
             GpuCommand::CtxDetachResource(req) => {
-                virtio_gpu.context_detach_resource(hdr.ctx_id.into(), req.resource_id.into())
+                renderer.context_detach_resource(hdr.ctx_id.into(), req.resource_id.into())
             }
-            GpuCommand::ResourceCreate3d(req) => Self::handle_resource_create_3d(virtio_gpu, req),
+            GpuCommand::ResourceCreate3d(req) => Self::handle_resource_create_3d(renderer, req),
             GpuCommand::TransferToHost3d(req) => {
-                Self::handle_transfer_to_host_3d(virtio_gpu, hdr.ctx_id.into(), req)
+                Self::handle_transfer_to_host_3d(renderer, hdr.ctx_id.into(), req)
             }
             GpuCommand::TransferFromHost3d(req) => {
-                Self::handle_transfer_from_host_3d(virtio_gpu, hdr.ctx_id.into(), req)
+                Self::handle_transfer_from_host_3d(renderer, hdr.ctx_id.into(), req)
             }
             GpuCommand::CmdSubmit3d {
                 fence_ids,
                 mut cmd_data,
-            } => virtio_gpu.submit_command(hdr.ctx_id.into(), &mut cmd_data, &fence_ids),
+            } => renderer.submit_command(hdr.ctx_id.into(), &mut cmd_data, &fence_ids),
             GpuCommand::ResourceCreateBlob(_) => {
                 panic!("virtio_gpu: GpuCommand::ResourceCreateBlob unimplemented")
             }
+
             GpuCommand::SetScanoutBlob(_) => {
                 panic!("virtio_gpu: GpuCommand::SetScanoutBlob unimplemented")
             }
@@ -226,21 +266,21 @@ impl VhostUserGpuBackendInner {
         }
     }
 
-    fn handle_get_edid(virtio_gpu: &impl VirtioGpu, req: virtio_gpu_get_edid) -> VirtioGpuResult {
+    fn handle_get_edid(renderer: &dyn Renderer, req: virtio_gpu_get_edid) -> VirtioGpuResult {
         let edid_req = VhostUserGpuEdidRequest {
             scanout_id: req.scanout.into(),
         };
-        virtio_gpu.get_edid(edid_req)
+        renderer.get_edid(edid_req)
     }
 
     fn handle_resource_create_2d(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         req: virtio_gpu_resource_create_2d,
     ) -> VirtioGpuResult {
-        let resource_create_3d = ResourceCreate3D {
-            target: RUTABAGA_PIPE_TEXTURE_2D,
+        let resource_create_3d = ResourceCreate3d {
+            target: VIRTIO_GPU_TEXTURE_2D,
             format: req.format.into(),
-            bind: RUTABAGA_PIPE_BIND_RENDER_TARGET,
+            bind: VIRTIO_GPU_BIND_RENDER_TARGET,
             width: req.width.into(),
             height: req.height.into(),
             depth: 1,
@@ -249,25 +289,25 @@ impl VhostUserGpuBackendInner {
             nr_samples: 0,
             flags: 0,
         };
-        virtio_gpu.resource_create_3d(req.resource_id.into(), resource_create_3d)
+        renderer.resource_create_3d(req.resource_id.into(), resource_create_3d)
     }
 
     fn handle_transfer_to_host_2d(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         req: virtio_gpu_transfer_to_host_2d,
     ) -> VirtioGpuResult {
-        let transfer = Transfer3D::new_2d(
+        let transfer = Transfer3DDesc::new_2d(
             req.r.x.into(),
             req.r.y.into(),
             req.r.width.into(),
             req.r.height.into(),
             req.offset.into(),
         );
-        virtio_gpu.transfer_write(0, req.resource_id.into(), transfer)
+        renderer.transfer_write_2d(0, req.resource_id.into(), transfer)
     }
 
     fn handle_update_cursor(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         req: virtio_gpu_update_cursor,
     ) -> VirtioGpuResult {
         let cursor_pos = VhostUserGpuCursorPos {
@@ -275,7 +315,7 @@ impl VhostUserGpuBackendInner {
             x: req.pos.x.into(),
             y: req.pos.y.into(),
         };
-        virtio_gpu.update_cursor(
+        renderer.update_cursor(
             req.resource_id.into(),
             cursor_pos,
             req.hot_x.into(),
@@ -284,7 +324,7 @@ impl VhostUserGpuBackendInner {
     }
 
     fn handle_move_cursor(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         req: virtio_gpu_update_cursor,
     ) -> VirtioGpuResult {
         let cursor = VhostUserGpuCursorPos {
@@ -292,16 +332,16 @@ impl VhostUserGpuBackendInner {
             x: req.pos.x.into(),
             y: req.pos.y.into(),
         };
-        virtio_gpu.move_cursor(req.resource_id.into(), cursor)
+        renderer.move_cursor(req.resource_id.into(), cursor)
     }
 
     fn handle_ctx_create(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         hdr: virtio_gpu_ctrl_hdr,
         req: virtio_gpu_ctx_create,
     ) -> VirtioGpuResult {
         let context_name: Option<String> = Some(req.get_debug_name());
-        virtio_gpu.create_context(
+        renderer.create_context(
             hdr.ctx_id.into(),
             req.context_init.into(),
             context_name.as_deref(),
@@ -309,10 +349,10 @@ impl VhostUserGpuBackendInner {
     }
 
     fn handle_resource_create_3d(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         req: virtio_gpu_resource_create_3d,
     ) -> VirtioGpuResult {
-        let resource_create_3d = ResourceCreate3D {
+        let resource_create_3d = ResourceCreate3d {
             target: req.target.into(),
             format: req.format.into(),
             bind: req.bind.into(),
@@ -324,15 +364,15 @@ impl VhostUserGpuBackendInner {
             nr_samples: req.nr_samples.into(),
             flags: req.flags.into(),
         };
-        virtio_gpu.resource_create_3d(req.resource_id.into(), resource_create_3d)
+        renderer.resource_create_3d(req.resource_id.into(), resource_create_3d)
     }
 
     fn handle_transfer_to_host_3d(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         ctx_id: u32,
         req: virtio_gpu_transfer_host_3d,
     ) -> VirtioGpuResult {
-        let transfer = Transfer3D {
+        let transfer = Transfer3DDesc {
             x: req.box_.x.into(),
             y: req.box_.y.into(),
             z: req.box_.z.into(),
@@ -344,15 +384,15 @@ impl VhostUserGpuBackendInner {
             layer_stride: req.layer_stride.into(),
             offset: req.offset.into(),
         };
-        virtio_gpu.transfer_write(ctx_id, req.resource_id.into(), transfer)
+        renderer.transfer_write(ctx_id, req.resource_id.into(), transfer)
     }
 
     fn handle_transfer_from_host_3d(
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         ctx_id: u32,
         req: virtio_gpu_transfer_host_3d,
     ) -> VirtioGpuResult {
-        let transfer = Transfer3D {
+        let transfer = Transfer3DDesc {
             x: req.box_.x.into(),
             y: req.box_.y.into(),
             z: req.box_.z.into(),
@@ -364,12 +404,12 @@ impl VhostUserGpuBackendInner {
             layer_stride: req.layer_stride.into(),
             offset: req.offset.into(),
         };
-        virtio_gpu.transfer_read(ctx_id, req.resource_id.into(), transfer, None)
+        renderer.transfer_read(ctx_id, req.resource_id.into(), transfer, None)
     }
 
     fn process_queue_chain(
         &self,
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         vring: &VringRwLock,
         head_index: u16,
         reader: &mut Reader,
@@ -382,8 +422,7 @@ impl VhostUserGpuBackendInner {
         let ctrl_hdr = match GpuCommand::decode(reader) {
             Ok((ctrl_hdr, gpu_cmd)) => {
                 let cmd_name = gpu_cmd.command_name();
-                let response_result =
-                    Self::process_gpu_command(virtio_gpu, &mem, ctrl_hdr, gpu_cmd);
+                let response_result = Self::process_gpu_command(renderer, &mem, ctrl_hdr, gpu_cmd);
                 // Unwrap the response from inside Result and log information
                 response = match response_result {
                     Ok(response) => response,
@@ -425,7 +464,7 @@ impl VhostUserGpuBackendInner {
                     ctx_id,
                     ring_idx,
                 };
-                if let Err(fence_response) = virtio_gpu.create_fence(fence) {
+                if let Err(fence_response) = renderer.create_fence(fence) {
                     warn!(
                         "Failed to create fence: fence_id: {fence_id} fence_response: \
                          {fence_response}"
@@ -447,7 +486,7 @@ impl VhostUserGpuBackendInner {
                 _ => VirtioGpuRing::ContextSpecific { ctx_id, ring_idx },
             };
             debug!("Trying to process_fence for the command");
-            virtio_gpu.process_fence(ring, fence_id, head_index, response_len)
+            renderer.process_fence(ring, fence_id, head_index, response_len)
         } else {
             true
         };
@@ -456,14 +495,14 @@ impl VhostUserGpuBackendInner {
             vring
                 .add_used(head_index, response_len)
                 .map_err(Error::QueueAddUsed)?;
-            trace!("add_used {} bytes", response_len);
+            trace!("add_used {response_len} bytes");
             *signal_used_queue = true;
         }
         Ok(())
     }
 
     /// Process the requests in the vring and dispatch replies
-    fn process_queue(&self, virtio_gpu: &mut impl VirtioGpu, vring: &VringRwLock) -> Result<()> {
+    fn process_queue(&self, renderer: &mut dyn Renderer, vring: &VringRwLock) -> Result<()> {
         let mem = self.mem.as_ref().unwrap().memory().into_inner();
         let desc_chains: Vec<_> = vring
             .get_mut()
@@ -482,7 +521,7 @@ impl VhostUserGpuBackendInner {
             let mut writer = desc_chain.writer(&mem).map_err(Error::CreateWriter)?;
 
             self.process_queue_chain(
-                virtio_gpu,
+                renderer,
                 vring,
                 head_index,
                 &mut reader,
@@ -505,7 +544,7 @@ impl VhostUserGpuBackendInner {
     fn handle_event(
         &self,
         device_event: u16,
-        virtio_gpu: &mut impl VirtioGpu,
+        renderer: &mut dyn Renderer,
         vrings: &[VringRwLock],
     ) -> IoResult<()> {
         match device_event {
@@ -520,27 +559,39 @@ impl VhostUserGpuBackendInner {
                     // requests on the queue.
                     loop {
                         vring.disable_notification().unwrap();
-                        self.process_queue(virtio_gpu, vring)?;
+                        self.process_queue(renderer, vring)?;
                         if !vring.enable_notification().unwrap() {
                             break;
                         }
                     }
                 } else {
                     // Without EVENT_IDX, a single call is enough.
-                    self.process_queue(virtio_gpu, vring)?;
+                    self.process_queue(renderer, vring)?;
                 }
             }
             POLL_EVENT => {
                 trace!("Handling POLL_EVENT");
-                virtio_gpu.event_poll();
+                renderer.event_poll();
             }
             _ => {
-                warn!("unhandled device_event: {}", device_event);
+                warn!("unhandled device_event: {device_event}");
                 return Err(Error::HandleEventUnknown.into());
             }
         }
 
         Ok(())
+    }
+
+    fn extract_backend_and_vring<'a>(
+        &mut self,
+        vrings: &'a [VringRwLock],
+    ) -> IoResult<(&'a VringRwLock, GpuBackend)> {
+        let control_vring = &vrings[CONTROL_QUEUE as usize];
+        let backend = self
+            .gpu_backend
+            .take()
+            .ok_or_else(|| io::Error::other("set_gpu_socket() not called, GpuBackend missing"))?;
+        Ok((control_vring, backend))
     }
 
     fn lazy_init_and_handle_event(
@@ -550,45 +601,36 @@ impl VhostUserGpuBackendInner {
         vrings: &[VringRwLock],
         _thread_id: usize,
     ) -> IoResult<Option<EventFd>> {
-        // We use thread_local here because it is the easiest way to handle VirtioGpu
-        // being !Send
-        thread_local! {
-            static VIRTIO_GPU_REF: RefCell<Option<RutabagaVirtioGpu>> = const { RefCell::new(None) };
-        }
-
         debug!("Handle event called");
         if evset != EventSet::IN {
             return Err(Error::HandleEventNotEpollIn.into());
-        };
+        }
 
-        let mut event_poll_fd = None;
-        VIRTIO_GPU_REF.with_borrow_mut(|maybe_virtio_gpu| {
-            let virtio_gpu = match maybe_virtio_gpu {
-                Some(virtio_gpu) => virtio_gpu,
-                None => {
-                    let gpu_backend = self.gpu_backend.take().ok_or_else(|| {
-                        io::Error::other("set_gpu_socket() not called, GpuBackend missing")
-                    })?;
+        match self.gpu_config.gpu_mode() {
+            #[cfg(feature = "backend-gfxstream")]
+            GpuMode::Gfxstream => handle_adapter!(
+                GfxstreamAdapter,
+                TLS_GFXSTREAM,
+                |control_vring, gpu_backend| {
+                    GfxstreamAdapter::new(control_vring, &self.gpu_config, gpu_backend)
+                },
+                self,
+                device_event,
+                vrings
+            ),
 
-                    // We currently pass the CONTROL_QUEUE vring to RutabagaVirtioGpu, because we
-                    // only expect to process fences for that queue.
-                    let control_vring = &vrings[CONTROL_QUEUE as usize];
-
-                    // VirtioGpu::new can be called once per process (otherwise it panics),
-                    // so if somehow another thread accidentally wants to create another gpu here,
-                    // it will panic anyway
-                    let virtio_gpu =
-                        RutabagaVirtioGpu::new(control_vring, &self.gpu_config, gpu_backend);
-                    event_poll_fd = virtio_gpu.get_event_poll_fd();
-
-                    maybe_virtio_gpu.insert(virtio_gpu)
-                }
-            };
-
-            self.handle_event(device_event, virtio_gpu, vrings)
-        })?;
-
-        Ok(event_poll_fd)
+            #[cfg(feature = "backend-virgl")]
+            GpuMode::VirglRenderer => handle_adapter!(
+                VirglRendererAdapter,
+                TLS_VIRGL,
+                |control_vring, gpu_backend| {
+                    VirglRendererAdapter::new(control_vring, &self.gpu_config, gpu_backend)
+                },
+                self,
+                device_event,
+                vrings
+            ),
+        }
     }
 
     fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
@@ -640,7 +682,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
 
     fn set_event_idx(&self, enabled: bool) {
         self.inner.lock().unwrap().event_idx_enabled = enabled;
-        debug!("Event idx set to: {}", enabled);
+        debug!("Event idx set to: {enabled}");
     }
 
     fn update_memory(&self, mem: GuestMemoryAtomic<GuestMemoryMmap>) -> IoResult<()> {
@@ -677,11 +719,11 @@ impl VhostUserBackend for VhostUserGpuBackend {
         )?;
 
         if let Some(poll_event_fd) = poll_event_fd {
-            let epoll_handler = match self.epoll_handler.lock() {
+            let Some(epoll_handler) = (match self.epoll_handler.lock() {
                 Ok(h) => h,
                 Err(poisoned) => poisoned.into_inner(),
-            };
-            let Some(epoll_handler) = epoll_handler.upgrade() else {
+            })
+            .upgrade() else {
                 return Err(
                     Error::EpollHandler("Failed to upgrade epoll handler".to_string()).into(),
                 );
@@ -705,39 +747,33 @@ impl VhostUserBackend for VhostUserGpuBackend {
 #[cfg(test)]
 mod tests {
     use std::{
-        fs::File,
         io::{ErrorKind, Read},
-        iter::zip,
         mem,
-        os::{fd::FromRawFd, unix::net::UnixStream},
+        os::unix::net::UnixStream,
         sync::Arc,
         thread,
         time::Duration,
     };
 
     use assert_matches::assert_matches;
-    use mockall::predicate;
+    use mockall::{mock, predicate};
     use rusty_fork::rusty_fork_test;
     use vhost::vhost_user::gpu_message::{VhostUserGpuDMABUFScanout, VhostUserGpuUpdate};
     use vhost_user_backend::{VhostUserDaemon, VringRwLock, VringT};
-    use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
-    use virtio_queue::{
-        desc::{split::Descriptor as SplitDescriptor, RawDescriptor},
-        mock::MockSplitQueue,
-        Queue, QueueT,
-    };
     use vm_memory::{
-        ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
+        ByteValued, Bytes, GuestAddress, GuestMemoryAtomic, GuestMemoryMmap, VolatileSlice,
     };
 
     use super::*;
     use crate::{
+        gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
         protocol::{
-            virtio_gpu_ctx_create, virtio_gpu_ctx_destroy, virtio_gpu_ctx_resource,
-            virtio_gpu_get_capset_info, virtio_gpu_mem_entry, virtio_gpu_rect,
-            virtio_gpu_resource_attach_backing, virtio_gpu_resource_detach_backing,
-            virtio_gpu_resource_flush, virtio_gpu_resource_unref, virtio_gpu_set_scanout,
-            GpuResponse::{OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
+            virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_ctx_destroy,
+            virtio_gpu_ctx_resource, virtio_gpu_get_capset, virtio_gpu_get_capset_info,
+            virtio_gpu_mem_entry, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
+            virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush,
+            virtio_gpu_resource_unref, virtio_gpu_set_scanout,
+            GpuResponse::{OkCapset, OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
             VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE, VIRTIO_GPU_CMD_CTX_CREATE,
             VIRTIO_GPU_CMD_CTX_DESTROY, VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE,
             VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
@@ -747,9 +783,86 @@ mod tests {
             VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM, VIRTIO_GPU_RESP_ERR_UNSPEC,
             VIRTIO_GPU_RESP_OK_NODATA,
         },
-        virtio_gpu::MockVirtioGpu,
+        renderer::Renderer,
+        testutils::{create_vring, TestingDescChainArgs},
         GpuCapset, GpuFlags, GpuMode,
     };
+
+    // Create a mock for the Renderer trait
+    mock! {
+        pub MockRenderer {}
+
+        impl Renderer for MockRenderer {
+            fn display_info(&self) -> VirtioGpuResult;
+            fn get_edid(&self, edid_req: VhostUserGpuEdidRequest) -> VirtioGpuResult;
+            fn set_scanout(&mut self, scanout_id: u32, resource_id: u32, rect: virtio_gpu_rect) -> VirtioGpuResult;
+            fn flush_resource(&mut self, resource_id: u32, rect: virtio_gpu_rect) -> VirtioGpuResult;
+            fn resource_create_blob(
+                &mut self,
+                ctx_id: u32,
+                resource_id: u32,
+                blob_id: u64,
+                size: u64,
+                blob_mem: u32,
+                blob_flags: u32,
+            ) -> VirtioGpuResult;
+            fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult;
+            fn resource_unmap_blob(&mut self, resource_id: u32) -> VirtioGpuResult;
+            fn resource_create_3d(&mut self, resource_id: u32, req: ResourceCreate3d) -> VirtioGpuResult;
+            fn unref_resource(&mut self, resource_id: u32) -> VirtioGpuResult;
+            fn transfer_write(&mut self, ctx_id: u32, resource_id: u32, req: Transfer3DDesc) -> VirtioGpuResult;
+            fn transfer_write_2d(&mut self, ctx_id: u32, resource_id: u32, req: Transfer3DDesc) -> VirtioGpuResult;
+            fn transfer_read<'a>(
+                &mut self,
+                ctx_id: u32,
+                resource_id: u32,
+                req: Transfer3DDesc,
+                buf: Option<VolatileSlice<'a>>,
+            ) -> VirtioGpuResult;
+            fn attach_backing(
+                &mut self,
+                resource_id: u32,
+                mem: &GuestMemoryMmap,
+                vecs: Vec<(GuestAddress, usize)>,
+            ) -> VirtioGpuResult;
+            fn detach_backing(&mut self, resource_id: u32) -> VirtioGpuResult;
+            fn update_cursor(
+                &mut self,
+                resource_id: u32,
+                cursor_pos: VhostUserGpuCursorPos,
+                hot_x: u32,
+                hot_y: u32,
+            ) -> VirtioGpuResult;
+            fn move_cursor(
+                &mut self,
+                resource_id: u32,
+                cursor: VhostUserGpuCursorPos,
+            ) -> VirtioGpuResult;
+            fn get_capset_info(&self, index: u32) -> VirtioGpuResult;
+            fn get_capset(&self, capset_id: u32, version: u32) -> VirtioGpuResult;
+            fn create_context<'a>(
+                &mut self,
+                ctx_id: u32,
+                context_init: u32,
+                context_name: Option<&'a str>,
+            ) -> VirtioGpuResult;
+            fn destroy_context(&mut self, ctx_id: u32) -> VirtioGpuResult;
+            fn context_attach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult;
+            fn context_detach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult;
+            fn submit_command(
+                &mut self,
+                ctx_id: u32,
+                commands: &mut [u8],
+                fence_ids: &[u64],
+            ) -> VirtioGpuResult;
+            fn force_ctx_0(&self);
+            fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult;
+            fn create_fence(&mut self, rutabaga_fence: RutabagaFence) -> VirtioGpuResult;
+            fn process_fence(&mut self, ring: VirtioGpuRing, fence_id: u64, desc_index: u16, len: u32) -> bool;
+            fn get_event_poll_fd(&self) -> Option<EventFd>;
+            fn event_poll(&self);
+        }
+    }
 
     const MEM_SIZE: usize = 2 * 1024 * 1024; // 2MiB
 
@@ -776,12 +889,6 @@ mod tests {
         (backend, mem)
     }
 
-    /// Arguments to create a descriptor chain for testing
-    struct TestingDescChainArgs<'a> {
-        readable_desc_bufs: &'a [&'a [u8]],
-        writable_desc_lengths: &'a [u32],
-    }
-
     fn gpu_backend_pair() -> (UnixStream, GpuBackend) {
         let (frontend, backend) = UnixStream::pair().unwrap();
         let backend = GpuBackend::from_stream(backend);
@@ -789,26 +896,21 @@ mod tests {
         (frontend, backend)
     }
 
-    fn event_fd_into_file(event_fd: EventFd) -> File {
-        // SAFETY: We ensure that the `event_fd` is properly handled such that its file
-        // descriptor is not closed after `File` takes ownership of it.
-        unsafe {
-            let event_fd_raw = event_fd.as_raw_fd();
-            mem::forget(event_fd);
-            File::from_raw_fd(event_fd_raw)
-        }
-    }
-
     #[test]
     fn test_process_gpu_command() {
         let (_, mem) = init();
         let hdr = virtio_gpu_ctrl_hdr::default();
 
-        let test_cmd = |cmd: GpuCommand, setup: fn(&mut MockVirtioGpu)| {
-            let mut mock_gpu = MockVirtioGpu::new();
-            mock_gpu.expect_force_ctx_0().return_once(|| ());
-            setup(&mut mock_gpu);
-            VhostUserGpuBackendInner::process_gpu_command(&mut mock_gpu, &mem.memory(), hdr, cmd)
+        let test_cmd = |cmd: GpuCommand, setup: fn(&mut MockMockRenderer)| {
+            let mut mock_renderer = MockMockRenderer::new();
+            mock_renderer.expect_force_ctx_0().return_const(());
+            setup(&mut mock_renderer);
+            VhostUserGpuBackendInner::process_gpu_command(
+                &mut mock_renderer,
+                &mem.memory(),
+                hdr,
+                cmd,
+            )
         };
 
         let cmd = GpuCommand::GetDisplayInfo;
@@ -855,7 +957,7 @@ mod tests {
 
         let cmd = GpuCommand::TransferToHost2d(virtio_gpu_transfer_to_host_2d::default());
         let result = test_cmd(cmd, |g| {
-            g.expect_transfer_write()
+            g.expect_transfer_write_2d()
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
@@ -873,6 +975,19 @@ mod tests {
         let cmd = GpuCommand::ResourceDetachBacking(virtio_gpu_resource_detach_backing::default());
         let result = test_cmd(cmd, |g| {
             g.expect_detach_backing().return_once(|_| Ok(OkNoData));
+        });
+        assert_matches!(result, Ok(OkNoData));
+
+        let cmd = GpuCommand::UpdateCursor(virtio_gpu_update_cursor::default());
+        let result = test_cmd(cmd, |g| {
+            g.expect_update_cursor()
+                .return_once(|_, _, _, _| Ok(OkNoData));
+        });
+        assert_matches!(result, Ok(OkNoData));
+
+        let cmd = GpuCommand::MoveCursor(virtio_gpu_update_cursor::default());
+        let result = test_cmd(cmd, |g| {
+            g.expect_move_cursor().return_once(|_, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
 
@@ -894,6 +1009,14 @@ mod tests {
                 size: 32
             })
         );
+
+        let cmd = GpuCommand::GetCapset(virtio_gpu_get_capset::default());
+        let result = test_cmd(cmd, |g| {
+            // Fixed E0559: Correctly constructing the OkCapset tuple variant with a Vec<u8>
+            g.expect_get_capset()
+                .return_once(|_, _| Ok(OkCapset(vec![0; 1])));
+        });
+        assert_matches!(result, Ok(OkCapset { .. }));
 
         let cmd = GpuCommand::CtxCreate(virtio_gpu_ctx_create::default());
         let result = test_cmd(cmd, |g| {
@@ -952,119 +1075,6 @@ mod tests {
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
-
-        let cmd = GpuCommand::UpdateCursor(virtio_gpu_update_cursor::default());
-        let result = test_cmd(cmd, |g| {
-            g.expect_update_cursor()
-                .return_once(|_, _, _, _| Ok(OkNoData));
-        });
-        assert_matches!(result, Ok(OkNoData));
-
-        let cmd = GpuCommand::MoveCursor(virtio_gpu_update_cursor::default());
-        let result = test_cmd(cmd, |g| {
-            g.expect_move_cursor().return_once(|_, _| Ok(OkNoData));
-        });
-        assert_matches!(result, Ok(OkNoData));
-
-        let cmd = GpuCommand::MoveCursor(virtio_gpu_update_cursor::default());
-        let result = test_cmd(cmd, |g| {
-            g.expect_move_cursor().return_once(|_, _| Ok(OkNoData));
-        });
-        assert_matches!(result, Ok(OkNoData));
-    }
-
-    fn make_descriptors_into_a_chain(start_idx: u16, descriptors: &mut [SplitDescriptor]) {
-        let last_idx = start_idx + descriptors.len() as u16 - 1;
-        for (idx, desc) in zip(start_idx.., descriptors.iter_mut()) {
-            if idx == last_idx {
-                desc.set_flags(desc.flags() & !VRING_DESC_F_NEXT as u16);
-            } else {
-                desc.set_flags(desc.flags() | VRING_DESC_F_NEXT as u16);
-                desc.set_next(idx + 1);
-            };
-        }
-    }
-
-    // Creates a vring from the specified descriptor chains
-    // For each created device-writable descriptor chain a Vec<(GuestAddress,
-    // usize)> is returned representing the descriptors of that chain.
-    fn create_vring(
-        mem: &GuestMemoryAtomic<GuestMemoryMmap>,
-        chains: &[TestingDescChainArgs],
-        queue_addr_start: GuestAddress,
-        data_addr_start: GuestAddress,
-        queue_size: u16,
-    ) -> (VringRwLock, Vec<Vec<GuestAddress>>, EventFd) {
-        let mem_handle = mem.memory();
-        mem.memory()
-            .check_address(queue_addr_start)
-            .expect("Invalid start address");
-
-        let mut output_bufs = Vec::new();
-        let vq = MockSplitQueue::create(&*mem_handle, queue_addr_start, queue_size);
-        // Address of the buffer associated with the descriptor
-        let mut next_addr = data_addr_start.0;
-        let mut chain_index_start = 0;
-        let mut descriptors = Vec::new();
-
-        for chain in chains {
-            for buf in chain.readable_desc_bufs {
-                mem.memory()
-                    .check_address(GuestAddress(next_addr))
-                    .expect("Readable descriptor's buffer address is not valid!");
-                let desc = SplitDescriptor::new(
-                    next_addr,
-                    buf.len()
-                        .try_into()
-                        .expect("Buffer too large to fit into descriptor"),
-                    0,
-                    0,
-                );
-                mem_handle.write(buf, desc.addr()).unwrap();
-                descriptors.push(desc);
-                next_addr += buf.len() as u64;
-            }
-            let mut writable_descriptor_addresses = Vec::new();
-            for desc_len in chain.writable_desc_lengths.iter().copied() {
-                mem.memory()
-                    .check_address(GuestAddress(next_addr))
-                    .expect("Writable descriptor's buffer address is not valid!");
-                let desc = SplitDescriptor::new(next_addr, desc_len, VRING_DESC_F_WRITE as u16, 0);
-                writable_descriptor_addresses.push(desc.addr());
-                descriptors.push(desc);
-                next_addr += u64::from(desc_len);
-            }
-            output_bufs.push(writable_descriptor_addresses);
-            make_descriptors_into_a_chain(
-                chain_index_start as u16,
-                &mut descriptors[chain_index_start..],
-            );
-            chain_index_start = descriptors.len();
-        }
-
-        assert!(descriptors.len() < queue_size as usize);
-        if !descriptors.is_empty() {
-            let descs_raw = descriptors
-                .into_iter()
-                .map(RawDescriptor::from)
-                .collect::<Vec<RawDescriptor>>();
-            vq.build_multiple_desc_chains(&descs_raw)
-                .expect("Failed to build descriptor chain");
-        }
-
-        let queue: Queue = vq.create_queue().unwrap();
-        let vring = VringRwLock::new(mem.clone(), queue_size).unwrap();
-        let signal_used_queue_evt = EventFd::new(EFD_NONBLOCK).unwrap();
-        let signal_used_queue_evt_clone = signal_used_queue_evt.try_clone().unwrap();
-        vring
-            .set_queue_info(queue.desc_table(), queue.avail_ring(), queue.used_ring())
-            .unwrap();
-        vring.set_call(Some(event_fd_into_file(signal_used_queue_evt_clone)));
-
-        vring.set_enabled(true);
-        vring.set_queue_ready(true);
-
-        (vring, output_bufs, signal_used_queue_evt)
     }
 
     fn create_control_vring(
@@ -1097,7 +1107,6 @@ mod tests {
     fn test_handle_event_executes_gpu_commands() {
         let (backend, mem) = init();
         backend.update_memory(mem.clone()).unwrap();
-        let backend_inner = backend.inner.lock().unwrap();
 
         let hdr = virtio_gpu_ctrl_hdr {
             type_: VIRTIO_GPU_CMD_RESOURCE_CREATE_2D.into(),
@@ -1127,29 +1136,29 @@ mod tests {
 
         let mem = mem.memory().into_inner();
 
-        let mut mock_gpu = MockVirtioGpu::new();
+        let mut mock_renderer = MockMockRenderer::new();
         let seq = &mut mockall::Sequence::new();
 
-        mock_gpu
+        mock_renderer
             .expect_force_ctx_0()
             .return_const(())
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_resource_create_3d()
             .with(predicate::eq(1), predicate::always())
             .returning(|_, _| Ok(OkNoData))
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_force_ctx_0()
             .return_const(())
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_resource_create_3d()
             .with(predicate::eq(1), predicate::always())
             .returning(|_, _| Err(ErrUnspec))
@@ -1161,8 +1170,11 @@ mod tests {
             ErrorKind::WouldBlock
         );
 
-        backend_inner
-            .handle_event(0, &mut mock_gpu, &[control_vring, cursor_vring])
+        backend
+            .inner
+            .lock()
+            .unwrap()
+            .handle_event(0, &mut mock_renderer, &[control_vring, cursor_vring])
             .unwrap();
 
         let expected_hdr1 = virtio_gpu_ctrl_hdr {
@@ -1196,7 +1208,6 @@ mod tests {
 
         let (backend, mem) = init();
         backend.update_memory(mem.clone()).unwrap();
-        let backend_inner = backend.inner.lock().unwrap();
 
         let hdr = virtio_gpu_ctrl_hdr {
             type_: VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D.into(),
@@ -1218,29 +1229,29 @@ mod tests {
             create_control_vring(&mem, &[chain]);
         let (cursor_vring, _, _) = create_cursor_vring(&mem, &[]);
 
-        let mut mock_gpu = MockVirtioGpu::new();
+        let mut mock_renderer = MockMockRenderer::new();
         let seq = &mut mockall::Sequence::new();
 
-        mock_gpu
+        mock_renderer
             .expect_force_ctx_0()
             .return_const(())
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_transfer_write()
             .returning(|_, _, _| Ok(OkNoData))
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_create_fence()
             .withf(|fence| fence.fence_id == FENCE_ID)
             .returning(|_| Ok(OkNoData))
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_process_fence()
             .with(
                 predicate::eq(VirtioGpuRing::Global),
@@ -1252,8 +1263,11 @@ mod tests {
             .once()
             .in_sequence(seq);
 
-        backend_inner
-            .handle_event(0, &mut mock_gpu, &[control_vring, cursor_vring])
+        backend
+            .inner
+            .lock()
+            .unwrap()
+            .handle_event(0, &mut mock_renderer, &[control_vring, cursor_vring])
             .unwrap();
 
         let expected_hdr = virtio_gpu_ctrl_hdr {
@@ -1281,7 +1295,6 @@ mod tests {
 
         let (backend, mem) = init();
         backend.update_memory(mem.clone()).unwrap();
-        let backend_inner = backend.inner.lock().unwrap();
 
         let hdr = virtio_gpu_ctrl_hdr {
             type_: VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D.into(),
@@ -1303,29 +1316,29 @@ mod tests {
             create_control_vring(&mem, &[chain]);
         let (cursor_vring, _, _) = create_cursor_vring(&mem, &[]);
 
-        let mut mock_gpu = MockVirtioGpu::new();
+        let mut mock_renderer = MockMockRenderer::new();
         let seq = &mut mockall::Sequence::new();
 
-        mock_gpu
+        mock_renderer
             .expect_force_ctx_0()
             .return_const(())
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_transfer_read()
             .returning(|_, _, _, _| Ok(OkNoData))
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_create_fence()
             .withf(|fence| fence.fence_id == FENCE_ID)
             .returning(|_| Ok(OkNoData))
             .once()
             .in_sequence(seq);
 
-        mock_gpu
+        mock_renderer
             .expect_process_fence()
             .with(
                 predicate::eq(VirtioGpuRing::ContextSpecific {
@@ -1340,8 +1353,11 @@ mod tests {
             .once()
             .in_sequence(seq);
 
-        backend_inner
-            .handle_event(0, &mut mock_gpu, &[control_vring, cursor_vring])
+        backend
+            .inner
+            .lock()
+            .unwrap()
+            .handle_event(0, &mut mock_renderer, &[control_vring, cursor_vring])
             .unwrap();
 
         assert_eq!(
@@ -1491,7 +1507,7 @@ mod tests {
                 fd_height: IMAGE_HEIGHT,
                 fd_stride: IMAGE_WIDTH * 4,
                 fd_flags: 0,
-                fd_drm_fourcc: 875708993, // This is a placeholder; actual value depends on the backend.
+                fd_drm_fourcc: 875_708_993, // This is a placeholder; actual value depends on the backend.
             };
 
             let (backend, mem) = init();

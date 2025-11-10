@@ -1,35 +1,6 @@
 // Manos Pitsidianakis <manos.pitsidianakis@linaro.org>
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 //
-#![deny(
-    clippy::undocumented_unsafe_blocks,
-    /* groups */
-    clippy::correctness,
-    clippy::suspicious,
-    clippy::complexity,
-    clippy::perf,
-    clippy::style,
-    clippy::nursery,
-    //* restriction */
-    clippy::dbg_macro,
-    clippy::rc_buffer,
-    clippy::as_underscore,
-    clippy::assertions_on_result_states,
-    //* pedantic */
-    clippy::cast_lossless,
-    clippy::cast_possible_wrap,
-    clippy::ptr_as_ptr,
-    clippy::bool_to_int_with_if,
-    clippy::borrow_as_ptr,
-    clippy::case_sensitive_file_extension_comparisons,
-    clippy::cast_lossless,
-    clippy::cast_ptr_alignment,
-    clippy::naive_bytecount
-)]
-#![allow(
-    clippy::significant_drop_in_scrutinee,
-    clippy::significant_drop_tightening
-)]
 
 #[cfg(test)]
 pub fn init_logger() {

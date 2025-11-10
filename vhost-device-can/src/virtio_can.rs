@@ -70,11 +70,10 @@ unsafe impl ByteValued for VirtioCanConfig {}
 ///
 /// The response message is a stream of bytes, where first byte represents the
 /// status, and rest is message specific data.
-
 #[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub struct VirtioCanTxResponse {
-    pub result: i8,
+    pub result: u8,
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -136,7 +135,7 @@ unsafe impl ByteValued for VirtioCanCtrlRequest {}
 #[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub struct VirtioCanCtrlResponse {
-    pub result: i8,
+    pub result: u8,
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by

@@ -102,6 +102,7 @@ pub struct GpuConfig {
     gpu_mode: GpuMode,
     capset: GpuCapset,
     flags: GpuFlags,
+    gpu_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +174,7 @@ impl GpuConfig {
         gpu_mode: GpuMode,
         capset: Option<GpuCapset>,
         flags: GpuFlags,
+        gpu_path: Option<String>,
     ) -> Result<Self, GpuConfigError> {
         let capset = capset.unwrap_or_else(|| Self::get_default_capset_for_mode(gpu_mode));
         Self::validate_capset(gpu_mode, capset)?;
@@ -186,6 +188,7 @@ impl GpuConfig {
             gpu_mode,
             capset,
             flags,
+            gpu_path,
         })
     }
 
@@ -238,7 +241,8 @@ mod tests {
 
     #[test]
     fn test_gpu_config_create_default_virglrenderer() {
-        let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::new_default()).unwrap();
+        let config =
+            GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::new_default(), None).unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
         assert_eq!(config.capsets(), GpuConfig::DEFAULT_VIRGLRENDER_CAPSET_MASK);
     }
@@ -246,14 +250,14 @@ mod tests {
     #[test]
     #[cfg(feature = "gfxstream")]
     fn test_gpu_config_create_default_gfxstream() {
-        let config = GpuConfig::new(GpuMode::Gfxstream, None, GpuFlags::default()).unwrap();
+        let config = GpuConfig::new(GpuMode::Gfxstream, None, GpuFlags::default(), None).unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::Gfxstream);
         assert_eq!(config.capsets(), GpuConfig::DEFAULT_GFXSTREAM_CAPSET_MASK);
     }
 
     #[cfg(feature = "gfxstream")]
     fn assert_invalid_gpu_config(mode: GpuMode, capset: GpuCapset, expected_capset: GpuCapset) {
-        let result = GpuConfig::new(mode, Some(capset), GpuFlags::new_default());
+        let result = GpuConfig::new(mode, Some(capset), GpuFlags::new_default(), None);
         assert_matches!(
             result,
             Err(GpuConfigError::CapsetUnsupportedByMode(
@@ -269,6 +273,7 @@ mod tests {
             GpuMode::VirglRenderer,
             Some(GpuCapset::VIRGL2),
             GpuFlags::default(),
+            None,
         )
         .unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
@@ -298,7 +303,7 @@ mod tests {
             use_gles: false,
             ..GpuFlags::new_default()
         };
-        let result = GpuConfig::new(GpuMode::Gfxstream, Some(capset), flags);
+        let result = GpuConfig::new(GpuMode::Gfxstream, Some(capset), flags, None);
         assert_matches!(result, Err(GpuConfigError::GlesRequiredByGfxstream));
     }
 
@@ -330,7 +335,8 @@ mod tests {
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
         let socket_name = Path::new("/proc/-1/nonexistent");
-        let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
+        let config =
+            GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default(), None).unwrap();
 
         assert_matches!(
             start_backend(socket_name, config).unwrap_err(),

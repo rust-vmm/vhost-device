@@ -3,6 +3,8 @@
 
 ### Added
 
+- [https://github.com/rust-vmm/vhost-device/pull/900] vhost-device-gpu: Add support for specifying GPU path
+
 ### Changed
 
 ### Fixed

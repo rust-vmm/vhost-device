@@ -765,6 +765,7 @@ mod tests {
             GpuMode::VirglRenderer,
             Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
             GpuFlags::default(),
+            None,
         )
         .unwrap();
         let backend = VhostUserGpuBackend::new(config).unwrap();
@@ -1353,7 +1354,7 @@ mod tests {
     rusty_fork_test! {
         #[test]
         fn test_verify_backend() {
-            let gpu_config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
+            let gpu_config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default(), None).unwrap();
             let backend = VhostUserGpuBackend::new(gpu_config).unwrap();
 
             assert_eq!(backend.num_queues(), NUM_QUEUES);

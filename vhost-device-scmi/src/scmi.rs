@@ -314,7 +314,7 @@ impl HandlerMap {
         map
     }
 
-    fn keys(&self) -> std::collections::hash_map::Keys<(u8, u8), HandlerInfo> {
+    fn keys(&self) -> std::collections::hash_map::Keys<'_, (u8, u8), HandlerInfo> {
         self.0.keys()
     }
 

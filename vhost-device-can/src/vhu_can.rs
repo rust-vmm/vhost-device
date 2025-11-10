@@ -33,13 +33,14 @@ use vmm_sys_util::{
 use crate::{
     can::{CanController, Error::QueueEmpty},
     virtio_can::{
-        VirtioCanCtrlRequest, VirtioCanFrame, VirtioCanHeader, CANFD_VALID_LENGTHS, CAN_CS_STARTED,
-        CAN_CS_STOPPED, CAN_EFF_FLAG, CAN_EFF_MASK, CAN_ERR_BUSOFF, CAN_ERR_FLAG, CAN_FRMF_TYPE_FD,
-        CAN_RTR_FLAG, CAN_SFF_MASK, VIRTIO_CAN_FLAGS_EXTENDED, VIRTIO_CAN_FLAGS_FD,
-        VIRTIO_CAN_FLAGS_RTR, VIRTIO_CAN_FLAGS_VALID_MASK, VIRTIO_CAN_F_CAN_CLASSIC,
-        VIRTIO_CAN_F_CAN_FD, VIRTIO_CAN_F_RTR_FRAMES, VIRTIO_CAN_RESULT_NOT_OK,
-        VIRTIO_CAN_RESULT_OK, VIRTIO_CAN_RX, VIRTIO_CAN_SET_CTRL_MODE_START,
-        VIRTIO_CAN_SET_CTRL_MODE_STOP, VIRTIO_CAN_S_CTRL_BUSOFF, VIRTIO_CAN_TX,
+        VirtioCanCtrlRequest, VirtioCanCtrlResponse, VirtioCanFrame, VirtioCanHeader,
+        VirtioCanTxResponse, CANFD_VALID_LENGTHS, CAN_CS_STARTED, CAN_CS_STOPPED, CAN_EFF_FLAG,
+        CAN_EFF_MASK, CAN_ERR_BUSOFF, CAN_ERR_FLAG, CAN_FRMF_TYPE_FD, CAN_RTR_FLAG, CAN_SFF_MASK,
+        VIRTIO_CAN_FLAGS_EXTENDED, VIRTIO_CAN_FLAGS_FD, VIRTIO_CAN_FLAGS_RTR,
+        VIRTIO_CAN_FLAGS_VALID_MASK, VIRTIO_CAN_F_CAN_CLASSIC, VIRTIO_CAN_F_CAN_FD,
+        VIRTIO_CAN_F_RTR_FRAMES, VIRTIO_CAN_RESULT_NOT_OK, VIRTIO_CAN_RESULT_OK, VIRTIO_CAN_RX,
+        VIRTIO_CAN_SET_CTRL_MODE_START, VIRTIO_CAN_SET_CTRL_MODE_STOP, VIRTIO_CAN_S_CTRL_BUSOFF,
+        VIRTIO_CAN_TX,
     },
 };
 
@@ -323,7 +324,7 @@ impl VhostUserCanBackend {
             // This implementation requires the CAN devices to be already in UP state
             // before starting. This code does not trigger state changes [UP/DOWN] of
             // the host CAN devices.
-            let response = match request.msg_type.into() {
+            let result = match request.msg_type.into() {
                 VIRTIO_CAN_SET_CTRL_MODE_START => {
                     if self.controller.write().unwrap().ctrl_state == CAN_CS_STARTED {
                         VIRTIO_CAN_RESULT_NOT_OK
@@ -351,7 +352,7 @@ impl VhostUserCanBackend {
             };
 
             writer
-                .write_obj(response)
+                .write_obj(VirtioCanCtrlResponse { result })
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
             if vring
@@ -415,11 +416,11 @@ impl VhostUserCanBackend {
             };
             CanController::print_can_frame(request);
 
-            let response = if self.controller.read().unwrap().ctrl_state == CAN_CS_STOPPED {
+            let result = if self.controller.read().unwrap().ctrl_state == CAN_CS_STOPPED {
                 trace!("Device is stopped!");
                 VIRTIO_CAN_RESULT_NOT_OK
             } else {
-                let _response = match self.check_tx_frame(request) {
+                let result = match self.check_tx_frame(request) {
                     Ok(frame) => {
                         CanController::print_can_frame(frame);
 
@@ -443,7 +444,7 @@ impl VhostUserCanBackend {
                 // If the device cannot send the frame either because socket does not
                 // exist or the writing the frame fails for another unknown reason
                 // then behave as receiving a busoff error.
-                if _response == VIRTIO_CAN_RESULT_NOT_OK {
+                if result == VIRTIO_CAN_RESULT_NOT_OK {
                     trace!("Change controller status to STOPPED and busoff to true");
                     // TODO: Trigger a config_change notification
                     self.controller.write().unwrap().config.status =
@@ -451,11 +452,11 @@ impl VhostUserCanBackend {
                     self.controller.write().unwrap().ctrl_state = CAN_CS_STOPPED;
                 }
 
-                _response
+                result
             };
 
             writer
-                .write_obj(response)
+                .write_obj(VirtioCanTxResponse { result })
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
             if vring

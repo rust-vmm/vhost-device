@@ -18,8 +18,9 @@ markdown = { version = "=1.0.0", optional = true }
 [build-dependencies]
 
 [features]
-default = ["vhost-device-sound", "vhost-device-scmi"]
+default = ["vhost-device-sound", "vhost-device-scmi", "vhost-device-scsi"]
 vhost-device-scmi = []
+vhost-device-scsi = []
 vhost-device-sound = ["vhost-device-sound-alsa", "vhost-device-sound-pipewire"]
 vhost-device-sound-alsa = ["mangen"]
 vhost-device-sound-pipewire = ["mangen"]

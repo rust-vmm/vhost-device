@@ -34,6 +34,12 @@ mod vhost_device_sound;
 #[path = "../../vhost-device-scmi/src/args.rs"]
 mod vhost_device_scmi;
 
+// Use vhost-device-scsi's args module as our own using the #[path] attribute
+
+#[cfg(feature = "vhost-device-scsi")]
+#[path = "../../vhost-device-scsi/src/args.rs"]
+mod vhost_device_scsi;
+
 fn main() {
     if let Err(err) = run_app() {
         eprintln!("{err}");
@@ -191,6 +197,14 @@ fn mangen() -> Result<(), Box<dyn Error>> {
 
         let buffer = mangen_for_crate::<ScmiArgs>(workspace_dir.join("vhost-device-scmi"))?;
         let man_path = dist_dir.join("vhost-device-scmi.1");
+        buffers.push((man_path, buffer));
+    }
+    #[cfg(feature = "vhost-device-scsi")]
+    {
+        use vhost_device_scsi::ScsiArgs;
+
+        let buffer = mangen_for_crate::<ScsiArgs>(workspace_dir.join("vhost-device-scsi"))?;
+        let man_path = dist_dir.join("vhost-device-scsi.1");
         buffers.push((man_path, buffer));
     }
 

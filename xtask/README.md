@@ -22,3 +22,4 @@ The following crates have manual pages built by default:
 - [`vhost-device-sound`](../vhost-device-sound), enabled by the default feature `vhost-device-sound`.
   - It can further be fine-tuned with the features `vhost-device-sound-pipewire` and `vhost-device-sound-alsa`.
 - [`vhost-device-scmi`](../vhost-device-scmi), enabled by the default feature `vhost-device-scmi`.
+- [`vhost-device-scsi`](../vhost-device-scsi), enabled by the default feature `vhost-device-scsi`.

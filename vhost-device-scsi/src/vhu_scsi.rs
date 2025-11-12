@@ -35,15 +35,21 @@ const REQUEST_QUEUE: u16 = 2;
 type DescriptorChainWriter = virtio::DescriptorChainWriter<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 type DescriptorChainReader = virtio::DescriptorChainReader<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 
-pub(crate) struct VhostUserScsiBackend {
+pub struct VhostUserScsiBackend {
     event_idx: bool,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     targets: Vec<Box<dyn Target>>,
-    pub(crate) exit_event: EventFd,
+    pub exit_event: EventFd,
+}
+
+impl Default for VhostUserScsiBackend {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VhostUserScsiBackend {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             event_idx: false,
             mem: None,
@@ -193,7 +199,7 @@ impl VhostUserScsiBackend {
         Ok(())
     }
 
-    pub(crate) fn add_target(&mut self, target: Box<dyn Target>) {
+    pub fn add_target(&mut self, target: Box<dyn Target>) {
         self.targets.push(target);
     }
 }

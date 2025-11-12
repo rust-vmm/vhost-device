@@ -3,26 +3,26 @@
 use std::io::{self, Write};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub(crate) enum ModePage {
+pub enum ModePage {
     Caching,
 }
 
 impl ModePage {
-    pub(crate) const ALL_ZERO: &'static [Self] = &[Self::Caching];
+    pub const ALL_ZERO: &'static [Self] = &[Self::Caching];
 
-    pub(crate) const fn page_code(self) -> (u8, u8) {
+    pub const fn page_code(self) -> (u8, u8) {
         match self {
             Self::Caching => (0x8, 0),
         }
     }
 
-    pub(crate) const fn page_length(self) -> u8 {
+    pub const fn page_length(self) -> u8 {
         match self {
             Self::Caching => 0x12,
         }
     }
 
-    pub(crate) fn write(self, data_in: &mut impl Write) -> io::Result<()> {
+    pub fn write(self, data_in: &mut impl Write) -> io::Result<()> {
         assert_eq!(self.page_code().1, 0, "Subpages aren't supported yet.");
 
         data_in.write_all(&[

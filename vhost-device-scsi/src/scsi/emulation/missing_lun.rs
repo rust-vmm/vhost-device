@@ -9,7 +9,7 @@ use super::{
 };
 use crate::scsi::{sense, CmdError, CmdError::DataIn, CmdOutput};
 
-pub(crate) struct MissingLun;
+pub struct MissingLun;
 
 impl LogicalUnit for MissingLun {
     fn execute_command(

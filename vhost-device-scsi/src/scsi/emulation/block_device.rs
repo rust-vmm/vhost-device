@@ -22,13 +22,13 @@ use super::{
 };
 use crate::scsi::{sense, CmdError, CmdOutput, TaskAttr};
 
-pub(crate) enum MediumRotationRate {
+pub enum MediumRotationRate {
     Unreported,
     NonRotating,
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(crate) struct ByteOffset(u64);
+pub struct ByteOffset(u64);
 impl From<u64> for ByteOffset {
     fn from(value: u64) -> Self {
         ByteOffset(value)
@@ -48,7 +48,7 @@ impl Div<BlockSize> for ByteOffset {
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(crate) struct BlockSize(NonZeroU32);
+pub struct BlockSize(NonZeroU32);
 impl From<BlockSize> for u32 {
     fn from(value: BlockSize) -> Self {
         u32::from(value.0)
@@ -63,7 +63,7 @@ impl TryFrom<u32> for BlockSize {
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub(crate) struct BlockOffset(u64);
+pub struct BlockOffset(u64);
 impl From<BlockOffset> for u64 {
     fn from(value: BlockOffset) -> Self {
         value.0
@@ -96,7 +96,7 @@ impl Mul<BlockSize> for BlockOffset {
     }
 }
 
-pub(crate) trait BlockDeviceBackend: Send + Sync {
+pub trait BlockDeviceBackend: Send + Sync {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: ByteOffset) -> io::Result<()>;
     fn write_exact_at(&mut self, buf: &[u8], offset: ByteOffset) -> io::Result<()>;
     fn size_in_blocks(&mut self) -> io::Result<BlockOffset>;
@@ -104,7 +104,7 @@ pub(crate) trait BlockDeviceBackend: Send + Sync {
     fn sync(&mut self) -> io::Result<()>;
 }
 
-pub(crate) struct FileBackend {
+pub struct FileBackend {
     file: File,
     block_size: BlockSize,
 }
@@ -142,14 +142,14 @@ impl BlockDeviceBackend for FileBackend {
     }
 }
 
-pub(crate) struct BlockDevice<T: BlockDeviceBackend> {
+pub struct BlockDevice<T: BlockDeviceBackend> {
     backend: T,
     write_protected: bool,
     rotation_rate: MediumRotationRate,
 }
 
 impl<T: BlockDeviceBackend> BlockDevice<T> {
-    pub(crate) const fn new(backend: T) -> Self {
+    pub const fn new(backend: T) -> Self {
         Self {
             backend,
             write_protected: false,

@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-mod scsi;
-mod vhu_scsi;
-mod virtio;
+use vhost_device_scsi::{
+    scsi::emulation::{
+        block_device::{BlockDevice, FileBackend, MediumRotationRate},
+        target::EmulatedTarget,
+    },
+    vhu_scsi::VhostUserScsiBackend,
+};
 
 use std::{
     fs::File,
@@ -16,14 +20,6 @@ use log::{error, warn};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
-
-use crate::{
-    scsi::emulation::{
-        block_device::{BlockDevice, FileBackend, MediumRotationRate},
-        target::EmulatedTarget,
-    },
-    vhu_scsi::VhostUserScsiBackend,
-};
 
 #[derive(Debug, ThisError)]
 enum Error {

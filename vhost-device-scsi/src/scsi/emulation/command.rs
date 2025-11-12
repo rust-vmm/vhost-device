@@ -13,12 +13,11 @@
 use std::convert::{TryFrom, TryInto};
 
 use log::warn;
-use num_enum::TryFromPrimitive;
 
 use crate::scsi::emulation::mode_page::ModePage;
 
 /// One of the modes supported by SCSI's REPORT LUNS command.
-#[derive(PartialEq, Eq, TryFromPrimitive, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 #[repr(u8)]
 pub(crate) enum ReportLunsSelectReport {
     NoWellKnown = 0x0,
@@ -27,6 +26,22 @@ pub(crate) enum ReportLunsSelectReport {
     Administrative = 0x10,
     TopLevel = 0x11,
     SameConglomerate = 0x12,
+}
+
+impl TryFrom<u8> for ReportLunsSelectReport {
+    type Error = ();
+
+    fn try_from(val: u8) -> Result<Self, ()> {
+        match val {
+            0x0 => Ok(Self::NoWellKnown),
+            0x1 => Ok(Self::WellKnownOnly),
+            0x2 => Ok(Self::All),
+            0x10 => Ok(Self::Administrative),
+            0x11 => Ok(Self::TopLevel),
+            0x12 => Ok(Self::SameConglomerate),
+            _ => Err(()),
+        }
+    }
 }
 
 /// A type of "vital product data" page returned by SCSI's INQUIRY command.
@@ -61,13 +76,27 @@ pub(crate) enum VpdPage {
 }
 // starred ones are ones Linux will use if available
 
-#[derive(PartialEq, Eq, TryFromPrimitive, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 #[repr(u8)]
 pub(crate) enum ModeSensePageControl {
     Current = 0b00,
     Changeable = 0b01,
     Default = 0b10,
     Saved = 0b11,
+}
+
+impl TryFrom<u8> for ModeSensePageControl {
+    type Error = ();
+
+    fn try_from(val: u8) -> Result<Self, ()> {
+        match val {
+            0b00 => Ok(Self::Current),
+            0b01 => Ok(Self::Changeable),
+            0b10 => Ok(Self::Default),
+            0b11 => Ok(Self::Saved),
+            _ => Err(()),
+        }
+    }
 }
 
 impl TryFrom<u8> for VpdPage {

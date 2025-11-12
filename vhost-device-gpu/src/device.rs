@@ -77,6 +77,7 @@ use crate::backend::gfxstream::GfxstreamAdapter;
 #[cfg(feature = "backend-virgl")]
 use crate::backend::virgl::VirglRendererAdapter;
 use crate::{
+    backend::null::NullAdapter,
     gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
     protocol::{
         virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_get_edid,
@@ -625,6 +626,17 @@ impl VhostUserGpuBackendInner {
                 TLS_VIRGL,
                 |control_vring, gpu_backend| {
                     VirglRendererAdapter::new(control_vring, &self.gpu_config, gpu_backend)
+                },
+                self,
+                device_event,
+                vrings
+            ),
+
+            GpuMode::Null => handle_adapter!(
+                NullAdapter,
+                TLS_NULL,
+                |control_vring, gpu_backend| {
+                    NullAdapter::new(control_vring, &self.gpu_config, gpu_backend)
                 },
                 self,
                 device_event,

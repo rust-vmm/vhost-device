@@ -4,6 +4,7 @@
 
 /// Generates an implementation of `From<Transfer3DDesc>` for any compatible
 /// target struct.
+#[cfg(any(feature = "backend-virgl", feature = "backend-gfxstream"))]
 macro_rules! impl_transfer3d_from_desc {
     ($target:path) => {
         impl From<Transfer3DDesc> for $target {
@@ -25,6 +26,7 @@ macro_rules! impl_transfer3d_from_desc {
     };
 }
 
+#[cfg(any(feature = "backend-virgl", feature = "backend-gfxstream"))]
 macro_rules! impl_from_resource_create3d {
     ($target:ty) => {
         impl From<ResourceCreate3d> for $target {
@@ -48,7 +50,9 @@ macro_rules! impl_from_resource_create3d {
 
 use std::{collections::BTreeMap, os::raw::c_void};
 
+#[cfg(feature = "backend-gfxstream")]
 use rutabaga_gfx::Transfer3D;
+#[cfg(feature = "backend-virgl")]
 use virglrenderer::Transfer3D as VirglTransfer3D;
 
 use crate::protocol::virtio_gpu_rect;
@@ -87,8 +91,10 @@ impl Transfer3DDesc {
 }
 // Invoke the macro for both targets
 // rutabaga_gfx::Transfer3D
+#[cfg(feature = "backend-gfxstream")]
 impl_transfer3d_from_desc!(Transfer3D);
 // virglrenderer::Transfer3D
+#[cfg(feature = "backend-virgl")]
 impl_transfer3d_from_desc!(VirglTransfer3D);
 
 // These are neutral types that can be used by all backends
@@ -136,7 +142,9 @@ pub struct ResourceCreate3d {
 }
 
 // Invoke the macro for both targets
+#[cfg(feature = "backend-gfxstream")]
 impl_from_resource_create3d!(rutabaga_gfx::ResourceCreate3D);
+#[cfg(feature = "backend-virgl")]
 impl_from_resource_create3d!(virglrenderer::ResourceCreate3D);
 
 #[derive(Debug, Clone, Copy)]

@@ -44,6 +44,7 @@ pub enum GpuMode {
     VirglRenderer,
     #[cfg(feature = "backend-gfxstream")]
     Gfxstream,
+    Null,
 }
 
 impl Display for GpuMode {
@@ -53,6 +54,7 @@ impl Display for GpuMode {
             Self::VirglRenderer => write!(f, "virglrenderer"),
             #[cfg(feature = "backend-gfxstream")]
             Self::Gfxstream => write!(f, "gfxstream"),
+            Self::Null => write!(f, "null"),
         }
     }
 }
@@ -79,7 +81,12 @@ bitflags! {
 
 impl Display for GpuCapset {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.is_empty() {
+            return write!(f, "none");
+        }
+
         let mut first = true;
+        #[allow(unused_assignments)]
         for capset in self.iter() {
             if !first {
                 write!(f, ", ")?;
@@ -88,15 +95,15 @@ impl Display for GpuCapset {
 
             match capset {
                 #[cfg(feature = "backend-virgl")]
-                Self::VIRGL => write!(f, "virgl"),
+                Self::VIRGL => write!(f, "virgl")?,
                 #[cfg(feature = "backend-virgl")]
-                Self::VIRGL2 => write!(f, "virgl2"),
+                Self::VIRGL2 => write!(f, "virgl2")?,
                 #[cfg(feature = "backend-gfxstream")]
-                Self::GFXSTREAM_VULKAN => write!(f, "gfxstream-vulkan"),
+                Self::GFXSTREAM_VULKAN => write!(f, "gfxstream-vulkan")?,
                 #[cfg(feature = "backend-gfxstream")]
-                Self::GFXSTREAM_GLES => write!(f, "gfxstream-gles"),
+                Self::GFXSTREAM_GLES => write!(f, "gfxstream-gles")?,
                 _ => panic!("Unknown capset {:#x}", self.bits()),
-            }?;
+            }
         }
 
         Ok(())
@@ -165,6 +172,7 @@ impl GpuConfig {
             GpuMode::VirglRenderer => Self::DEFAULT_VIRGLRENDER_CAPSET_MASK,
             #[cfg(feature = "backend-gfxstream")]
             GpuMode::Gfxstream => Self::DEFAULT_GFXSTREAM_CAPSET_MASK,
+            GpuMode::Null => GpuCapset::empty(),
         }
     }
 
@@ -174,6 +182,7 @@ impl GpuConfig {
             GpuMode::VirglRenderer => GpuCapset::ALL_VIRGLRENDERER_CAPSETS,
             #[cfg(feature = "backend-gfxstream")]
             GpuMode::Gfxstream => GpuCapset::ALL_GFXSTREAM_CAPSETS,
+            GpuMode::Null => GpuCapset::empty(),
         };
         for capset in capset.iter() {
             if !supported_capset_mask.contains(capset) {

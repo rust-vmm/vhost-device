@@ -10,7 +10,6 @@ use vhost_device_scsi::{
 
 use std::{
     fs::File,
-    path::PathBuf,
     process::exit,
     sync::{Arc, RwLock},
 };
@@ -20,6 +19,8 @@ use log::{error, warn};
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
+
+mod args;
 
 #[derive(Debug, ThisError)]
 enum Error {
@@ -31,28 +32,7 @@ enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Parser)]
-struct ScsiArgs {
-    /// Make the images read-only.
-    ///
-    /// Currently, we don't actually support writes, but sometimes we want to
-    /// pretend the disk is writable to work around issues with some tools that
-    /// use the Linux SCSI generic API.
-    #[arg(long = "read-only", short = 'r')]
-    read_only: bool,
-    /// Tell the guest this disk is non-rotational.
-    ///
-    /// Affects some heuristics in Linux around, for example, scheduling.
-    #[arg(long = "solid-state")]
-    solid_state: bool,
-    /// Location of vhost-user socket.
-    #[clap(short, long)]
-    socket_path: PathBuf,
-    /// Images against which the SCSI actions are emulated.
-    images: Vec<PathBuf>,
-}
-
-fn create_backend(args: &ScsiArgs) -> Result<VhostUserScsiBackend> {
+fn create_backend(args: &args::ScsiArgs) -> Result<VhostUserScsiBackend> {
     let mut backend = VhostUserScsiBackend::new();
     let mut target = EmulatedTarget::new();
 
@@ -88,7 +68,7 @@ fn create_backend(args: &ScsiArgs) -> Result<VhostUserScsiBackend> {
     Ok(backend)
 }
 
-fn start_backend(backend: VhostUserScsiBackend, args: ScsiArgs) -> Result<()> {
+fn start_backend(backend: VhostUserScsiBackend, args: args::ScsiArgs) -> Result<()> {
     let backend = Arc::new(RwLock::new(backend));
     let mut daemon = VhostUserDaemon::new(
         "vhost-device-scsi".into(),
@@ -104,7 +84,7 @@ fn start_backend(backend: VhostUserScsiBackend, args: ScsiArgs) -> Result<()> {
 
 fn run() -> Result<()> {
     env_logger::init();
-    let args = ScsiArgs::parse();
+    let args = args::ScsiArgs::parse();
     let backend = create_backend(&args)?;
     start_backend(backend, args)?;
 
@@ -125,7 +105,7 @@ mod tests {
     #[test]
     fn test_create_backend() {
         let sock = tempfile::NamedTempFile::new().unwrap();
-        let args = ScsiArgs {
+        let args = args::ScsiArgs {
             images: vec!["/dev/null".into()],
             read_only: true,
             socket_path: sock.path().into(),
@@ -137,7 +117,7 @@ mod tests {
     #[test]
     fn test_fail_listener() {
         let socket_name = "~/path/not/present/scsi";
-        let args = ScsiArgs {
+        let args = args::ScsiArgs {
             images: vec!["/dev/null".into()],
             read_only: true,
             socket_path: socket_name.into(),

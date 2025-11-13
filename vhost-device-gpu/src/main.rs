@@ -173,9 +173,9 @@ mod tests {
         }
 
         // Convert each CapsetName into GpuCapset
-        for capset_name in CapsetName::value_variants().iter().cloned() {
+        for capset_name in CapsetName::value_variants().iter().copied() {
             let resulting_capset: GpuCapset = capset_name.into(); // Would panic! if the definition is incorrect
-            assert_eq!(resulting_capset.bits(), capset_name as u64)
+            assert_eq!(resulting_capset.bits(), capset_name as u64);
         }
     }
 

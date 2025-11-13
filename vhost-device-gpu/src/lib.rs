@@ -257,8 +257,9 @@ pub fn start_backend(socket_path: &Path, config: GpuConfig) -> Result<(), StartE
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use std::path::Path;
+
+    use assert_matches::assert_matches;
 
     use super::*;
 
@@ -343,7 +344,7 @@ mod tests {
     fn test_capset_display_multiple() {
         let capset = GpuCapset::VIRGL | GpuCapset::VIRGL2;
         let output = capset.to_string();
-        assert_eq!(output, "virgl, virgl2")
+        assert_eq!(output, "virgl, virgl2");
     }
 
     /// Check if display name of GpuMode is the same as the name in the CLI arg

@@ -12,28 +12,43 @@ use vhost_device_gpu::{start_backend, GpuCapset, GpuConfig, GpuConfigError, GpuF
 
 #[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u64)]
+// __Null is a placeholder to prevent a zero-variant enum when building with
+// --no-default-features, not an implementation of the non-exhaustive pattern
+#[allow(clippy::manual_non_exhaustive)]
 pub enum CapsetName {
     /// [virglrenderer] OpenGL implementation, superseded by Virgl2
+    #[cfg(feature = "backend-virgl")]
     Virgl = GpuCapset::VIRGL.bits(),
 
     /// [virglrenderer] OpenGL implementation
+    #[cfg(feature = "backend-virgl")]
     Virgl2 = GpuCapset::VIRGL2.bits(),
 
     /// [gfxstream] Vulkan implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     GfxstreamVulkan = GpuCapset::GFXSTREAM_VULKAN.bits(),
 
     /// [gfxstream] OpenGL ES implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet
-    #[cfg(feature = "gfxstream")]
+    #[cfg(feature = "backend-gfxstream")]
     GfxstreamGles = GpuCapset::GFXSTREAM_GLES.bits(),
+
+    /// Placeholder variant to prevent zero-variant enum when no backend
+    /// features are enabled. The null backend doesn't use capsets, so this
+    /// maps to GpuCapset::empty().
+    #[doc(hidden)]
+    __Null = 0,
 }
 
 impl From<CapsetName> for GpuCapset {
     fn from(capset_name: CapsetName) -> GpuCapset {
+        if matches!(capset_name, CapsetName::__Null) {
+            return GpuCapset::empty();
+        }
+
         GpuCapset::from_bits(capset_name as u64)
             .expect("Internal error: CapsetName enum is incorrectly defined")
     }
@@ -158,9 +173,9 @@ mod tests {
         }
 
         // Convert each CapsetName into GpuCapset
-        for capset_name in CapsetName::value_variants().iter().cloned() {
+        for capset_name in CapsetName::value_variants().iter().copied() {
             let resulting_capset: GpuCapset = capset_name.into(); // Would panic! if the definition is incorrect
-            assert_eq!(resulting_capset.bits(), capset_name as u64)
+            assert_eq!(resulting_capset.bits(), capset_name as u64);
         }
     }
 

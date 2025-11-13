@@ -5,6 +5,8 @@
 
 ### Changed
 
+- [[#852]] (https://github.com/rust-vmm/vhost-device/pull/890) vhost-device-gpu: Refactor vhost-device-gpu
+
 ### Fixed
 
 ### Deprecated

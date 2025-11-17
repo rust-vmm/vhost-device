@@ -26,8 +26,8 @@ vhost-user-backend = "0.20"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.16"
 virtio-vsock = "0.10"
-vm-memory = "0.16.1"
-vmm-sys-util = "0.14"
+vm-memory = "0.17.1"
+vmm-sys-util = "0.15"
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.0", optional = true }
 libc = { version = "0.2.177", optional = true }

@@ -27,7 +27,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::{
@@ -103,7 +103,8 @@ pub(crate) struct VhostUserCanBackend {
     controller: Arc<RwLock<CanController>>,
     acked_features: u64,
     event_idx: bool,
-    pub(crate) exit_event: EventFd,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -111,11 +112,15 @@ type CanDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl VhostUserCanBackend {
     pub(crate) fn new(controller: Arc<RwLock<CanController>>) -> Result<Self> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
+
         Ok(VhostUserCanBackend {
             controller,
             event_idx: false,
             acked_features: 0x0,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -719,8 +724,10 @@ impl VhostUserBackendMut for VhostUserCanBackend {
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

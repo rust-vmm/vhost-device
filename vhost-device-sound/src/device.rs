@@ -22,7 +22,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::{
@@ -486,7 +486,8 @@ impl VhostUserSoundThread {
 pub struct VhostUserSoundBackend {
     pub threads: Vec<RwLock<VhostUserSoundThread>>,
     virtio_cfg: VirtioSoundConfig,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>>,
 }
 
@@ -567,6 +568,9 @@ impl VhostUserSoundBackend {
 
         let audio_backend = alloc_audio_backend(config.audio_backend, streams)?;
 
+        let (exit_consumer, exit_notifier) =
+            new_event_consumer_and_notifier(EventFlag::NONBLOCK).map_err(Error::EventFdCreate)?;
+
         Ok(Self {
             threads,
             virtio_cfg: VirtioSoundConfig {
@@ -575,13 +579,14 @@ impl VhostUserSoundBackend {
                 chmaps: 1.into(),
                 controls: 0.into(),
             },
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
+            exit_consumer,
+            exit_notifier,
             audio_backend: RwLock::new(audio_backend),
         })
     }
 
     pub fn send_exit_event(&self) {
-        self.exit_event.write(1).unwrap();
+        self.exit_notifier.notify().unwrap();
     }
 }
 
@@ -668,8 +673,10 @@ impl VhostUserBackend for VhostUserSoundBackend {
         vec
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 
@@ -982,7 +989,8 @@ mod tests {
 
             let exit = backend.exit_event(0);
             assert!(exit.is_some());
-            exit.unwrap().write(1).unwrap();
+            let (_, notifier) = exit.unwrap();
+            notifier.notify().unwrap();
 
             backend
                 .handle_event(CONTROL_QUEUE_IDX, EventSet::IN, &vrings, 0)

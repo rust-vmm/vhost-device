@@ -18,7 +18,8 @@ use virtio_bindings::bindings::{
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le64};
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
+    eventfd::EventFd,
 };
 
 use crate::{thread_backend::RawPktsQ, vhu_vsock_thread::*};
@@ -258,7 +259,8 @@ pub(crate) struct VhostUserVsockBackend {
     queue_size: usize,
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
 }
 
 impl VhostUserVsockBackend {
@@ -272,6 +274,9 @@ impl VhostUserVsockBackend {
         )?);
         let queues_per_thread = vec![QUEUE_MASK];
 
+        let (exit_consumer, exit_notifier) =
+            new_event_consumer_and_notifier(EventFlag::NONBLOCK).map_err(Error::EventFdCreate)?;
+
         Ok(Self {
             config: VirtioVsockConfig {
                 guest_cid: From::from(config.get_guest_cid()),
@@ -279,7 +284,8 @@ impl VhostUserVsockBackend {
             queue_size: config.get_queue_size(),
             threads: vec![thread],
             queues_per_thread,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?,
+            exit_consumer,
+            exit_notifier,
         })
     }
 }
@@ -390,8 +396,10 @@ impl VhostUserBackend for VhostUserVsockBackend {
         self.queues_per_thread.clone()
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 
@@ -447,7 +455,8 @@ mod tests {
 
         let exit = backend.exit_event(0);
         assert!(exit.is_some());
-        exit.unwrap().write(1).unwrap();
+        let (_, notifier) = exit.unwrap();
+        notifier.notify().unwrap();
 
         let ret = backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
         ret.unwrap();

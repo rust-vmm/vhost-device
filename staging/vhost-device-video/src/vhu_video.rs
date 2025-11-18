@@ -20,7 +20,7 @@ use virtio_queue::DescriptorChain;
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap, Le32};
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::{vhu_video_thread::VhostUserVideoThread, video_backends};
@@ -127,7 +127,8 @@ unsafe impl ByteValued for VirtioVideoConfig {}
 pub(crate) struct VuVideoBackend {
     config: VirtioVideoConfig,
     pub threads: Vec<Mutex<VhostUserVideoThread>>,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
 }
 
 impl VuVideoBackend {
@@ -137,6 +138,8 @@ impl VuVideoBackend {
             video_backend,
             video_path,
         )?));
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| VuVideoError::EventFdError)?;
         Ok(Self {
             config: VirtioVideoConfig {
                 version: 0.into(),
@@ -145,7 +148,8 @@ impl VuVideoBackend {
                 device_name: [0; 32],
             },
             threads: vec![Mutex::new(VhostUserVideoThread::new(backend.clone())?)],
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuVideoError::EventFdError)?,
+            exit_consumer,
+            exit_notifier,
         })
     }
 }
@@ -259,8 +263,10 @@ impl VhostUserBackendMut for VuVideoBackend {
         buf[offset..offset + size].to_vec()
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 
@@ -344,7 +350,8 @@ pub mod tests {
 
         let exit = backend.exit_event(0);
         assert!(exit.is_some());
-        exit.unwrap().write(1).unwrap();
+        let (_, notifier) = exit.unwrap();
+        notifier.notify().unwrap();
         for queue in COMMAND_Q..VIDEO_EVENT {
             // Skip exit event
             if queue == NUM_QUEUES as u16 {

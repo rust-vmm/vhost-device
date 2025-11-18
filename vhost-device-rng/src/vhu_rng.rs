@@ -22,12 +22,12 @@ use virtio_bindings::bindings::{
 };
 use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{
-    GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
+    Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap,
     ReadVolatile,
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 const QUEUE_SIZE: usize = 1024;
@@ -90,7 +90,8 @@ pub(crate) struct VuRngBackend<T: ReadVolatile> {
     event_idx: bool,
     timer: VuRngTimerConfig,
     rng_source: Arc<Mutex<T>>,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -101,11 +102,14 @@ impl<T: ReadVolatile> VuRngBackend<T> {
         period_ms: u128,
         max_bytes: usize,
     ) -> std::result::Result<Self, std::io::Error> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| VuRngError::EventFdError)?;
         Ok(VuRngBackend {
             event_idx: false,
             rng_source,
             timer: VuRngTimerConfig::new(period_ms, max_bytes),
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuRngError::EventFdError)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -284,8 +288,10 @@ impl<T: 'static + ReadVolatile + Sync + Send> VhostUserBackendMut for VuRngBacke
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

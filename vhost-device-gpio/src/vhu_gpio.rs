@@ -29,7 +29,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::{
@@ -160,7 +160,8 @@ pub(crate) struct VhostUserGpioBackend<D: GpioDevice> {
     controller: Arc<GpioController<D>>,
     handles: Arc<RwLock<Vec<Option<JoinHandle<()>>>>>,
     event_idx: bool,
-    pub(crate) exit_event: EventFd,
+    pub(crate) exit_consumer: EventConsumer,
+    pub(crate) exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -172,11 +173,14 @@ impl<D: GpioDevice> VhostUserGpioBackend<D> {
         let mut handles: Vec<Option<JoinHandle<()>>> = Vec::new();
         handles.resize_with(controller.num_gpios() as usize, || None);
 
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
         Ok(VhostUserGpioBackend {
             controller: Arc::new(controller),
             handles: Arc::new(RwLock::new(handles)),
             event_idx: false,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -499,8 +503,10 @@ impl<D: 'static + GpioDevice + Sync + Send> VhostUserBackendMut for VhostUserGpi
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

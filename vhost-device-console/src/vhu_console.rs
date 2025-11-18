@@ -29,6 +29,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
     eventfd::{EventFd, EFD_NONBLOCK},
 };
 
@@ -140,7 +141,8 @@ pub struct VhostUserConsoleBackend {
     pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
     pub rx_event: EventFd,
     pub rx_ctrl_event: EventFd,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -151,6 +153,8 @@ impl VhostUserConsoleBackend {
     pub const NUM_QUEUES: u16 = 4;
 
     pub fn new(max_queue_size: usize, controller: Arc<RwLock<ConsoleController>>) -> Result<Self> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
         Ok(Self {
             max_queue_size,
             controller,
@@ -168,7 +172,8 @@ impl VhostUserConsoleBackend {
             listener: None,
             rx_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
             rx_ctrl_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -515,7 +520,7 @@ impl VhostUserConsoleBackend {
             )
             .unwrap();
 
-        let exit_event_fd = self.exit_event.as_raw_fd();
+        let exit_event_fd = self.exit_consumer.as_raw_fd();
         vring_worker
             .register_listener(
                 exit_event_fd,
@@ -850,8 +855,10 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

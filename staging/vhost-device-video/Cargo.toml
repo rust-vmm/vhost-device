@@ -26,17 +26,17 @@ log = "0.4"
 libc = "0.2.177"
 thiserror = "2.0"
 futures-executor = { version = "0.3", features = ["thread-pool"] }
-vhost = { version = "0.14", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.20"
+vhost = { version = "0.15", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.21"
 virtio-bindings = "0.2.5"
-virtio-queue = "0.16"
-vm-memory = "0.16.0"
-vmm-sys-util = "0.14"
+virtio-queue = "0.17"
+vm-memory = "0.17.1"
+vmm-sys-util = "0.15"
 v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "110fd77", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
 rstest = "0.26.1"
 tempfile = "3.23.0"
-virtio-queue = { version = "0.16", features = ["test-utils"] }
-vm-memory = { version = "0.16.0", features = ["backend-mmap", "backend-atomic"] }
+virtio-queue = { version = "0.17", features = ["test-utils"] }
+vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }

@@ -19,7 +19,7 @@ use virtio_queue::{DescriptorChain, QueueOwnedT};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::FooInfo;
@@ -53,7 +53,8 @@ impl From<Error> for std::io::Error {
 pub struct VhostUserFooBackend {
     info: FooInfo,
     event_idx: bool,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryLoadGuard<GuestMemoryMmap>>,
 }
 
@@ -61,10 +62,14 @@ type FooDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl VhostUserFooBackend {
     pub fn new(info: FooInfo) -> Result<Self> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
+
         Ok(VhostUserFooBackend {
             info,
             event_idx: false,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -214,8 +219,10 @@ impl VhostUserBackendMut for VhostUserFooBackend {
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

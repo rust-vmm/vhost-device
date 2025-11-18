@@ -15,16 +15,16 @@ env_logger = "0.11"
 itertools = "0.14"
 log = "0.4"
 thiserror = "2.0"
-vhost = { version = "0.14", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.20"
+vhost = { version = "0.15", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.21"
 virtio-bindings = "0.2"
-virtio-queue = "0.16"
-vm-memory = "0.16.1"
-vmm-sys-util = "0.14"
+virtio-queue = "0.17"
+vm-memory = "0.17.1"
+vmm-sys-util = "0.15"
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { version = "0.16", features = ["test-utils"] }
+virtio-queue = { version = "0.17", features = ["test-utils"] }
 
 [lints]
 workspace = true

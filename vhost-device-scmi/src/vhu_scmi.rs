@@ -26,7 +26,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::{
@@ -96,7 +96,8 @@ type ScmiDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<
 
 pub struct VuScmiBackend {
     event_idx: bool,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     /// Event vring and descriptors serve for asynchronous responses and
     /// notifications. They are obtained from the driver and we store them
@@ -138,9 +139,12 @@ impl VuScmiBackend {
                 None => return Result::Err(VuScmiError::UnknownDeviceRequested(name.clone())),
             };
         }
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| VuScmiError::EventFdFailed)?;
         Ok(Self {
             event_idx: false,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuScmiError::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
             event_vring: None,
             event_descriptors: vec![],
@@ -539,9 +543,11 @@ impl VhostUserBackendMut for VuScmiBackend {
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
         debug!("Exit event called");
-        self.exit_event.try_clone().ok()
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

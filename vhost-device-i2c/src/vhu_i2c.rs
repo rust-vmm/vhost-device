@@ -27,7 +27,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::i2c::*;
@@ -105,7 +105,8 @@ unsafe impl ByteValued for VirtioI2cInHdr {}
 pub(crate) struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryLoadGuard<GuestMemoryMmap>>,
 }
 
@@ -113,10 +114,13 @@ type I2cDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl<D: I2cDevice> VhostUserI2cBackend<D> {
     pub fn new(i2c_map: Arc<I2cMap<D>>) -> Result<Self> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
         Ok(VhostUserI2cBackend {
             i2c_map,
             event_idx: false,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -355,8 +359,10 @@ impl<D: 'static + I2cDevice + Sync + Send> VhostUserBackendMut for VhostUserI2cB
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

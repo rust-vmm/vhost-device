@@ -19,7 +19,7 @@ use virtio_queue::QueueOwnedT;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryLoadGuard, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::{
@@ -39,7 +39,8 @@ pub struct VhostUserScsiBackend {
     event_idx: bool,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     targets: Vec<Box<dyn Target>>,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
 }
 
 impl Default for VhostUserScsiBackend {
@@ -50,11 +51,15 @@ impl Default for VhostUserScsiBackend {
 
 impl VhostUserScsiBackend {
     pub fn new() -> Self {
+        let (exit_consumer, exit_notifier) =
+            new_event_consumer_and_notifier(EventFlag::NONBLOCK).expect("Creating exit event");
+
         Self {
             event_idx: false,
             mem: None,
             targets: Vec::new(),
-            exit_event: EventFd::new(EFD_NONBLOCK).expect("Creating exit eventfd"),
+            exit_consumer,
+            exit_notifier,
         }
     }
 
@@ -322,8 +327,10 @@ impl VhostUserBackendMut for VhostUserScsiBackend {
         panic!("Access to configuration space is not supported.");
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        Some(self.exit_event.try_clone().expect("Cloning exit eventfd"))
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

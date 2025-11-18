@@ -69,7 +69,8 @@ use virtio_queue::{QueueOwnedT, Reader, Writer};
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap, Le32};
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
+    eventfd::EventFd,
 };
 
 #[cfg(feature = "backend-gfxstream")]
@@ -140,7 +141,8 @@ struct VhostUserGpuBackendInner {
     virtio_cfg: VirtioGpuConfig,
     event_idx_enabled: bool,
     gpu_backend: Option<GpuBackend>,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     gpu_config: GpuConfig,
 }
@@ -160,6 +162,9 @@ impl VhostUserGpuBackend {
             gpu_config.capsets(),
             gpu_config.flags()
         );
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
+
         let inner = VhostUserGpuBackendInner {
             virtio_cfg: VirtioGpuConfig {
                 events_read: 0.into(),
@@ -169,7 +174,8 @@ impl VhostUserGpuBackend {
             },
             event_idx_enabled: false,
             gpu_backend: None,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
             gpu_config,
         };
@@ -712,8 +718,11 @@ impl VhostUserBackend for VhostUserGpuBackend {
         self.inner.lock().unwrap().get_config(offset, size)
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.inner.lock().unwrap().exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let inner = self.inner.lock().unwrap();
+        let consumer = inner.exit_consumer.try_clone().ok()?;
+        let notifier = inner.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 
     fn handle_event(

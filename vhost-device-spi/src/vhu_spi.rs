@@ -27,7 +27,7 @@ use vm_memory::{
 };
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::spi::*;
@@ -137,7 +137,8 @@ unsafe impl ByteValued for VirtioSpiConfig {}
 pub(crate) struct VhostUserSpiBackend<D: SpiDevice> {
     spi_ctrl: Arc<SpiController<D>>,
     event_idx: bool,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -145,10 +146,13 @@ type SpiDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<(
 
 impl<D: SpiDevice> VhostUserSpiBackend<D> {
     pub fn new(spi_ctrl: Arc<SpiController<D>>) -> Result<Self> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| Error::EventFdFailed)?;
         Ok(VhostUserSpiBackend {
             spi_ctrl,
             event_idx: false,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?,
+            exit_consumer,
+            exit_notifier,
             mem: None,
         })
     }
@@ -482,8 +486,10 @@ impl<D: 'static + SpiDevice + Sync + Send> VhostUserBackendMut for VhostUserSpiB
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

@@ -228,7 +228,7 @@ where
                             .addr()
                             .0
                             .checked_add(u64::from(self.offset))
-                            .ok_or(io::Error::other(vm_memory::Error::InvalidGuestRegion))?,
+                            .ok_or(io::Error::other("Guest address overflow"))?,
                     ),
                 )
                 .map_err(io::Error::other)?;

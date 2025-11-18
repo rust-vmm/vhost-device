@@ -23,7 +23,7 @@ use virtio_queue::QueueT;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
 };
 
 use crate::input::*;
@@ -124,7 +124,8 @@ impl From<VuInputError> for io::Error {
 pub(crate) struct VuInputBackend<T: InputDevice> {
     event_idx: bool,
     ev_dev: T,
-    pub exit_event: EventFd,
+    pub exit_consumer: EventConsumer,
+    pub exit_notifier: EventNotifier,
     select: u8,
     subsel: u8,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
@@ -133,10 +134,13 @@ pub(crate) struct VuInputBackend<T: InputDevice> {
 
 impl<T: InputDevice> VuInputBackend<T> {
     pub fn new(ev_dev: T) -> std::result::Result<Self, std::io::Error> {
+        let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
+            .map_err(|_| VuInputError::EventFdError)?;
         Ok(VuInputBackend {
             event_idx: false,
             ev_dev,
-            exit_event: EventFd::new(EFD_NONBLOCK).map_err(|_| VuInputError::EventFdError)?,
+            exit_consumer,
+            exit_notifier,
             select: 0,
             subsel: 0,
             mem: None,
@@ -425,8 +429,10 @@ impl<T: 'static + InputDevice + Sync + Send> VhostUserBackendMut for VuInputBack
         Ok(())
     }
 
-    fn exit_event(&self, _thread_index: usize) -> Option<EventFd> {
-        self.exit_event.try_clone().ok()
+    fn exit_event(&self, _thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let consumer = self.exit_consumer.try_clone().ok()?;
+        let notifier = self.exit_notifier.try_clone().ok()?;
+        Some((consumer, notifier))
     }
 }
 

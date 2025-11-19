@@ -19,9 +19,13 @@ pub mod renderer;
 #[cfg(test)]
 pub(crate) mod testutils;
 
+#[cfg(feature = "backend-virgl")]
+use std::fs::File;
+#[cfg(feature = "backend-virgl")]
+use std::os::fd::OwnedFd;
 use std::{
     fmt::{Display, Formatter},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use bitflags::bitflags;
@@ -129,6 +133,8 @@ pub struct GpuConfig {
     gpu_mode: GpuMode,
     capset: GpuCapset,
     flags: GpuFlags,
+    #[cfg(feature = "backend-virgl")]
+    render_server_fd: Option<OwnedFd>,
 }
 
 #[derive(Debug, Default)]
@@ -136,6 +142,8 @@ pub struct GpuConfigBuilder {
     gpu_mode: Option<GpuMode>,
     capset: Option<GpuCapset>,
     flags: Option<GpuFlags>,
+    #[cfg(feature = "backend-virgl")]
+    gpu_device: Option<PathBuf>,
 }
 
 impl GpuConfigBuilder {
@@ -151,6 +159,12 @@ impl GpuConfigBuilder {
 
     pub fn set_flags(mut self, flags: GpuFlags) -> Self {
         self.flags = Some(flags);
+        self
+    }
+
+    #[cfg(feature = "backend-virgl")]
+    pub fn set_gpu_device(mut self, gpu_device: PathBuf) -> Self {
+        self.gpu_device = Some(gpu_device);
         self
     }
 
@@ -189,10 +203,27 @@ impl GpuConfigBuilder {
             return Err(GpuConfigError::GlesRequiredByGfxstream);
         }
 
+        #[cfg(feature = "backend-virgl")]
+        if self.gpu_device.is_some() && !matches!(gpu_mode, GpuMode::VirglRenderer) {
+            return Err(GpuConfigError::GpuDeviceNotSupportedByMode);
+        }
+
+        #[cfg(feature = "backend-virgl")]
+        let render_server_fd = if let Some(gpu_device) = self.gpu_device {
+            let fd = File::open(&gpu_device)
+                .map(Into::into)
+                .map_err(|e| GpuConfigError::InvalidGpuDevice(gpu_device, e))?;
+            Some(fd)
+        } else {
+            None
+        };
+
         Ok(GpuConfig {
             gpu_mode,
             capset,
             flags,
+            #[cfg(feature = "backend-virgl")]
+            render_server_fd,
         })
     }
 }
@@ -233,6 +264,10 @@ pub enum GpuConfigError {
     CapsetUnsupportedByMode(GpuMode, GpuCapset),
     #[error("Requested gfxstream-gles capset, but gles is disabled")]
     GlesRequiredByGfxstream,
+    #[error("GPU device can only be specified when using virglrenderer mode")]
+    GpuDeviceNotSupportedByMode,
+    #[error("Failed to open GPU device '{0}': {1}")]
+    InvalidGpuDevice(PathBuf, std::io::Error),
 }
 
 impl GpuConfig {
@@ -246,6 +281,11 @@ impl GpuConfig {
 
     pub const fn flags(&self) -> &GpuFlags {
         &self.flags
+    }
+
+    #[cfg(feature = "backend-virgl")]
+    pub fn render_server_fd(&self) -> Option<&OwnedFd> {
+        self.render_server_fd.as_ref()
     }
 }
 
@@ -283,6 +323,18 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
+
+    #[cfg(feature = "backend-virgl")]
+    fn assert_gpu_device_fails_for_mode(mode: GpuMode) {
+        use std::path::PathBuf;
+
+        let result = GpuConfigBuilder::default()
+            .set_gpu_mode(mode)
+            .set_gpu_device(PathBuf::from("/dev/dri/renderD128"))
+            .set_flags(GpuFlags::default())
+            .build();
+        assert_matches!(result, Err(GpuConfigError::GpuDeviceNotSupportedByMode));
+    }
 
     #[test]
     #[cfg(feature = "backend-virgl")]
@@ -366,6 +418,15 @@ mod tests {
             .set_flags(flags)
             .build();
         assert_matches!(result, Err(GpuConfigError::GlesRequiredByGfxstream));
+    }
+
+    #[test]
+    #[cfg(feature = "backend-virgl")]
+    fn test_gpu_device_only_with_virglrenderer() {
+        assert_gpu_device_fails_for_mode(GpuMode::Null);
+
+        #[cfg(feature = "backend-gfxstream")]
+        assert_gpu_device_fails_for_mode(GpuMode::Gfxstream);
     }
 
     #[test]

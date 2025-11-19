@@ -120,6 +120,11 @@ pub struct GpuFlagsArgs {
     /// Enable headless mode (no display output)
     #[clap(long, action = ArgAction::SetTrue, default_value_t = false)]
     pub headless: bool,
+
+    /// GPU device path (e.g., /dev/dri/renderD128)
+    #[clap(long, value_name = "PATH")]
+    #[cfg(feature = "backend-virgl")]
+    pub gpu_device: Option<PathBuf>,
 }
 
 impl From<GpuFlagsArgs> for GpuFlags {
@@ -135,13 +140,23 @@ impl From<GpuFlagsArgs> for GpuFlags {
 }
 
 pub fn config_from_args(args: GpuArgs) -> Result<(PathBuf, GpuConfig), GpuConfigError> {
+    #[cfg(feature = "backend-virgl")]
+    let gpu_device = args.flags.gpu_device.clone();
+
     let flags = GpuFlags::from(args.flags);
+
     let capset = args.capset.map(capset_names_into_capset);
     let mut builder = GpuConfigBuilder::default()
         .set_gpu_mode(args.gpu_mode)
         .set_flags(flags);
+
     if let Some(capset) = capset {
         builder = builder.set_capset(capset);
+    }
+
+    #[cfg(feature = "backend-virgl")]
+    if let Some(gpu_device) = gpu_device {
+        builder = builder.set_gpu_device(gpu_device);
     }
 
     let config = builder.build()?;
@@ -215,6 +230,8 @@ mod tests {
                 use_gles: false,
                 use_surfaceless: false,
                 headless: false,
+                #[cfg(feature = "backend-virgl")]
+                gpu_device: None,
             },
         };
 
@@ -232,6 +249,31 @@ mod tests {
             }
         );
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
-        assert_eq!(config.capsets(), GpuCapset::VIRGL | GpuCapset::VIRGL2)
+        assert_eq!(config.capsets(), GpuCapset::VIRGL | GpuCapset::VIRGL2);
+
+        // Test with invalid GPU device
+        #[cfg(feature = "backend-virgl")]
+        {
+            let invalid_gpu_device = Path::new("/nonexistent/gpu/device");
+            let invalid_args = GpuArgs {
+                socket_path: expected_path.into(),
+                gpu_mode: GpuMode::VirglRenderer,
+                capset: Some(vec![CapsetName::Virgl]),
+                flags: GpuFlagsArgs {
+                    use_egl: true,
+                    use_glx: false,
+                    use_gles: true,
+                    use_surfaceless: true,
+                    headless: false,
+                    gpu_device: Some(invalid_gpu_device.into()),
+                },
+            };
+
+            let result = config_from_args(invalid_args);
+            assert!(matches!(
+                result,
+                Err(GpuConfigError::InvalidGpuDevice(ref path, _)) if path == invalid_gpu_device
+            ));
+        }
     }
 }

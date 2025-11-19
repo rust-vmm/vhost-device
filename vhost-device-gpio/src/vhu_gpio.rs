@@ -160,8 +160,8 @@ pub(crate) struct VhostUserGpioBackend<D: GpioDevice> {
     controller: Arc<GpioController<D>>,
     handles: Arc<RwLock<Vec<Option<JoinHandle<()>>>>>,
     event_idx: bool,
-    pub(crate) exit_consumer: EventConsumer,
-    pub(crate) exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 

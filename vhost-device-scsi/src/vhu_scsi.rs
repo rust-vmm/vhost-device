@@ -39,8 +39,8 @@ pub struct VhostUserScsiBackend {
     event_idx: bool,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     targets: Vec<Box<dyn Target>>,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
 }
 
 impl Default for VhostUserScsiBackend {

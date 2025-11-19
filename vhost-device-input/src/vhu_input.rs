@@ -124,8 +124,8 @@ impl From<VuInputError> for io::Error {
 pub(crate) struct VuInputBackend<T: InputDevice> {
     event_idx: bool,
     ev_dev: T,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     select: u8,
     subsel: u8,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,

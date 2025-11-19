@@ -259,8 +259,8 @@ pub(crate) struct VhostUserVsockBackend {
     queue_size: usize,
     pub threads: Vec<Mutex<VhostUserVsockThread>>,
     queues_per_thread: Vec<u64>,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
 }
 
 impl VhostUserVsockBackend {

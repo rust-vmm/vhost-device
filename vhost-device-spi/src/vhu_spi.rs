@@ -137,8 +137,8 @@ unsafe impl ByteValued for VirtioSpiConfig {}
 pub(crate) struct VhostUserSpiBackend<D: SpiDevice> {
     spi_ctrl: Arc<SpiController<D>>,
     event_idx: bool,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 

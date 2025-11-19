@@ -141,8 +141,8 @@ pub struct VhostUserConsoleBackend {
     pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
     pub rx_event: EventFd,
     pub rx_ctrl_event: EventFd,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 

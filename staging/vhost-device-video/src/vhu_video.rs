@@ -127,8 +127,8 @@ unsafe impl ByteValued for VirtioVideoConfig {}
 pub(crate) struct VuVideoBackend {
     config: VirtioVideoConfig,
     pub threads: Vec<Mutex<VhostUserVideoThread>>,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
 }
 
 impl VuVideoBackend {

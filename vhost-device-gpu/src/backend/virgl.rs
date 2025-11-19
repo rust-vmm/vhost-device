@@ -6,7 +6,7 @@
 
 use std::{
     collections::{BTreeMap, HashSet},
-    io::IoSliceMut,
+    io::{self, IoSliceMut},
     os::fd::{AsFd, FromRawFd, IntoRawFd, RawFd},
     sync::{Arc, Mutex},
 };
@@ -146,7 +146,7 @@ impl VirglRendererAdapter {
         queue_ctl: &VringRwLock,
         config: &GpuConfig,
         gpu_backend: Option<GpuBackend>,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let virglrenderer_flags = VirglRendererFlags::new()
             .use_virgl(true)
             .use_venus(true)
@@ -165,14 +165,14 @@ impl VirglRendererAdapter {
 
         let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, None)
             .expect("Failed to initialize virglrenderer");
-        Self {
+        Ok(Self {
             renderer,
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
             context_ids: HashSet::new(),
             scanouts: Default::default(),
-        }
+        })
     }
 }
 
@@ -802,7 +802,7 @@ mod virgl_cov_tests {
                 create_vring(&mem, &[] as &[TestingDescChainArgs], GuestAddress(0x2000), GuestAddress(0x4000), 64);
 
             let backend = dummy_gpu_backend();
-            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, Some(backend));
+            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, Some(backend)).unwrap();
 
             gpu.event_poll();
             let edid_req = VhostUserGpuEdidRequest {

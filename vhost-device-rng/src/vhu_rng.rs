@@ -90,8 +90,8 @@ pub(crate) struct VuRngBackend<T: ReadVolatile> {
     event_idx: bool,
     timer: VuRngTimerConfig,
     rng_source: Arc<Mutex<T>>,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 

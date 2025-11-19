@@ -105,8 +105,8 @@ unsafe impl ByteValued for VirtioI2cInHdr {}
 pub(crate) struct VhostUserI2cBackend<D: I2cDevice> {
     i2c_map: Arc<I2cMap<D>>,
     event_idx: bool,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryLoadGuard<GuestMemoryMmap>>,
 }
 

@@ -53,8 +53,8 @@ impl From<Error> for std::io::Error {
 pub struct VhostUserFooBackend {
     info: FooInfo,
     event_idx: bool,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryLoadGuard<GuestMemoryMmap>>,
 }
 

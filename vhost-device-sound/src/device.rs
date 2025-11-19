@@ -486,8 +486,8 @@ impl VhostUserSoundThread {
 pub struct VhostUserSoundBackend {
     pub threads: Vec<RwLock<VhostUserSoundThread>>,
     virtio_cfg: VirtioSoundConfig,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>>,
 }
 

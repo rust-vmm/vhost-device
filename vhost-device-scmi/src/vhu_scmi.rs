@@ -96,8 +96,8 @@ type ScmiDescriptorChain = DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap<
 
 pub struct VuScmiBackend {
     event_idx: bool,
-    pub exit_consumer: EventConsumer,
-    pub exit_notifier: EventNotifier,
+    exit_consumer: EventConsumer,
+    exit_notifier: EventNotifier,
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     /// Event vring and descriptors serve for asynchronous responses and
     /// notifications. They are obtained from the driver and we store them

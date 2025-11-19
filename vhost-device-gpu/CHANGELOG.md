@@ -3,6 +3,7 @@
 
 ### Added
 
+- [[#932]] (https://github.com/rust-vmm/vhost-device/pull/932) vhost-device-gpu: Add support for GPU device path
 - [[#927]] (https://github.com/rust-vmm/vhost-device/pull/927) vhost-device-gpu: Introduce headless mode
 
 ### Changed

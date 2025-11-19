@@ -6,7 +6,7 @@
 
 use std::{
     collections::BTreeMap,
-    io::IoSliceMut,
+    io::{self, IoSliceMut},
     os::fd::{AsFd, FromRawFd, IntoRawFd, RawFd},
     sync::{Arc, Mutex},
 };
@@ -142,7 +142,11 @@ pub struct VirglRendererAdapter {
 }
 
 impl VirglRendererAdapter {
-    pub fn new(queue_ctl: &VringRwLock, config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        config: &GpuConfig,
+        gpu_backend: GpuBackend,
+    ) -> io::Result<Self> {
         let virglrenderer_flags = VirglRendererFlags::new()
             .use_virgl(true)
             .use_venus(true)
@@ -161,14 +165,14 @@ impl VirglRendererAdapter {
 
         let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, None)
             .expect("Failed to initialize virglrenderer");
-        Self {
+        Ok(Self {
             renderer,
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
             contexts: BTreeMap::new(),
             scanouts: Default::default(),
-        }
+        })
     }
 }
 
@@ -758,7 +762,7 @@ mod virgl_cov_tests {
                 create_vring(&mem, &[] as &[TestingDescChainArgs], GuestAddress(0x2000), GuestAddress(0x4000), 64);
 
             let backend = dummy_gpu_backend();
-            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, backend);
+            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, backend).unwrap();
 
             gpu.event_poll();
             let edid_req = VhostUserGpuEdidRequest {

@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     collections::BTreeMap,
-    io::IoSliceMut,
+    io::{self, IoSliceMut},
     os::{fd::FromRawFd, raw::c_void},
     sync::{Arc, Mutex},
 };
@@ -103,7 +103,11 @@ pub struct GfxstreamAdapter {
 }
 
 impl GfxstreamAdapter {
-    pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        gpu_config: &GpuConfig,
+        gpu_backend: GpuBackend,
+    ) -> io::Result<Self> {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
 
@@ -116,12 +120,12 @@ impl GfxstreamAdapter {
             }
         });
 
-        Self {
+        Ok(Self {
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
             scanouts: Default::default(),
-        }
+        })
     }
 
     fn create_fence_handler(

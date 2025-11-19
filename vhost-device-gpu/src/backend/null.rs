@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use std::io;
+
 use log::trace;
 use rutabaga_gfx::RutabagaFence;
 use vhost::vhost_user::{
@@ -28,11 +30,11 @@ impl NullAdapter {
         _queue_ctl: &vhost_user_backend::VringRwLock,
         _config: &GpuConfig,
         gpu_backend: GpuBackend,
-    ) -> Self {
+    ) -> io::Result<Self> {
         trace!("NullAdapter created");
-        Self {
+        Ok(Self {
             _gpu_backend: gpu_backend,
-        }
+        })
     }
 }
 
@@ -264,7 +266,7 @@ mod tests {
         let vring = VringRwLock::new(mem, 0x100).unwrap();
         let config = GpuConfig::new(GpuMode::Null, None, GpuFlags::default()).unwrap();
 
-        NullAdapter::new(&vring, &config, gpu_backend)
+        NullAdapter::new(&vring, &config, gpu_backend).unwrap()
     }
 
     #[test]

@@ -24,7 +24,7 @@ macro_rules! handle_adapter {
                     // Pass $vrings to the call
                     let (control_vring, gpu_backend) = $self.extract_backend_and_vring($vrings)?;
 
-                    let renderer = $new_adapter(control_vring, gpu_backend);
+                    let renderer = $new_adapter(control_vring, gpu_backend)?;
 
                     event_poll_fd = renderer.get_event_poll_fd();
                     maybe_renderer.insert(renderer)

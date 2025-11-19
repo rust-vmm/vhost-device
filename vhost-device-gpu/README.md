@@ -56,6 +56,12 @@ A virtio-gpu device using the vhost-user protocol.
           [default: true]
           [possible values: true, false]
 
+      --gpu-device <PATH>
+          GPU device path (e.g., /dev/dri/renderD128)
+
+          [Optional] Specifies which GPU device to use for rendering. Only
+          applicable when using the virglrenderer backend.
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -132,6 +138,12 @@ First start the daemon on the host machine using one of the available gpu modes:
 
 ```shell
 host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virglrenderer
+```
+
+To specify a particular GPU device (e.g., when you have multiple GPUs):
+
+```shell
+host# vhost-device-gpu --socket-path /tmp/gpu.socket --gpu-mode virglrenderer --gpu-device /dev/dri/renderD128
 ```
 
 With QEMU, there are two device front-ends you can use with this device.

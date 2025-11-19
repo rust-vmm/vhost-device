@@ -14,6 +14,7 @@ use std::{
 use libc::c_void;
 use log::{debug, error, trace, warn};
 use rutabaga_gfx::RutabagaFence;
+use thiserror::Error as ThisError;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuDMABUFScanout, VhostUserGpuDMABUFScanout2,
@@ -50,6 +51,20 @@ use crate::{
 const CAPSET_ID_VIRGL: u32 = 1;
 const CAPSET_ID_VIRGL2: u32 = 2;
 const CAPSET_ID_VENUS: u32 = 4;
+
+#[derive(Debug, ThisError)]
+pub enum VirglAdapterError {
+    #[error("Failed to clone GPU device FD: {0}")]
+    CloneGpuDeviceFd(io::Error),
+    #[error("Failed to initialize virglrenderer: {0:?}")]
+    InitVirglRenderer(virglrenderer::VirglError),
+}
+
+impl From<VirglAdapterError> for io::Error {
+    fn from(e: VirglAdapterError) -> Self {
+        io::Error::other(e)
+    }
+}
 
 #[derive(Clone)]
 pub struct GpuResource {
@@ -163,8 +178,17 @@ impl VirglRendererAdapter {
             fence_state.clone(),
         ));
 
-        let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, None)
-            .expect("Failed to initialize virglrenderer");
+        // Use the GPU device FD if provided (already opened and validated at startup)
+        let render_server_fd = config
+            .flags()
+            .render_server_fd
+            .as_ref()
+            .map(|fd| fd.try_clone())
+            .transpose()
+            .map_err(VirglAdapterError::CloneGpuDeviceFd)?;
+
+        let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, render_server_fd)
+            .map_err(VirglAdapterError::InitVirglRenderer)?;
         Ok(Self {
             renderer,
             gpu_backend,

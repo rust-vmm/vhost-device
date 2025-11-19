@@ -19,9 +19,11 @@ pub mod renderer;
 #[cfg(test)]
 pub(crate) mod testutils;
 
+#[cfg(feature = "backend-virgl")]
+use std::os::fd::OwnedFd;
 use std::{
     fmt::{Display, Formatter},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use bitflags::bitflags;
@@ -117,7 +119,7 @@ impl GpuCapset {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// This structure holds the configuration for the GPU backend
 pub struct GpuConfig {
     gpu_mode: GpuMode,
@@ -125,12 +127,14 @@ pub struct GpuConfig {
     flags: GpuFlags,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct GpuFlags {
     pub use_egl: bool,
     pub use_glx: bool,
     pub use_gles: bool,
     pub use_surfaceless: bool,
+    #[cfg(feature = "backend-virgl")]
+    pub render_server_fd: Option<OwnedFd>,
 }
 
 impl GpuFlags {
@@ -141,6 +145,8 @@ impl GpuFlags {
             use_glx: false,
             use_gles: true,
             use_surfaceless: true,
+            #[cfg(feature = "backend-virgl")]
+            render_server_fd: None,
         }
     }
 }
@@ -157,6 +163,10 @@ pub enum GpuConfigError {
     CapsetUnsupportedByMode(GpuMode, GpuCapset),
     #[error("Requested gfxstream-gles capset, but gles is disabled")]
     GlesRequiredByGfxstream,
+    #[error("GPU path can only be specified when using virglrenderer mode")]
+    GpuPathNotSupportedByMode,
+    #[error("Failed to open GPU device '{0}'")]
+    InvalidGpuDevice(PathBuf),
 }
 
 impl GpuConfig {
@@ -206,6 +216,12 @@ impl GpuConfig {
         #[cfg(feature = "backend-gfxstream")]
         if capset.contains(GpuCapset::GFXSTREAM_GLES) && !flags.use_gles {
             return Err(GpuConfigError::GlesRequiredByGfxstream);
+        }
+
+        // Validate that render_server_fd is only used with virglrenderer
+        #[cfg(feature = "backend-virgl")]
+        if flags.render_server_fd.is_some() && !matches!(gpu_mode, GpuMode::VirglRenderer) {
+            return Err(GpuConfigError::GpuPathNotSupportedByMode);
         }
 
         Ok(Self {

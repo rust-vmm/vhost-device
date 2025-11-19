@@ -24,7 +24,7 @@ macro_rules! handle_adapter {
                     // Pass $vrings to the call
                     let (control_vring, gpu_backend) = $self.extract_backend_and_vring($vrings)?;
 
-                    let renderer = $new_adapter(control_vring, gpu_backend);
+                    let renderer = $new_adapter(control_vring, gpu_backend)?;
 
                     event_poll_fd = renderer.get_event_poll_fd();
                     maybe_renderer.insert(renderer)
@@ -622,8 +622,12 @@ impl VhostUserGpuBackendInner {
             GpuMode::Gfxstream => handle_adapter!(
                 GfxstreamAdapter,
                 TLS_GFXSTREAM,
-                |control_vring, gpu_backend| {
-                    GfxstreamAdapter::new(control_vring, &self.gpu_config, gpu_backend)
+                |control_vring, gpu_backend| -> io::Result<GfxstreamAdapter> {
+                    Ok(GfxstreamAdapter::new(
+                        control_vring,
+                        &self.gpu_config,
+                        gpu_backend,
+                    ))
                 },
                 self,
                 device_event,
@@ -645,8 +649,12 @@ impl VhostUserGpuBackendInner {
             GpuMode::Null => handle_adapter!(
                 NullAdapter,
                 TLS_NULL,
-                |control_vring, gpu_backend| {
-                    NullAdapter::new(control_vring, &self.gpu_config, gpu_backend)
+                |control_vring, gpu_backend| -> io::Result<NullAdapter> {
+                    Ok(NullAdapter::new(
+                        control_vring,
+                        &self.gpu_config,
+                        gpu_backend,
+                    ))
                 },
                 self,
                 device_event,

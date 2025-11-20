@@ -36,7 +36,7 @@ pub struct DbusSession {
 impl DbusSession {
     pub fn new(working_dir: &Path) -> Self {
         let address_prefix = format!("unix:path={}", working_dir.join("dbus").display());
-        let mut child = Command::new("/usr/bin/dbus-daemon")
+        let mut child = Command::new("dbus-daemon")
             .args(["--session", "--address", &address_prefix, "--print-address"])
             .env("DBUS_VERBOSE", "1")
             .stdout(Stdio::piped())

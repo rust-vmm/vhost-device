@@ -33,9 +33,28 @@ fn main() {
 mod tests {
     use clap::Parser;
     use rstest::*;
+    use std::path::PathBuf;
     use vhost_device_sound::BackendType;
 
     use super::*;
+
+    #[test]
+    fn test_cli_socket_arg() {
+        let args: SoundArgs = Parser::parse_from([
+            "",
+            "--socket",
+            "/tmp/vhost-sound.socket",
+            "--backend",
+            "null",
+        ]);
+        assert_eq!(args.socket, Some(PathBuf::from("/tmp/vhost-sound.socket")));
+    }
+
+    #[test]
+    fn test_cli_socket_fd_arg() {
+        let args: SoundArgs = Parser::parse_from(["", "--socket-fd", "3", "--backend", "null"]);
+        assert_eq!(args.socket_fd, Some(3));
+    }
 
     #[rstest]
     #[case::null_backend("null", BackendType::Null)]

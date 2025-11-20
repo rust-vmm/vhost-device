@@ -40,6 +40,12 @@ mod vhost_device_scmi;
 #[path = "../../vhost-device-scsi/src/args.rs"]
 mod vhost_device_scsi;
 
+// Use vhost-device-rtc's args module as our own using the #[path] attribute
+
+#[cfg(feature = "vhost-device-rtc")]
+#[path = "../../vhost-device-rtc/src/args.rs"]
+mod vhost_device_rtc;
+
 fn main() {
     if let Err(err) = run_app() {
         eprintln!("{err}");
@@ -205,6 +211,14 @@ fn mangen() -> Result<(), Box<dyn Error>> {
 
         let buffer = mangen_for_crate::<ScsiArgs>(workspace_dir.join("vhost-device-scsi"))?;
         let man_path = dist_dir.join("vhost-device-scsi.1");
+        buffers.push((man_path, buffer));
+    }
+    #[cfg(feature = "vhost-device-rtc")]
+    {
+        use vhost_device_rtc::RtcArgs;
+
+        let buffer = mangen_for_crate::<RtcArgs>(workspace_dir.join("vhost-device-rtc"))?;
+        let man_path = dist_dir.join("vhost-device-rtc.1");
         buffers.push((man_path, buffer));
     }
 

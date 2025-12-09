@@ -44,12 +44,8 @@ use crate::{
         VirtioGpuResult, VIRTIO_GPU_MAX_SCANOUTS,
     },
     renderer::Renderer,
-    GpuConfig,
+    GpuCapset, GpuConfig,
 };
-
-const CAPSET_ID_VIRGL: u32 = 1;
-const CAPSET_ID_VIRGL2: u32 = 2;
-const CAPSET_ID_VENUS: u32 = 4;
 
 #[derive(Clone)]
 pub struct GpuResource {
@@ -134,6 +130,7 @@ impl FenceHandler for VirglFenceHandler {
 
 pub struct VirglRendererAdapter {
     renderer: VirglRenderer,
+    capsets: GpuCapset,
     gpu_backend: GpuBackend,
     fence_state: Arc<Mutex<FenceState>>,
     resources: BTreeMap<u32, GpuResource>,
@@ -143,6 +140,8 @@ pub struct VirglRendererAdapter {
 
 impl VirglRendererAdapter {
     pub fn new(queue_ctl: &VringRwLock, config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+        let capsets = config.capsets();
+
         let virglrenderer_flags = VirglRendererFlags::new()
             .use_virgl(true)
             .use_venus(true)
@@ -162,6 +161,7 @@ impl VirglRendererAdapter {
         let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, None)
             .expect("Failed to initialize virglrenderer");
         Self {
+            capsets,
             renderer,
             gpu_backend,
             fence_state,
@@ -320,13 +320,14 @@ impl Renderer for VirglRendererAdapter {
     }
 
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
-        debug!("the capset index is {index}");
-        let capset_id = match index {
-            0 => CAPSET_ID_VIRGL,
-            1 => CAPSET_ID_VIRGL2,
-            3 => CAPSET_ID_VENUS,
-            _ => return Err(ErrInvalidParameter),
-        };
+        debug!("Looking up capset at index {index}");
+        let capset_id = self
+            .capsets
+            .iter()
+            .nth(index as usize)
+            .ok_or(ErrInvalidParameter)?
+            .bits() as u32;
+
         let (version, size) = self.renderer.get_capset_info(index);
         Ok(OkCapsetInfo {
             capset_id,

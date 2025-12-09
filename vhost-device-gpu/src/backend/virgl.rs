@@ -849,10 +849,12 @@ mod virgl_cov_tests {
             }
             assert!(call_b.read().is_err(), "no signal when no match");
 
+            let capsets = GpuCapset::VIRGL | GpuCapset::VIRGL2;
+
             // Initialize virgl ONCE in this forked process; exercise adapter paths
             let cfg = GpuConfig::new(
                 GpuMode::VirglRenderer,
-                Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
+                Some(capsets),
                 GpuFlags::default(),
             ).expect("GpuConfig");
 
@@ -968,7 +970,7 @@ mod virgl_cov_tests {
             assert_matches!(gpu.flush_resource(0, dirty), Ok(GpuResponse::OkNoData));
 
             // Test capset queries
-            for index in [0, 1, 3] {
+            for index in 0..capsets.num_capsets() {
                 test_capset_operations(&gpu, index);
             }
 

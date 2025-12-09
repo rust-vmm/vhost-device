@@ -19,7 +19,7 @@ use vhost::vhost_user::{
         VhostUserGpuCursorPos, VhostUserGpuDMABUFScanout, VhostUserGpuDMABUFScanout2,
         VhostUserGpuEdidRequest, VhostUserGpuUpdate,
     },
-    GpuBackend,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use virglrenderer::{
@@ -131,6 +131,8 @@ impl FenceHandler for VirglFenceHandler {
 pub struct VirglRendererAdapter {
     renderer: VirglRenderer,
     capsets: GpuCapset,
+    #[allow(dead_code)]
+    backend: Backend,
     gpu_backend: GpuBackend,
     fence_state: Arc<Mutex<FenceState>>,
     resources: BTreeMap<u32, GpuResource>,
@@ -138,7 +140,12 @@ pub struct VirglRendererAdapter {
 }
 
 impl VirglRendererAdapter {
-    pub fn new(queue_ctl: &VringRwLock, config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        backend: Backend,
+        config: &GpuConfig,
+        gpu_backend: GpuBackend,
+    ) -> Self {
         let capsets = config.capsets();
 
         let virglrenderer_flags = VirglRendererFlags::new()
@@ -162,6 +169,7 @@ impl VirglRendererAdapter {
         Self {
             capsets,
             renderer,
+            backend,
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
@@ -663,6 +671,11 @@ mod virgl_cov_tests {
         GpuBackend::from_stream(backend)
     }
 
+    fn dummy_backend() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
+    }
+
     #[test]
     fn sglist_to_iovecs_err_on_invalid_slice() {
         // Single region: 0x1000..0x2000 (4 KiB)
@@ -748,8 +761,9 @@ mod virgl_cov_tests {
             let (vring, _outs, _call_evt) =
                 create_vring(&mem, &[] as &[TestingDescChainArgs], GuestAddress(0x2000), GuestAddress(0x4000), 64);
 
-            let backend = dummy_gpu_backend();
-            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, backend);
+            let backend = dummy_backend();
+            let gpu_backend = dummy_gpu_backend();
+            let mut gpu = VirglRendererAdapter::new(&vring, backend, &cfg, gpu_backend);
 
             gpu.event_poll();
             let edid_req = VhostUserGpuEdidRequest {

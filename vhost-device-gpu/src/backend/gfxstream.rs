@@ -21,7 +21,7 @@ use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuEdidRequest, VhostUserGpuScanout, VhostUserGpuUpdate,
     },
-    GpuBackend,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
@@ -96,6 +96,8 @@ thread_local! {
 }
 
 pub struct GfxstreamAdapter {
+    #[allow(dead_code)]
+    backend: Backend,
     gpu_backend: GpuBackend,
     resources: BTreeMap<u32, GfxstreamResource>,
     fence_state: Arc<Mutex<FenceState>>,
@@ -103,7 +105,12 @@ pub struct GfxstreamAdapter {
 }
 
 impl GfxstreamAdapter {
-    pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        backend: Backend,
+        gpu_config: &GpuConfig,
+        gpu_backend: GpuBackend,
+    ) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
 
@@ -117,6 +124,7 @@ impl GfxstreamAdapter {
         });
 
         Self {
+            backend,
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
@@ -732,6 +740,11 @@ mod gfx_fence_tests {
         GpuBackend::from_stream(backend)
     }
 
+    fn dummy_backend() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
+    }
+
     /// Attempts to create a GPU adapter for testing.
     /// Returns None if gfxstream initialization fails (e.g., in CI without GPU
     /// drivers).
@@ -776,6 +789,7 @@ mod gfx_fence_tests {
         });
 
         Some(GfxstreamAdapter {
+            backend: dummy_backend(),
             gpu_backend: dummy_gpu_backend(),
             resources: BTreeMap::default(),
             fence_state,

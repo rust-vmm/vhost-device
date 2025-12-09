@@ -48,6 +48,22 @@ macro_rules! impl_from_resource_create3d {
     };
 }
 
+#[cfg(any(feature = "backend-virgl", feature = "backend-gfxstream"))]
+macro_rules! impl_from_resource_create_blob {
+    ($target:ty) => {
+        impl From<ResourceCreateBlob> for $target {
+            fn from(r: ResourceCreateBlob) -> Self {
+                Self {
+                    blob_id: r.blob_id,
+                    blob_mem: r.blob_mem,
+                    blob_flags: r.blob_flags,
+                    size: r.size,
+                }
+            }
+        }
+    };
+}
+
 use std::{collections::BTreeMap, os::raw::c_void};
 
 #[cfg(feature = "backend-gfxstream")]
@@ -146,6 +162,21 @@ pub struct ResourceCreate3d {
 impl_from_resource_create3d!(rutabaga_gfx::ResourceCreate3D);
 #[cfg(feature = "backend-virgl")]
 impl_from_resource_create3d!(virglrenderer::ResourceCreate3D);
+
+#[cfg(feature = "backend-gfxstream")]
+impl_from_resource_create_blob!(rutabaga_gfx::ResourceCreateBlob);
+#[cfg(feature = "backend-virgl")]
+impl_from_resource_create_blob!(virglrenderer::ResourceCreateBlob);
+
+/// Parameters for creating a blob resource.
+#[derive(Debug, Clone, Copy)]
+pub struct ResourceCreateBlob {
+    pub resource_id: u32,
+    pub blob_id: u64,
+    pub blob_mem: u32,
+    pub blob_flags: u32,
+    pub size: u64,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ResourceCreate2d {

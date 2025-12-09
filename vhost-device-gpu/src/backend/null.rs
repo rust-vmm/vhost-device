@@ -13,7 +13,7 @@ use vm_memory::{GuestAddress, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
-    gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+    gpu_types::{ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
     protocol::{virtio_gpu_rect, GpuResponse, VirtioGpuResult},
     renderer::Renderer,
     GpuConfig,
@@ -27,6 +27,7 @@ impl NullAdapter {
     pub fn new(
         _queue_ctl: &vhost_user_backend::VringRwLock,
         _config: &GpuConfig,
+        _backend: vhost::vhost_user::Backend,
         gpu_backend: GpuBackend,
     ) -> Self {
         trace!("NullAdapter created");
@@ -224,11 +225,9 @@ impl Renderer for NullAdapter {
     fn resource_create_blob(
         &mut self,
         _ctx_id: u32,
-        _resource_id: u32,
-        _blob_id: u64,
-        _size: u64,
-        _blob_mem: u32,
-        _blob_flags: u32,
+        _resource_create_blob: ResourceCreateBlob,
+        _vecs: Vec<(vm_memory::GuestAddress, usize)>,
+        _mem: &vm_memory::GuestMemoryMmap,
     ) -> VirtioGpuResult {
         trace!("NullAdapter::resource_create_blob - no-op");
         Ok(GpuResponse::OkNoData)
@@ -256,15 +255,16 @@ mod tests {
     use crate::{GpuFlags, GpuMode};
 
     fn create_null_adapter() -> NullAdapter {
-        let (_, backend) = UnixStream::pair().unwrap();
-        let gpu_backend = GpuBackend::from_stream(backend);
+        let (stream1, stream2) = UnixStream::pair().unwrap();
+        let backend = vhost::vhost_user::Backend::from_stream(stream1);
+        let gpu_backend = GpuBackend::from_stream(stream2);
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
         let vring = VringRwLock::new(mem, 0x100).unwrap();
         let config = GpuConfig::new(GpuMode::Null, None, GpuFlags::default()).unwrap();
 
-        NullAdapter::new(&vring, &config, gpu_backend)
+        NullAdapter::new(&vring, &config, backend, gpu_backend)
     }
 
     #[test]
@@ -430,9 +430,21 @@ mod tests {
     #[test]
     fn test_null_adapter_blob_operations() {
         let mut adapter = create_null_adapter();
+        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
 
         // Verify blob resource creation succeeds
-        let result = adapter.resource_create_blob(0, 1, 1, 4096, 0, 0);
+        let result = adapter.resource_create_blob(
+            0,
+            ResourceCreateBlob {
+                resource_id: 1,
+                blob_id: 1,
+                blob_mem: 0,
+                blob_flags: 0,
+                size: 4096,
+            },
+            vec![],
+            &mem,
+        );
         assert!(matches!(result, Ok(GpuResponse::OkNoData)));
 
         // Verify mapping blob resource succeeds

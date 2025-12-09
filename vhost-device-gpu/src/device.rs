@@ -80,7 +80,7 @@ use crate::backend::gfxstream::GfxstreamAdapter;
 use crate::backend::virgl::VirglRendererAdapter;
 use crate::{
     backend::null::NullAdapter,
-    gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+    gpu_types::{ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
     protocol::{
         virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_get_edid,
         virtio_gpu_resource_create_2d, virtio_gpu_resource_create_3d, virtio_gpu_transfer_host_3d,
@@ -260,18 +260,27 @@ impl VhostUserGpuBackendInner {
                 fence_ids,
                 mut cmd_data,
             } => renderer.submit_command(hdr.ctx_id.into(), &mut cmd_data, &fence_ids),
-            GpuCommand::ResourceCreateBlob(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceCreateBlob unimplemented")
-            }
+            GpuCommand::ResourceCreateBlob(info, vecs) => renderer.resource_create_blob(
+                hdr.ctx_id.into(),
+                ResourceCreateBlob {
+                    resource_id: info.resource_id.into(),
+                    blob_id: info.blob_id.into(),
+                    blob_mem: info.blob_mem.into(),
+                    blob_flags: info.blob_flags.into(),
+                    size: info.size.into(),
+                },
+                vecs,
+                mem,
+            ),
 
             GpuCommand::SetScanoutBlob(_) => {
                 panic!("virtio_gpu: GpuCommand::SetScanoutBlob unimplemented")
             }
-            GpuCommand::ResourceMapBlob(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceMapBlob unimplemented")
+            GpuCommand::ResourceMapBlob(info) => {
+                renderer.resource_map_blob(info.resource_id.into(), info.offset.into())
             }
-            GpuCommand::ResourceUnmapBlob(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceUnmapBlob unimplemented")
+            GpuCommand::ResourceUnmapBlob(info) => {
+                renderer.resource_unmap_blob(info.resource_id.into())
             }
         }
     }
@@ -648,8 +657,8 @@ impl VhostUserGpuBackendInner {
             GpuMode::Null => handle_adapter!(
                 NullAdapter,
                 TLS_NULL,
-                |control_vring, _backend, gpu_backend| {
-                    NullAdapter::new(control_vring, &self.gpu_config, gpu_backend)
+                |control_vring, backend, gpu_backend| {
+                    NullAdapter::new(control_vring, &self.gpu_config, backend, gpu_backend)
                 },
                 self,
                 device_event,
@@ -706,6 +715,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | VhostUserProtocolFeatures::MQ
             | VhostUserProtocolFeatures::BACKEND_REQ
             | VhostUserProtocolFeatures::BACKEND_SEND_FD
+            | VhostUserProtocolFeatures::SHMEM
     }
 
     fn set_event_idx(&self, enabled: bool) {
@@ -802,7 +812,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+        gpu_types::{ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
         protocol::{
             virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_ctx_destroy,
             virtio_gpu_ctx_resource, virtio_gpu_get_capset, virtio_gpu_get_capset_info,
@@ -836,11 +846,9 @@ mod tests {
             fn resource_create_blob(
                 &mut self,
                 ctx_id: u32,
-                resource_id: u32,
-                blob_id: u64,
-                size: u64,
-                blob_mem: u32,
-                blob_flags: u32,
+                resource_create_blob: ResourceCreateBlob,
+                vecs: Vec<(GuestAddress, usize)>,
+                mem: &GuestMemoryMmap,
             ) -> VirtioGpuResult;
             fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult;
             fn resource_unmap_blob(&mut self, resource_id: u32) -> VirtioGpuResult;
@@ -1422,6 +1430,7 @@ mod tests {
                     | VhostUserProtocolFeatures::MQ
                     | VhostUserProtocolFeatures::BACKEND_REQ
                     | VhostUserProtocolFeatures::BACKEND_SEND_FD
+                    | VhostUserProtocolFeatures::SHMEM
             );
             assert_eq!(backend.queues_per_thread(), vec![0xffff_ffff]);
             assert_eq!(backend.get_config(0, 0), Vec::<u8>::new());

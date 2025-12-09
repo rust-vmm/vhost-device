@@ -19,27 +19,32 @@ use vhost::vhost_user::{
         VhostUserGpuCursorPos, VhostUserGpuDMABUFScanout, VhostUserGpuDMABUFScanout2,
         VhostUserGpuEdidRequest, VhostUserGpuUpdate,
     },
+    message::VhostUserMMapFlags,
     Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use virglrenderer::{
     FenceHandler, Iovec, VirglRenderer, VirglRendererFlags, VirglResource,
-    VIRGL_HANDLE_TYPE_MEM_DMABUF,
+    VIRGL_HANDLE_TYPE_MEM_DMABUF, VIRGL_HANDLE_TYPE_MEM_OPAQUE_FD, VIRGL_MAP_CACHE_MASK,
 };
+use virtio_bindings::virtio_gpu::VIRTIO_GPU_BLOB_MEM_HOST3D;
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
     backend::{
         common,
-        common::{common_set_scanout_disable, AssociatedScanouts, CursorConfig, VirtioGpuScanout},
+        common::{
+            common_map_blob, common_set_scanout_disable, common_unmap_blob, AssociatedScanouts,
+            CursorConfig, VirtioGpuScanout,
+        },
     },
-    gpu_types::{FenceState, ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+    gpu_types::{FenceState, ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
     protocol::{
         virtio_gpu_rect, GpuResponse,
         GpuResponse::{
             ErrInvalidContextId, ErrInvalidParameter, ErrInvalidResourceId, ErrInvalidScanoutId,
-            ErrUnspec, OkCapset, OkCapsetInfo, OkNoData,
+            ErrUnspec, OkCapset, OkCapsetInfo, OkMapInfo, OkNoData,
         },
         VirtioGpuResult, VIRTIO_GPU_MAX_SCANOUTS,
     },
@@ -54,6 +59,8 @@ pub struct GpuResource {
     // resource. Resource could be used for multiple scanouts.
     pub scanouts: AssociatedScanouts,
     pub backing_iovecs: Arc<Mutex<Option<Vec<Iovec>>>>,
+    pub blob_size: u64,
+    pub blob_shmem_offset: Option<u64>,
 }
 
 fn sglist_to_iovecs(
@@ -190,6 +197,8 @@ impl Renderer for VirglRendererAdapter {
             virgl_resource,
             scanouts: AssociatedScanouts::default(),
             backing_iovecs: Arc::new(Mutex::new(None)),
+            blob_size: 0,
+            blob_shmem_offset: None,
         };
         self.resources.insert(resource_id, local_resource);
         Ok(OkNoData)
@@ -611,25 +620,112 @@ impl Renderer for VirglRendererAdapter {
 
     fn resource_create_blob(
         &mut self,
-        _ctx_id: u32,
-        _resource_id: u32,
-        _blob_id: u64,
-        _size: u64,
-        _blob_mem: u32,
-        _blob_flags: u32,
+        ctx_id: u32,
+        resource_create_blob: ResourceCreateBlob,
+        vecs: Vec<(GuestAddress, usize)>,
+        mem: &GuestMemoryMmap,
     ) -> VirtioGpuResult {
-        error!("Not implemented: resource_create_blob");
-        Err(ErrUnspec)
+        let mut virgl_iovecs = None;
+
+        if resource_create_blob.blob_flags
+            & crate::protocol::VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE
+            != 0
+        {
+            error!("GUEST_HANDLE unimplemented for virgl backend");
+            return Err(ErrUnspec);
+        } else if resource_create_blob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D {
+            virgl_iovecs = Some(sglist_to_iovecs(&vecs[..], mem).map_err(|_| ErrUnspec)?);
+        }
+
+        let virgl_resource = self
+            .renderer
+            .create_blob(
+                ctx_id,
+                0, // width
+                0, // height
+                resource_create_blob.resource_id,
+                resource_create_blob.into(),
+                virgl_iovecs.as_deref(),
+            )
+            .map_err(|_| ErrUnspec)?;
+
+        let resource = GpuResource {
+            virgl_resource,
+            scanouts: AssociatedScanouts::default(),
+            backing_iovecs: Arc::new(Mutex::new(virgl_iovecs)),
+            blob_size: resource_create_blob.size,
+            blob_shmem_offset: None,
+        };
+
+        debug_assert!(
+            !self
+                .resources
+                .contains_key(&resource_create_blob.resource_id),
+            "Resource ID {} already exists in the resources map.",
+            resource_create_blob.resource_id
+        );
+
+        self.resources
+            .insert(resource_create_blob.resource_id, resource);
+        Ok(OkNoData)
     }
 
-    fn resource_map_blob(&mut self, _resource_id: u32, _offset: u64) -> VirtioGpuResult {
-        error!("Not implemented: resource_map_blob");
-        Err(ErrUnspec)
+    fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult {
+        let resource = self
+            .resources
+            .get_mut(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        let map_info = resource.virgl_resource.map_info.ok_or(ErrUnspec)?;
+
+        let handle = resource.virgl_resource.handle.as_ref().ok_or(ErrUnspec)?;
+
+        // Check handle type - we don't support OPAQUE_FD mapping
+        if handle.handle_type == VIRGL_HANDLE_TYPE_MEM_OPAQUE_FD {
+            error!("VIRGL_HANDLE_TYPE_MEM_OPAQUE_FD not supported for mapping");
+            return Err(ErrUnspec);
+        }
+
+        // virgl doesn't provide detailed permissions for mapping, map everything as
+        // writable
+        let flags = VhostUserMMapFlags::WRITABLE;
+
+        common_map_blob(
+            &self.backend,
+            flags,
+            &handle.os_handle.as_fd(),
+            resource.blob_size,
+            offset,
+            resource_id,
+        )?;
+
+        resource.blob_shmem_offset = Some(offset);
+
+        // Return cache flags only (access flags not part of virtio-gpu spec)
+        Ok(OkMapInfo {
+            map_info: map_info & VIRGL_MAP_CACHE_MASK,
+        })
     }
 
-    fn resource_unmap_blob(&mut self, _resource_id: u32) -> VirtioGpuResult {
-        error!("Not implemented: resource_unmap_blob");
-        Err(ErrUnspec)
+    fn resource_unmap_blob(&mut self, resource_id: u32) -> VirtioGpuResult {
+        let resource = self
+            .resources
+            .get_mut(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        let Some(offset) = resource.blob_shmem_offset else {
+            warn!(
+                "Guest tried to unmap blob resource with resource_id={resource_id}, but it is not \
+                 mapped!"
+            );
+            return Err(ErrInvalidParameter);
+        };
+
+        common_unmap_blob(&self.backend, resource.blob_size, offset)?;
+
+        resource.blob_shmem_offset = None;
+
+        Ok(OkNoData)
     }
 }
 
@@ -647,7 +743,10 @@ mod virgl_cov_tests {
 
     use super::*;
     use crate::{
-        gpu_types::{FenceDescriptor, FenceState, ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+        gpu_types::{
+            FenceDescriptor, FenceState, ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc,
+            VirtioGpuRing,
+        },
         protocol::{virtio_gpu_rect, GpuResponse, VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM},
         renderer::Renderer,
         testutils::{
@@ -871,18 +970,30 @@ mod virgl_cov_tests {
                 test_capset_operations(&gpu, index);
             }
 
-            // Test blob resource functions (all should return ErrUnspec - not implemented)
+            // Test blob resource functions
             assert_matches!(
-                gpu.resource_create_blob(1, 100, 0, 4096, 0, 0),
+                gpu.resource_create_blob(
+                    1,
+                    ResourceCreateBlob {
+                        resource_id: 100,
+                        blob_id: 0,
+                        blob_mem: 0,
+                        blob_flags: 0,
+                        size: 4096,
+                    },
+                    vec![],
+                    &gm_back
+                ),
                 Err(GpuResponse::ErrUnspec)
             );
+            // resource 100 was never created, so these return ErrInvalidResourceId
             assert_matches!(
                 gpu.resource_map_blob(100, 0),
-                Err(GpuResponse::ErrUnspec)
+                Err(GpuResponse::ErrInvalidResourceId)
             );
             assert_matches!(
                 gpu.resource_unmap_blob(100),
-                Err(GpuResponse::ErrUnspec)
+                Err(GpuResponse::ErrInvalidResourceId)
             );
 
             // Test resource_assign_uuid (not implemented)

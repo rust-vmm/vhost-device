@@ -4,16 +4,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use bitflags::Flags;
+use libc::c_void;
+use log::{debug, error, trace, warn};
+use rutabaga_gfx::RutabagaFence;
 use std::{
     collections::BTreeMap,
     io::IoSliceMut,
     os::fd::{AsFd, FromRawFd, IntoRawFd, RawFd},
     sync::{Arc, Mutex},
 };
-
-use libc::c_void;
-use log::{debug, error, trace, warn};
-use rutabaga_gfx::RutabagaFence;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuDMABUFScanout, VhostUserGpuDMABUFScanout2,
@@ -155,9 +155,10 @@ impl VirglRendererAdapter {
     ) -> Self {
         let capsets = config.capsets();
         let venus_enabled = capsets.contains(GpuCapset::VENUS);
+        let virgl_enabled = !(capsets & (GpuCapset::VIRGL | GpuCapset::VIRGL2)).is_empty();
 
         let virglrenderer_flags = VirglRendererFlags::new()
-            .use_virgl(true)
+            .use_virgl(virgl_enabled)
             .use_venus(venus_enabled)
             .use_render_server(venus_enabled)
             .use_egl(config.flags().use_egl)

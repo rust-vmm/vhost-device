@@ -24,6 +24,10 @@ pub enum CapsetName {
     #[cfg(feature = "backend-virgl")]
     Virgl2 = GpuCapset::VIRGL2.bits(),
 
+    /// [virglrenderer] Venus (Vulkan) implementation
+    #[cfg(feature = "backend-virgl")]
+    Venus = GpuCapset::VENUS.bits(),
+
     /// [gfxstream] Vulkan implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet

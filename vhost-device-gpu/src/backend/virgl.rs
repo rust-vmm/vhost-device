@@ -4,52 +4,53 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use bitflags::Flags;
+use libc::c_void;
+use log::{debug, error, trace, warn};
+use rutabaga_gfx::RutabagaFence;
 use std::{
     collections::BTreeMap,
     io::IoSliceMut,
     os::fd::{AsFd, FromRawFd, IntoRawFd, RawFd},
     sync::{Arc, Mutex},
 };
-
-use libc::c_void;
-use log::{debug, error, trace, warn};
-use rutabaga_gfx::RutabagaFence;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuDMABUFScanout, VhostUserGpuDMABUFScanout2,
         VhostUserGpuEdidRequest, VhostUserGpuUpdate,
     },
-    GpuBackend,
+    message::VhostUserMMapFlags,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use virglrenderer::{
-    FenceHandler, Iovec, VirglContext, VirglRenderer, VirglRendererFlags, VirglResource,
-    VIRGL_HANDLE_TYPE_MEM_DMABUF,
+    FenceHandler, Iovec, VirglRenderer, VirglRendererFlags, VirglResource,
+    VIRGL_HANDLE_TYPE_MEM_DMABUF, VIRGL_HANDLE_TYPE_MEM_OPAQUE_FD, VIRGL_MAP_CACHE_MASK,
 };
+use virtio_bindings::virtio_gpu::VIRTIO_GPU_BLOB_MEM_HOST3D;
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
     backend::{
         common,
-        common::{common_set_scanout_disable, AssociatedScanouts, CursorConfig, VirtioGpuScanout},
+        common::{
+            common_map_blob, common_set_scanout_disable, common_unmap_blob, AssociatedScanouts,
+            CursorConfig, VirtioGpuScanout,
+        },
     },
-    gpu_types::{FenceState, ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+    gpu_types::{FenceState, ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
     protocol::{
         virtio_gpu_rect, GpuResponse,
         GpuResponse::{
             ErrInvalidContextId, ErrInvalidParameter, ErrInvalidResourceId, ErrInvalidScanoutId,
-            ErrUnspec, OkCapset, OkCapsetInfo, OkNoData,
+            ErrUnspec, OkCapset, OkCapsetInfo, OkMapInfo, OkNoData,
         },
         VirtioGpuResult, VIRTIO_GPU_MAX_SCANOUTS,
     },
     renderer::Renderer,
-    GpuConfig,
+    GpuCapset, GpuConfig,
 };
-
-const CAPSET_ID_VIRGL: u32 = 1;
-const CAPSET_ID_VIRGL2: u32 = 2;
-const CAPSET_ID_VENUS: u32 = 4;
 
 #[derive(Clone)]
 pub struct GpuResource {
@@ -58,6 +59,8 @@ pub struct GpuResource {
     // resource. Resource could be used for multiple scanouts.
     pub scanouts: AssociatedScanouts,
     pub backing_iovecs: Arc<Mutex<Option<Vec<Iovec>>>>,
+    pub blob_size: u64,
+    pub blob_shmem_offset: Option<u64>,
 }
 
 fn sglist_to_iovecs(
@@ -134,18 +137,30 @@ impl FenceHandler for VirglFenceHandler {
 
 pub struct VirglRendererAdapter {
     renderer: VirglRenderer,
+    capsets: GpuCapset,
+    #[allow(dead_code)]
+    backend: Backend,
     gpu_backend: GpuBackend,
     fence_state: Arc<Mutex<FenceState>>,
     resources: BTreeMap<u32, GpuResource>,
-    contexts: BTreeMap<u32, VirglContext>,
     scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS as usize],
 }
 
 impl VirglRendererAdapter {
-    pub fn new(queue_ctl: &VringRwLock, config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        backend: Backend,
+        config: &GpuConfig,
+        gpu_backend: GpuBackend,
+    ) -> Self {
+        let capsets = config.capsets();
+        let venus_enabled = capsets.contains(GpuCapset::VENUS);
+        let virgl_enabled = !(capsets & (GpuCapset::VIRGL | GpuCapset::VIRGL2)).is_empty();
+
         let virglrenderer_flags = VirglRendererFlags::new()
-            .use_virgl(true)
-            .use_venus(true)
+            .use_virgl(virgl_enabled)
+            .use_venus(venus_enabled)
+            .use_render_server(venus_enabled)
             .use_egl(config.flags().use_egl)
             .use_gles(config.flags().use_gles)
             .use_glx(config.flags().use_glx)
@@ -162,11 +177,12 @@ impl VirglRendererAdapter {
         let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, None)
             .expect("Failed to initialize virglrenderer");
         Self {
+            capsets,
             renderer,
+            backend,
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
-            contexts: BTreeMap::new(),
             scanouts: Default::default(),
         }
     }
@@ -184,6 +200,8 @@ impl Renderer for VirglRendererAdapter {
             virgl_resource,
             scanouts: AssociatedScanouts::default(),
             backing_iovecs: Arc::new(Mutex::new(None)),
+            blob_size: 0,
+            blob_shmem_offset: None,
         };
         self.resources.insert(resource_id, local_resource);
         Ok(OkNoData)
@@ -320,13 +338,14 @@ impl Renderer for VirglRendererAdapter {
     }
 
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
-        debug!("the capset index is {index}");
-        let capset_id = match index {
-            0 => CAPSET_ID_VIRGL,
-            1 => CAPSET_ID_VIRGL2,
-            3 => CAPSET_ID_VENUS,
-            _ => return Err(ErrInvalidParameter),
-        };
+        debug!("Looking up capset at index {index}");
+        let capset_id = self
+            .capsets
+            .iter()
+            .nth(index as usize)
+            .ok_or(ErrInvalidParameter)?
+            .bits() as u32;
+
         let (version, size) = self.renderer.get_capset_info(index);
         Ok(OkCapsetInfo {
             capset_id,
@@ -346,41 +365,34 @@ impl Renderer for VirglRendererAdapter {
         context_init: u32,
         context_name: Option<&str>,
     ) -> VirtioGpuResult {
-        if self.contexts.contains_key(&ctx_id) {
-            return Err(ErrUnspec);
-        }
+        trace!("Creating context ctx_id={ctx_id}, '{context_name:?}', context_init={context_init}");
 
-        // Create the VirglContext using virglrenderer
-        let ctx = virglrenderer::VirglContext::create_context(ctx_id, context_init, context_name)
+        // Create the context using virglrenderer (contexts are now managed internally)
+        self.renderer
+            .create_context(ctx_id, context_init, context_name)
             .map_err(|_| ErrInvalidContextId)?;
 
-        // Insert the newly created context into our local BTreeMap.
-        self.contexts.insert(ctx_id, ctx);
         Ok(OkNoData)
     }
 
     fn destroy_context(&mut self, ctx_id: u32) -> VirtioGpuResult {
-        self.contexts.remove(&ctx_id).ok_or(ErrInvalidContextId)?;
+        self.renderer.destroy_context(ctx_id);
         Ok(OkNoData)
     }
 
     fn context_attach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
-        let ctx = self.contexts.get_mut(&ctx_id).ok_or(ErrInvalidContextId)?;
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-        ctx.attach(&mut resource.virgl_resource);
+        if !self.resources.contains_key(&resource_id) {
+            return Err(ErrInvalidResourceId);
+        }
+        self.renderer.ctx_attach_resource(ctx_id, resource_id);
         Ok(OkNoData)
     }
 
     fn context_detach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
-        let ctx = self.contexts.get_mut(&ctx_id).ok_or(ErrInvalidContextId)?;
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-        ctx.detach(&resource.virgl_resource);
+        if !self.resources.contains_key(&resource_id) {
+            return Err(ErrInvalidResourceId);
+        }
+        self.renderer.ctx_detach_resource(ctx_id, resource_id);
         Ok(OkNoData)
     }
 
@@ -390,9 +402,8 @@ impl Renderer for VirglRendererAdapter {
         commands: &mut [u8],
         fence_ids: &[u64],
     ) -> VirtioGpuResult {
-        let ctx = self.contexts.get_mut(&ctx_id).ok_or(ErrInvalidContextId)?;
-
-        ctx.submit_cmd(commands, fence_ids)
+        self.renderer
+            .submit_cmd(ctx_id, commands, fence_ids)
             .map(|()| OkNoData)
             .map_err(|_| ErrUnspec)
     }
@@ -612,25 +623,112 @@ impl Renderer for VirglRendererAdapter {
 
     fn resource_create_blob(
         &mut self,
-        _ctx_id: u32,
-        _resource_id: u32,
-        _blob_id: u64,
-        _size: u64,
-        _blob_mem: u32,
-        _blob_flags: u32,
+        ctx_id: u32,
+        resource_create_blob: ResourceCreateBlob,
+        vecs: Vec<(GuestAddress, usize)>,
+        mem: &GuestMemoryMmap,
     ) -> VirtioGpuResult {
-        error!("Not implemented: resource_create_blob");
-        Err(ErrUnspec)
+        let mut virgl_iovecs = None;
+
+        if resource_create_blob.blob_flags
+            & crate::protocol::VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE
+            != 0
+        {
+            error!("GUEST_HANDLE unimplemented for virgl backend");
+            return Err(ErrUnspec);
+        } else if resource_create_blob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D {
+            virgl_iovecs = Some(sglist_to_iovecs(&vecs[..], mem).map_err(|_| ErrUnspec)?);
+        }
+
+        let virgl_resource = self
+            .renderer
+            .create_blob(
+                ctx_id,
+                0, // width
+                0, // height
+                resource_create_blob.resource_id,
+                resource_create_blob.into(),
+                virgl_iovecs.as_deref(),
+            )
+            .map_err(|_| ErrUnspec)?;
+
+        let resource = GpuResource {
+            virgl_resource,
+            scanouts: AssociatedScanouts::default(),
+            backing_iovecs: Arc::new(Mutex::new(virgl_iovecs)),
+            blob_size: resource_create_blob.size,
+            blob_shmem_offset: None,
+        };
+
+        debug_assert!(
+            !self
+                .resources
+                .contains_key(&resource_create_blob.resource_id),
+            "Resource ID {} already exists in the resources map.",
+            resource_create_blob.resource_id
+        );
+
+        self.resources
+            .insert(resource_create_blob.resource_id, resource);
+        Ok(OkNoData)
     }
 
-    fn resource_map_blob(&mut self, _resource_id: u32, _offset: u64) -> VirtioGpuResult {
-        error!("Not implemented: resource_map_blob");
-        Err(ErrUnspec)
+    fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult {
+        let resource = self
+            .resources
+            .get_mut(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        let map_info = resource.virgl_resource.map_info.ok_or(ErrUnspec)?;
+
+        let handle = resource.virgl_resource.handle.as_ref().ok_or(ErrUnspec)?;
+
+        // Check handle type - we don't support OPAQUE_FD mapping
+        if handle.handle_type == VIRGL_HANDLE_TYPE_MEM_OPAQUE_FD {
+            error!("VIRGL_HANDLE_TYPE_MEM_OPAQUE_FD not supported for mapping");
+            return Err(ErrUnspec);
+        }
+
+        // virgl doesn't provide detailed permissions for mapping, map everything as
+        // writable
+        let flags = VhostUserMMapFlags::WRITABLE;
+
+        common_map_blob(
+            &self.backend,
+            flags,
+            &handle.os_handle.as_fd(),
+            resource.blob_size,
+            offset,
+            resource_id,
+        )?;
+
+        resource.blob_shmem_offset = Some(offset);
+
+        // Return cache flags only (access flags not part of virtio-gpu spec)
+        Ok(OkMapInfo {
+            map_info: map_info & VIRGL_MAP_CACHE_MASK,
+        })
     }
 
-    fn resource_unmap_blob(&mut self, _resource_id: u32) -> VirtioGpuResult {
-        error!("Not implemented: resource_unmap_blob");
-        Err(ErrUnspec)
+    fn resource_unmap_blob(&mut self, resource_id: u32) -> VirtioGpuResult {
+        let resource = self
+            .resources
+            .get_mut(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        let Some(offset) = resource.blob_shmem_offset else {
+            warn!(
+                "Guest tried to unmap blob resource with resource_id={resource_id}, but it is not \
+                 mapped!"
+            );
+            return Err(ErrInvalidParameter);
+        };
+
+        common_unmap_blob(&self.backend, resource.blob_size, offset)?;
+
+        resource.blob_shmem_offset = None;
+
+        Ok(OkNoData)
     }
 }
 
@@ -648,7 +746,10 @@ mod virgl_cov_tests {
 
     use super::*;
     use crate::{
-        gpu_types::{FenceDescriptor, FenceState, ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+        gpu_types::{
+            FenceDescriptor, FenceState, ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc,
+            VirtioGpuRing,
+        },
         protocol::{virtio_gpu_rect, GpuResponse, VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM},
         renderer::Renderer,
         testutils::{
@@ -670,6 +771,11 @@ mod virgl_cov_tests {
     fn dummy_gpu_backend() -> GpuBackend {
         let (_, backend) = UnixStream::pair().unwrap();
         GpuBackend::from_stream(backend)
+    }
+
+    fn dummy_backend() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
     }
 
     #[test]
@@ -744,10 +850,12 @@ mod virgl_cov_tests {
             }
             assert!(call_b.read().is_err(), "no signal when no match");
 
+            let capsets = GpuCapset::VIRGL | GpuCapset::VIRGL2;
+
             // Initialize virgl ONCE in this forked process; exercise adapter paths
             let cfg = GpuConfig::new(
                 GpuMode::VirglRenderer,
-                Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
+                Some(capsets),
                 GpuFlags::default(),
             ).expect("GpuConfig");
 
@@ -757,8 +865,9 @@ mod virgl_cov_tests {
             let (vring, _outs, _call_evt) =
                 create_vring(&mem, &[] as &[TestingDescChainArgs], GuestAddress(0x2000), GuestAddress(0x4000), 64);
 
-            let backend = dummy_gpu_backend();
-            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, backend);
+            let backend = dummy_backend();
+            let gpu_backend = dummy_gpu_backend();
+            let mut gpu = VirglRendererAdapter::new(&vring, backend, &cfg, gpu_backend);
 
             gpu.event_poll();
             let edid_req = VhostUserGpuEdidRequest {
@@ -862,22 +971,34 @@ mod virgl_cov_tests {
             assert_matches!(gpu.flush_resource(0, dirty), Ok(GpuResponse::OkNoData));
 
             // Test capset queries
-            for index in [0, 1, 3] {
+            for index in 0..capsets.num_capsets() {
                 test_capset_operations(&gpu, index);
             }
 
-            // Test blob resource functions (all should return ErrUnspec - not implemented)
+            // Test blob resource functions
             assert_matches!(
-                gpu.resource_create_blob(1, 100, 0, 4096, 0, 0),
+                gpu.resource_create_blob(
+                    1,
+                    ResourceCreateBlob {
+                        resource_id: 100,
+                        blob_id: 0,
+                        blob_mem: 0,
+                        blob_flags: 0,
+                        size: 4096,
+                    },
+                    vec![],
+                    &gm_back
+                ),
                 Err(GpuResponse::ErrUnspec)
             );
+            // resource 100 was never created, so these return ErrInvalidResourceId
             assert_matches!(
                 gpu.resource_map_blob(100, 0),
-                Err(GpuResponse::ErrUnspec)
+                Err(GpuResponse::ErrInvalidResourceId)
             );
             assert_matches!(
                 gpu.resource_unmap_blob(100),
-                Err(GpuResponse::ErrUnspec)
+                Err(GpuResponse::ErrInvalidResourceId)
             );
 
             // Test resource_assign_uuid (not implemented)

@@ -28,9 +28,9 @@ log = "0.4"
 [target.'cfg(not(target_env = "musl"))'.dependencies]
 rutabaga_gfx = "0.1.75"
 thiserror = "2.0.17"
-virglrenderer = {version = "0.1.2", optional = true }
-vhost = { version = "0.15.0", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.21"
+virglrenderer = { git = "https://gitlab.freedesktop.org/mtjhrc/virglrenderer-rs.git", branch = "map_info", optional = true }
+vhost = { git = "https://github.com/mtjhrc/vhost.git", branch = "shmem", features = ["vhost-user-backend"] }
+vhost-user-backend = { git = "https://github.com/mtjhrc/vhost.git", branch = "shmem" }
 virtio-bindings = "0.2.5"
 virtio-queue = "0.17.0"
 vm-memory = "0.17.1"

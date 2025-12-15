@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     io::IoSliceMut,
     os::fd::{AsFd, FromRawFd, IntoRawFd, RawFd},
     sync::{Arc, Mutex},
@@ -23,7 +23,7 @@ use vhost::vhost_user::{
 };
 use vhost_user_backend::{VringRwLock, VringT};
 use virglrenderer::{
-    FenceHandler, Iovec, VirglContext, VirglRenderer, VirglRendererFlags, VirglResource,
+    FenceHandler, Iovec, VirglRenderer, VirglRendererFlags, VirglResource,
     VIRGL_HANDLE_TYPE_MEM_DMABUF,
 };
 use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
@@ -137,7 +137,7 @@ pub struct VirglRendererAdapter {
     gpu_backend: GpuBackend,
     fence_state: Arc<Mutex<FenceState>>,
     resources: BTreeMap<u32, GpuResource>,
-    contexts: BTreeMap<u32, VirglContext>,
+    context_ids: HashSet<u32>,
     scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS as usize],
 }
 
@@ -166,7 +166,7 @@ impl VirglRendererAdapter {
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
-            contexts: BTreeMap::new(),
+            context_ids: HashSet::new(),
             scanouts: Default::default(),
         }
     }
@@ -346,41 +346,45 @@ impl Renderer for VirglRendererAdapter {
         context_init: u32,
         context_name: Option<&str>,
     ) -> VirtioGpuResult {
-        if self.contexts.contains_key(&ctx_id) {
+        if self.context_ids.contains(&ctx_id) {
             return Err(ErrUnspec);
         }
 
-        // Create the VirglContext using virglrenderer
-        let ctx = virglrenderer::VirglContext::create_context(ctx_id, context_init, context_name)
+        self.renderer
+            .create_context(ctx_id, context_init, context_name)
             .map_err(|_| ErrInvalidContextId)?;
 
-        // Insert the newly created context into our local BTreeMap.
-        self.contexts.insert(ctx_id, ctx);
+        self.context_ids.insert(ctx_id);
         Ok(OkNoData)
     }
 
     fn destroy_context(&mut self, ctx_id: u32) -> VirtioGpuResult {
-        self.contexts.remove(&ctx_id).ok_or(ErrInvalidContextId)?;
+        if !self.context_ids.remove(&ctx_id) {
+            return Err(ErrInvalidContextId);
+        }
+        self.renderer.destroy_context(ctx_id);
         Ok(OkNoData)
     }
 
     fn context_attach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
-        let ctx = self.contexts.get_mut(&ctx_id).ok_or(ErrInvalidContextId)?;
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-        ctx.attach(&mut resource.virgl_resource);
+        if !self.context_ids.contains(&ctx_id) {
+            return Err(ErrInvalidContextId);
+        }
+        if !self.resources.contains_key(&resource_id) {
+            return Err(ErrInvalidResourceId);
+        }
+        self.renderer.ctx_attach_resource(ctx_id, resource_id);
         Ok(OkNoData)
     }
 
     fn context_detach_resource(&mut self, ctx_id: u32, resource_id: u32) -> VirtioGpuResult {
-        let ctx = self.contexts.get_mut(&ctx_id).ok_or(ErrInvalidContextId)?;
-        let resource = self
-            .resources
-            .get_mut(&resource_id)
-            .ok_or(ErrInvalidResourceId)?;
-        ctx.detach(&resource.virgl_resource);
+        if !self.context_ids.contains(&ctx_id) {
+            return Err(ErrInvalidContextId);
+        }
+        if !self.resources.contains_key(&resource_id) {
+            return Err(ErrInvalidResourceId);
+        }
+        self.renderer.ctx_detach_resource(ctx_id, resource_id);
         Ok(OkNoData)
     }
 
@@ -390,9 +394,11 @@ impl Renderer for VirglRendererAdapter {
         commands: &mut [u8],
         fence_ids: &[u64],
     ) -> VirtioGpuResult {
-        let ctx = self.contexts.get_mut(&ctx_id).ok_or(ErrInvalidContextId)?;
-
-        ctx.submit_cmd(commands, fence_ids)
+        if !self.context_ids.contains(&ctx_id) {
+            return Err(ErrInvalidContextId);
+        }
+        self.renderer
+            .submit_cmd(ctx_id, commands, fence_ids)
             .map(|()| OkNoData)
             .map_err(|_| ErrUnspec)
     }

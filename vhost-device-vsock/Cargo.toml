@@ -30,13 +30,13 @@ vm-memory = "0.17.1"
 vmm-sys-util = "0.15"
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.2", optional = true }
-libc = { version = "0.2.177", optional = true }
+libc = { version = "0.2.178", optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 assert_matches = "1.5"
 virtio-queue = { version = "0.17", features = ["test-utils"] }
-tempfile = "3.23.0"
+tempfile = "3.24.0"
 
 [lints]
 workspace = true

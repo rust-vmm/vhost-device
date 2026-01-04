@@ -27,7 +27,7 @@
     },
     {
       "test_name": "unittests-gnu",
-      "command": "cargo test --all-features --workspace",
+      "command": ".buildkite/selective-tests.sh unittests-gnu",
       "platform": [
         "x86_64",
         "aarch64",
@@ -39,7 +39,7 @@
     },
     {
       "test_name": "unittests-musl",
-      "command": "cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu",
+      "command": ".buildkite/selective-tests.sh unittests-musl {target_platform}",
       "platform": [
         "x86_64",
         "aarch64"
@@ -50,7 +50,7 @@
     },
     {
       "test_name": "unittests-gnu-release",
-      "command": "cargo test --release --all-features --workspace",
+      "command": ".buildkite/selective-tests.sh unittests-gnu-release",
       "platform": [
         "x86_64",
         "aarch64",
@@ -62,7 +62,7 @@
     },
     {
       "test_name": "unittests-musl-release",
-      "command": "cargo test --release --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu",
+      "command": ".buildkite/selective-tests.sh unittests-musl-release {target_platform}",
       "platform": [
         "x86_64",
         "aarch64"

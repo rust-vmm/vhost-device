@@ -116,6 +116,10 @@ impl CanController {
         self.rx_fifo.size() == 0
     }
 
+    pub fn rx_fifo_size(&self) -> usize {
+        self.rx_fifo.size()
+    }
+
     pub fn pop(&mut self) -> Result<VirtioCanFrame> {
         if self.rx_fifo.size() < 1 {
             return Err(Error::QueueEmpty);

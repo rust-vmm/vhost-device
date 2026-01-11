@@ -20,14 +20,14 @@ use crate::{
 };
 
 pub struct NullAdapter {
-    _gpu_backend: GpuBackend,
+    _gpu_backend: Option<GpuBackend>,
 }
 
 impl NullAdapter {
     pub fn new(
         _queue_ctl: &vhost_user_backend::VringRwLock,
         _config: &GpuConfig,
-        gpu_backend: GpuBackend,
+        gpu_backend: Option<GpuBackend>,
     ) -> Self {
         trace!("NullAdapter created");
         Self {
@@ -264,7 +264,7 @@ mod tests {
         let vring = VringRwLock::new(mem, 0x100).unwrap();
         let config = GpuConfig::new(GpuMode::Null, None, GpuFlags::default()).unwrap();
 
-        NullAdapter::new(&vring, &config, gpu_backend)
+        NullAdapter::new(&vring, &config, Some(gpu_backend))
     }
 
     #[test]

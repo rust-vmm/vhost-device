@@ -592,12 +592,16 @@ impl VhostUserGpuBackendInner {
     fn extract_backend_and_vring<'a>(
         &mut self,
         vrings: &'a [VringRwLock],
-    ) -> IoResult<(&'a VringRwLock, GpuBackend)> {
+    ) -> IoResult<(&'a VringRwLock, Option<GpuBackend>)> {
         let control_vring = &vrings[CONTROL_QUEUE as usize];
-        let backend = self
-            .gpu_backend
-            .take()
-            .ok_or_else(|| io::Error::other("set_gpu_socket() not called, GpuBackend missing"))?;
+        let backend = self.gpu_backend.take();
+
+        if !self.gpu_config.flags().headless && backend.is_none() {
+            return Err(io::Error::other(
+                "set_gpu_socket() not called, GpuBackend missing",
+            ));
+        }
+
         Ok((control_vring, backend))
     }
 
@@ -681,16 +685,22 @@ impl VhostUserBackend for VhostUserGpuBackend {
     }
 
     fn features(&self) -> u64 {
-        (1 << VIRTIO_F_VERSION_1)
+        let mut features = (1 << VIRTIO_F_VERSION_1)
             | (1 << VIRTIO_F_RING_RESET)
             | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
             | (1 << VIRTIO_RING_F_INDIRECT_DESC)
             | (1 << VIRTIO_RING_F_EVENT_IDX)
             | (1 << VIRTIO_GPU_F_VIRGL)
-            | (1 << VIRTIO_GPU_F_EDID)
             | (1 << VIRTIO_GPU_F_RESOURCE_BLOB)
             | (1 << VIRTIO_GPU_F_CONTEXT_INIT)
-            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
+            | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+
+        let inner = self.inner.lock().unwrap();
+        if !inner.gpu_config.flags().headless {
+            features |= 1 << VIRTIO_GPU_F_EDID;
+        }
+
+        features
     }
 
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
@@ -1385,6 +1395,22 @@ mod tests {
             control_signal_used_queue_evt.read().unwrap_err().kind(),
             ErrorKind::WouldBlock
         );
+    }
+
+    #[test]
+    fn test_verify_backend_headless() {
+        let (backend, _) = init();
+
+        // Headless is disabled, so EDID flag should be set.
+        backend.inner.lock().unwrap().gpu_config.flags.headless = false;
+        assert_eq!(
+            backend.features() & (1 << VIRTIO_GPU_F_EDID),
+            1 << VIRTIO_GPU_F_EDID
+        );
+
+        // Headless is enabled, so EDID flag should not be set.
+        backend.inner.lock().unwrap().gpu_config.flags.headless = true;
+        assert_eq!(backend.features() & (1 << VIRTIO_GPU_F_EDID), 0);
     }
 
     rusty_fork_test! {

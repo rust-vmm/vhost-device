@@ -114,6 +114,10 @@ pub struct GpuFlagsArgs {
             default_value_t = GpuFlags::new_default().use_surfaceless
     )]
     pub use_surfaceless: bool,
+
+    /// Enable headless mode (no display output)
+    #[clap(long, action = ArgAction::SetTrue, default_value_t = false)]
+    pub headless: bool,
 }
 
 impl From<GpuFlagsArgs> for GpuFlags {
@@ -123,6 +127,7 @@ impl From<GpuFlagsArgs> for GpuFlags {
             use_glx: args.use_glx,
             use_gles: args.use_gles,
             use_surfaceless: args.use_surfaceless,
+            headless: args.headless,
         }
     }
 }
@@ -200,6 +205,7 @@ mod tests {
                 use_glx: true,
                 use_gles: false,
                 use_surfaceless: false,
+                headless: false,
             },
         };
 
@@ -213,6 +219,7 @@ mod tests {
                 use_glx: true,
                 use_gles: false,
                 use_surfaceless: false,
+                headless: false,
             }
         );
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);

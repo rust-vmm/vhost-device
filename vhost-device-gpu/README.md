@@ -56,6 +56,9 @@ A virtio-gpu device using the vhost-user protocol.
           [default: true]
           [possible values: true, false]
 
+      --headless
+          Enable headless mode (no display output)
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -166,6 +169,27 @@ Start QEMU with the following flags:
 -machine q35,memory-backend=mem0,accel=kvm \
 -display gtk,gl=on,show-cursor=on \
 -vga none
+```
+
+3) Using `vhost-user-gpu-pci` in headless mode
+
+You should start vhost-device-gpu with `--headless` argument.
+
+```shell
+host# vhost-device-gpu --socket-path /tmp/gpu.socket \
+    --gpu-mode virglrenderer --use-egl false \
+    --headless
+```
+
+Start QEMU with the following flags:
+
+```text
+-chardev socket,id=vgpu,path=/tmp/gpu.socket \
+-device vhost-user-gpu-pci,chardev=vgpu,id=vgpu \
+-object memory-backend-memfd,share=on,id=mem0,size=4G, \
+-machine q35,memory-backend=mem0,accel=kvm \
+-display egl-headless \
+-nographic
 ```
 
 ## License

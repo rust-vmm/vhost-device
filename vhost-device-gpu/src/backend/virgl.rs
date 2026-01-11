@@ -134,7 +134,7 @@ impl FenceHandler for VirglFenceHandler {
 
 pub struct VirglRendererAdapter {
     renderer: VirglRenderer,
-    gpu_backend: GpuBackend,
+    gpu_backend: Option<GpuBackend>,
     fence_state: Arc<Mutex<FenceState>>,
     resources: BTreeMap<u32, GpuResource>,
     context_ids: HashSet<u32>,
@@ -142,7 +142,11 @@ pub struct VirglRendererAdapter {
 }
 
 impl VirglRendererAdapter {
-    pub fn new(queue_ctl: &VringRwLock, config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        config: &GpuConfig,
+        gpu_backend: Option<GpuBackend>,
+    ) -> Self {
         let virglrenderer_flags = VirglRendererFlags::new()
             .use_virgl(true)
             .use_venus(true)
@@ -288,6 +292,10 @@ impl Renderer for VirglRendererAdapter {
         hot_x: u32,
         hot_y: u32,
     ) -> VirtioGpuResult {
+        if self.gpu_backend.is_none() {
+            return Ok(OkNoData);
+        }
+
         let config = CursorConfig {
             width: 64,
             height: 64,
@@ -307,11 +315,23 @@ impl Renderer for VirglRendererAdapter {
 
         let data = common::common_read_cursor_resource(self, resource_id, config)?;
 
-        common::common_update_cursor(&self.gpu_backend, cursor_pos, hot_x, hot_y, &data, config)
+        common::common_update_cursor(
+            // The existence of gpu_backend has been already checked above.
+            self.gpu_backend.as_ref().unwrap(),
+            cursor_pos,
+            hot_x,
+            hot_y,
+            &data,
+            config,
+        )
     }
 
     fn move_cursor(&mut self, resource_id: u32, cursor: VhostUserGpuCursorPos) -> VirtioGpuResult {
-        common::common_move_cursor(&self.gpu_backend, resource_id, cursor)
+        self.gpu_backend
+            .as_ref()
+            .map_or(Ok(OkNoData), |gpu_backend| {
+                common::common_move_cursor(gpu_backend, resource_id, cursor)
+            })
     }
 
     fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
@@ -439,10 +459,19 @@ impl Renderer for VirglRendererAdapter {
     }
 
     fn display_info(&self) -> VirtioGpuResult {
-        common::common_display_info(&self.gpu_backend)
+        self.gpu_backend
+            .as_ref()
+            .map_or(Ok(GpuResponse::OkDisplayInfo(Vec::new())), |gpu_backend| {
+                common::common_display_info(gpu_backend)
+            })
     }
     fn get_edid(&self, edid_req: VhostUserGpuEdidRequest) -> VirtioGpuResult {
-        common::common_get_edid(&self.gpu_backend, edid_req)
+        self.gpu_backend.as_ref().map_or(
+            Ok(GpuResponse::OkEdid {
+                blob: Box::new([0u8; 0]),
+            }),
+            |gpu_backend| common::common_get_edid(gpu_backend, edid_req),
+        )
     }
     fn set_scanout(
         &mut self,
@@ -450,6 +479,10 @@ impl Renderer for VirglRendererAdapter {
         resource_id: u32,
         rect: virtio_gpu_rect,
     ) -> VirtioGpuResult {
+        let Some(gpu_backend) = self.gpu_backend.as_ref() else {
+            return Ok(OkNoData);
+        };
+
         let scanout_idx = scanout_id as usize;
         // Basic Validation of scanout_id
         if scanout_idx >= VIRTIO_GPU_MAX_SCANOUTS as usize {
@@ -473,7 +506,7 @@ impl Renderer for VirglRendererAdapter {
             common_set_scanout_disable(&mut self.scanouts, scanout_idx);
 
             // Send VHOST_USER_GPU_DMABUF_SCANOUT message with FD = -1
-            self.gpu_backend
+            gpu_backend
                 .set_dmabuf_scanout(
                     &VhostUserGpuDMABUFScanout {
                         scanout_id,
@@ -555,7 +588,7 @@ impl Renderer for VirglRendererAdapter {
                 dmabuf_scanout: dmabuf_scanout_payload,
                 modifier: info_3d.modifier,
             };
-            self.gpu_backend
+            gpu_backend
                 .set_dmabuf_scanout2(&dmabuf_scanout2_msg, Some(&fd.as_fd()))
                 .map_err(|e| {
                     error!(
@@ -564,7 +597,7 @@ impl Renderer for VirglRendererAdapter {
                     ErrUnspec
                 })?;
         } else {
-            self.gpu_backend
+            gpu_backend
                 .set_dmabuf_scanout(&dmabuf_scanout_payload, Some(&fd.as_fd()))
                 .map_err(|e| {
                     error!(
@@ -588,6 +621,10 @@ impl Renderer for VirglRendererAdapter {
     }
 
     fn flush_resource(&mut self, resource_id: u32, _rect: virtio_gpu_rect) -> VirtioGpuResult {
+        let Some(gpu_backend) = self.gpu_backend.as_ref() else {
+            return Ok(OkNoData);
+        };
+
         if resource_id == 0 {
             return Ok(OkNoData);
         }
@@ -600,7 +637,7 @@ impl Renderer for VirglRendererAdapter {
 
         for scanout_id in resource.scanouts.iter_enabled() {
             // For VirglRenderer, use update_dmabuf_scanout (no image copy)
-            self.gpu_backend
+            gpu_backend
                 .update_dmabuf_scanout(&VhostUserGpuUpdate {
                     scanout_id,
                     x: 0,
@@ -764,7 +801,7 @@ mod virgl_cov_tests {
                 create_vring(&mem, &[] as &[TestingDescChainArgs], GuestAddress(0x2000), GuestAddress(0x4000), 64);
 
             let backend = dummy_gpu_backend();
-            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, backend);
+            let mut gpu = VirglRendererAdapter::new(&vring, &cfg, Some(backend));
 
             gpu.event_poll();
             let edid_req = VhostUserGpuEdidRequest {

@@ -96,14 +96,18 @@ thread_local! {
 }
 
 pub struct GfxstreamAdapter {
-    gpu_backend: GpuBackend,
+    gpu_backend: Option<GpuBackend>,
     resources: BTreeMap<u32, GfxstreamResource>,
     fence_state: Arc<Mutex<FenceState>>,
     scanouts: [Option<VirtioGpuScanout>; VIRTIO_GPU_MAX_SCANOUTS as usize],
 }
 
 impl GfxstreamAdapter {
-    pub fn new(queue_ctl: &VringRwLock, gpu_config: &GpuConfig, gpu_backend: GpuBackend) -> Self {
+    pub fn new(
+        queue_ctl: &VringRwLock,
+        gpu_config: &GpuConfig,
+        gpu_backend: Option<GpuBackend>,
+    ) -> Self {
         let fence_state = Arc::new(Mutex::new(FenceState::default()));
         let fence = Self::create_fence_handler(queue_ctl.clone(), fence_state.clone());
 
@@ -381,6 +385,10 @@ impl Renderer for GfxstreamAdapter {
         hot_x: u32,
         hot_y: u32,
     ) -> VirtioGpuResult {
+        if self.gpu_backend.is_none() {
+            return Ok(OkNoData);
+        }
+
         let config = CursorConfig {
             width: 64,
             height: 64,
@@ -398,11 +406,23 @@ impl Renderer for GfxstreamAdapter {
 
         let data = common::common_read_cursor_resource(self, resource_id, config)?;
 
-        common::common_update_cursor(&self.gpu_backend, cursor_pos, hot_x, hot_y, &data, config)
+        common::common_update_cursor(
+            // The existence of gpu_backend has been already checked above.
+            self.gpu_backend.as_ref().unwrap(),
+            cursor_pos,
+            hot_x,
+            hot_y,
+            &data,
+            config,
+        )
     }
 
     fn move_cursor(&mut self, resource_id: u32, cursor: VhostUserGpuCursorPos) -> VirtioGpuResult {
-        common::common_move_cursor(&self.gpu_backend, resource_id, cursor)
+        self.gpu_backend
+            .as_ref()
+            .map_or(Ok(OkNoData), |gpu_backend| {
+                common::common_move_cursor(gpu_backend, resource_id, cursor)
+            })
     }
 
     fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
@@ -502,11 +522,20 @@ impl Renderer for GfxstreamAdapter {
     }
 
     fn display_info(&self) -> VirtioGpuResult {
-        common::common_display_info(&self.gpu_backend)
+        self.gpu_backend
+            .as_ref()
+            .map_or(Ok(GpuResponse::OkDisplayInfo(Vec::new())), |gpu_backend| {
+                common::common_display_info(gpu_backend)
+            })
     }
 
     fn get_edid(&self, edid_req: VhostUserGpuEdidRequest) -> VirtioGpuResult {
-        common::common_get_edid(&self.gpu_backend, edid_req)
+        self.gpu_backend.as_ref().map_or(
+            Ok(GpuResponse::OkEdid {
+                blob: Box::new([0u8; 0]),
+            }),
+            |gpu_backend| common::common_get_edid(gpu_backend, edid_req),
+        )
     }
 
     fn set_scanout(
@@ -515,11 +544,15 @@ impl Renderer for GfxstreamAdapter {
         resource_id: u32,
         rect: virtio_gpu_rect,
     ) -> VirtioGpuResult {
+        let Some(gpu_backend) = self.gpu_backend.as_ref() else {
+            return Ok(OkNoData);
+        };
+
         let scanout_idx = scanout_id as usize;
         if resource_id == 0 {
             common_set_scanout_disable(&mut self.scanouts, scanout_idx);
 
-            self.gpu_backend
+            gpu_backend
                 .set_scanout(&VhostUserGpuScanout {
                     scanout_id,
                     width: 0,
@@ -553,7 +586,7 @@ impl Renderer for GfxstreamAdapter {
             "Enabling legacy scanout scanout_id={scanout_id}, resource_id={resource_id}: {rect:?}"
         );
 
-        self.gpu_backend
+        gpu_backend
             .set_scanout(&VhostUserGpuScanout {
                 scanout_id,
                 width: rect.width.into(),
@@ -580,7 +613,7 @@ impl Renderer for GfxstreamAdapter {
             error!("Failed to read resource {resource_id} for initial scanout {scanout_id}: {e}");
         } else {
             // Send the initial framebuffer data to QEMU
-            self.gpu_backend
+            gpu_backend
                 .update_scanout(
                     &VhostUserGpuUpdate {
                         scanout_id,
@@ -601,6 +634,10 @@ impl Renderer for GfxstreamAdapter {
     }
 
     fn flush_resource(&mut self, resource_id: u32, _rect: virtio_gpu_rect) -> VirtioGpuResult {
+        let Some(gpu_backend) = self.gpu_backend.as_ref() else {
+            return Ok(OkNoData);
+        };
+
         if resource_id == 0 {
             return Ok(OkNoData);
         }
@@ -632,7 +669,7 @@ impl Renderer for GfxstreamAdapter {
                 continue;
             }
 
-            self.gpu_backend
+            gpu_backend
                 .update_scanout(
                     &VhostUserGpuUpdate {
                         scanout_id,
@@ -776,7 +813,7 @@ mod gfx_fence_tests {
         });
 
         Some(GfxstreamAdapter {
-            gpu_backend: dummy_gpu_backend(),
+            gpu_backend: Some(dummy_gpu_backend()),
             resources: BTreeMap::default(),
             fence_state,
             scanouts: Default::default(),

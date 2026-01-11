@@ -131,6 +131,7 @@ pub struct GpuFlags {
     pub use_glx: bool,
     pub use_gles: bool,
     pub use_surfaceless: bool,
+    pub headless: bool,
 }
 
 impl GpuFlags {
@@ -141,6 +142,7 @@ impl GpuFlags {
             use_glx: false,
             use_gles: true,
             use_surfaceless: true,
+            headless: false,
         }
     }
 }

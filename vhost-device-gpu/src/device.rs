@@ -46,7 +46,7 @@ use std::{
     sync::{self, Arc, Mutex},
 };
 
-use log::{debug, error, info, trace, warn};
+use log::{debug, info, trace, warn};
 use rutabaga_gfx::RutabagaFence;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::{

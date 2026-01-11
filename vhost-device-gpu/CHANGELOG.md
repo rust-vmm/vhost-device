@@ -3,6 +3,8 @@
 
 ### Added
 
+- [[#927]] (https://github.com/rust-vmm/vhost-device/pull/927) vhost-device-gpu: Introduce headless mode
+
 ### Changed
 
 ### Fixed

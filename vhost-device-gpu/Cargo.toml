@@ -41,6 +41,6 @@ bitflags = "2.10.0"
 assert_matches = "1.5"
 mockall = "0.14.0"
 rusty-fork = "0.3.1"
-tempfile = "3.23"
-virtio-queue = { workspace = true }
-vm-memory = { workspace = true }
+tempfile = "3.24"
+virtio-queue = { version = "0.17", features = ["test-utils"] }
+vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }

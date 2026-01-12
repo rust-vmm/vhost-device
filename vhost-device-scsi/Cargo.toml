@@ -29,7 +29,7 @@ vmm-sys-util = "0.15"
 
 [dev-dependencies]
 assert_matches = "1.5"
-tempfile = "3.23.0"
+tempfile = "3.24.0"
 virtio-queue = { version = "0.17", features = ["test-utils"] }
 
 [lints]

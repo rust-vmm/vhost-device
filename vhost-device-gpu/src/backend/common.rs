@@ -14,9 +14,8 @@ use vm_memory::VolatileSlice;
 use crate::{
     gpu_types::{FenceDescriptor, FenceState, Transfer3DDesc, VirtioGpuRing},
     protocol::{
-        GpuResponse,
-        GpuResponse::{ErrUnspec, OkDisplayInfo, OkEdid, OkNoData},
-        VirtioGpuResult, VIRTIO_GPU_MAX_SCANOUTS,
+        GpuResponse::{self, ErrUnspec, OkDisplayInfo, OkEdid, OkNoData},
+        VirtioGpuResult, EDID_BLOB_MAX_SIZE, VIRTIO_GPU_MAX_SCANOUTS,
     },
     renderer::Renderer,
 };
@@ -87,6 +86,13 @@ pub fn common_get_edid(
         error!("Failed to get edid from frontend: {e}");
         ErrUnspec
     })?;
+    if edid.size as usize > EDID_BLOB_MAX_SIZE {
+        error!(
+            "EDID blob size {} exceeds maximum {}",
+            edid.size, EDID_BLOB_MAX_SIZE
+        );
+        return Err(ErrUnspec);
+    }
     Ok(OkEdid {
         blob: Box::from(&edid.edid[..edid.size as usize]),
     })

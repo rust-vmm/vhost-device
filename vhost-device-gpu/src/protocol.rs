@@ -326,7 +326,7 @@ pub struct virtio_gpu_resp_display_info {
 // reading its content from byte array.
 unsafe impl ByteValued for virtio_gpu_resp_display_info {}
 
-const EDID_BLOB_MAX_SIZE: usize = 1024;
+pub const EDID_BLOB_MAX_SIZE: usize = 1024;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
@@ -1050,7 +1050,7 @@ impl GpuResponse {
                     edid: [0; EDID_BLOB_MAX_SIZE],
                     padding: Le32::default(),
                 };
-                edid_info.edid.copy_from_slice(blob);
+                edid_info.edid[..blob.len()].copy_from_slice(blob);
                 writer
                     .write_obj(edid_info)
                     .map_err(|_| Error::DescriptorWriteFailed)?;

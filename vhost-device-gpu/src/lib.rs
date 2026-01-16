@@ -37,6 +37,12 @@ use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 use crate::device::VhostUserGpuBackend;
 
+#[cfg(feature = "backend-virgl")]
+pub const DEFAULT_VIRGLRENDER_CAPSET_MASK: GpuCapset = GpuCapset::ALL_VIRGLRENDERER_CAPSETS;
+
+#[cfg(feature = "backend-gfxstream")]
+pub const DEFAULT_GFXSTREAM_CAPSET_MASK: GpuCapset = GpuCapset::ALL_GFXSTREAM_CAPSETS;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum GpuMode {
     #[value(name = "virglrenderer", alias("virgl-renderer"))]
@@ -117,7 +123,7 @@ impl GpuCapset {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// This structure holds the configuration for the GPU backend
 pub struct GpuConfig {
     gpu_mode: GpuMode,
@@ -125,7 +131,73 @@ pub struct GpuConfig {
     flags: GpuFlags,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default)]
+pub struct GpuConfigBuilder {
+    gpu_mode: Option<GpuMode>,
+    capset: Option<GpuCapset>,
+    flags: Option<GpuFlags>,
+}
+
+impl GpuConfigBuilder {
+    pub fn set_gpu_mode(mut self, mode: GpuMode) -> Self {
+        self.gpu_mode = Some(mode);
+        self
+    }
+
+    pub fn set_capset(mut self, capset: GpuCapset) -> Self {
+        self.capset = Some(capset);
+        self
+    }
+
+    pub fn set_flags(mut self, flags: GpuFlags) -> Self {
+        self.flags = Some(flags);
+        self
+    }
+
+    fn validate_capset(gpu_mode: GpuMode, capset: GpuCapset) -> Result<(), GpuConfigError> {
+        let supported_capset_mask = match gpu_mode {
+            #[cfg(feature = "backend-virgl")]
+            GpuMode::VirglRenderer => GpuCapset::ALL_VIRGLRENDERER_CAPSETS,
+            #[cfg(feature = "backend-gfxstream")]
+            GpuMode::Gfxstream => GpuCapset::ALL_GFXSTREAM_CAPSETS,
+            GpuMode::Null => GpuCapset::empty(),
+        };
+        for capset in capset.iter() {
+            if !supported_capset_mask.contains(capset) {
+                return Err(GpuConfigError::CapsetUnsupportedByMode(gpu_mode, capset));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn build(self) -> Result<GpuConfig, GpuConfigError> {
+        let gpu_mode = self.gpu_mode.ok_or(GpuConfigError::GpuModeRequired)?;
+        let flags = self.flags.unwrap_or_default();
+        let capset = self.capset.unwrap_or_else(|| match gpu_mode {
+            #[cfg(feature = "backend-virgl")]
+            GpuMode::VirglRenderer => DEFAULT_VIRGLRENDER_CAPSET_MASK,
+            #[cfg(feature = "backend-gfxstream")]
+            GpuMode::Gfxstream => DEFAULT_GFXSTREAM_CAPSET_MASK,
+            GpuMode::Null => GpuCapset::empty(),
+        });
+
+        Self::validate_capset(gpu_mode, capset)?;
+
+        #[cfg(feature = "backend-gfxstream")]
+        if capset.contains(GpuCapset::GFXSTREAM_GLES) && !flags.use_gles {
+            return Err(GpuConfigError::GlesRequiredByGfxstream);
+        }
+
+        Ok(GpuConfig {
+            gpu_mode,
+            capset,
+            flags,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct GpuFlags {
     pub use_egl: bool,
     pub use_glx: bool,
@@ -155,6 +227,8 @@ impl Default for GpuFlags {
 
 #[derive(Debug, ThisError)]
 pub enum GpuConfigError {
+    #[error("GPU mode is required")]
+    GpuModeRequired,
     #[error("The mode {0} does not support {1} capset")]
     CapsetUnsupportedByMode(GpuMode, GpuCapset),
     #[error("Requested gfxstream-gles capset, but gles is disabled")]
@@ -162,61 +236,6 @@ pub enum GpuConfigError {
 }
 
 impl GpuConfig {
-    #[cfg(feature = "backend-virgl")]
-    pub const DEFAULT_VIRGLRENDER_CAPSET_MASK: GpuCapset = GpuCapset::ALL_VIRGLRENDERER_CAPSETS;
-
-    #[cfg(feature = "backend-gfxstream")]
-    pub const DEFAULT_GFXSTREAM_CAPSET_MASK: GpuCapset = GpuCapset::ALL_GFXSTREAM_CAPSETS;
-
-    pub const fn get_default_capset_for_mode(gpu_mode: GpuMode) -> GpuCapset {
-        match gpu_mode {
-            #[cfg(feature = "backend-virgl")]
-            GpuMode::VirglRenderer => Self::DEFAULT_VIRGLRENDER_CAPSET_MASK,
-            #[cfg(feature = "backend-gfxstream")]
-            GpuMode::Gfxstream => Self::DEFAULT_GFXSTREAM_CAPSET_MASK,
-            GpuMode::Null => GpuCapset::empty(),
-        }
-    }
-
-    fn validate_capset(gpu_mode: GpuMode, capset: GpuCapset) -> Result<(), GpuConfigError> {
-        let supported_capset_mask = match gpu_mode {
-            #[cfg(feature = "backend-virgl")]
-            GpuMode::VirglRenderer => GpuCapset::ALL_VIRGLRENDERER_CAPSETS,
-            #[cfg(feature = "backend-gfxstream")]
-            GpuMode::Gfxstream => GpuCapset::ALL_GFXSTREAM_CAPSETS,
-            GpuMode::Null => GpuCapset::empty(),
-        };
-        for capset in capset.iter() {
-            if !supported_capset_mask.contains(capset) {
-                return Err(GpuConfigError::CapsetUnsupportedByMode(gpu_mode, capset));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Create a new instance of the `GpuConfig` struct, containing the
-    /// parameters to be fed into the gpu-backend server.
-    pub fn new(
-        gpu_mode: GpuMode,
-        capset: Option<GpuCapset>,
-        flags: GpuFlags,
-    ) -> Result<Self, GpuConfigError> {
-        let capset = capset.unwrap_or_else(|| Self::get_default_capset_for_mode(gpu_mode));
-        Self::validate_capset(gpu_mode, capset)?;
-
-        #[cfg(feature = "backend-gfxstream")]
-        if capset.contains(GpuCapset::GFXSTREAM_GLES) && !flags.use_gles {
-            return Err(GpuConfigError::GlesRequiredByGfxstream);
-        }
-
-        Ok(Self {
-            gpu_mode,
-            capset,
-            flags,
-        })
-    }
-
     pub const fn gpu_mode(&self) -> GpuMode {
         self.gpu_mode
     }
@@ -268,22 +287,34 @@ mod tests {
     #[test]
     #[cfg(feature = "backend-virgl")]
     fn test_gpu_config_create_default_virglrenderer() {
-        let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::new_default()).unwrap();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::VirglRenderer)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
-        assert_eq!(config.capsets(), GpuConfig::DEFAULT_VIRGLRENDER_CAPSET_MASK);
+        assert_eq!(config.capsets(), DEFAULT_VIRGLRENDER_CAPSET_MASK);
     }
 
     #[test]
     #[cfg(feature = "backend-gfxstream")]
     fn test_gpu_config_create_default_gfxstream() {
-        let config = GpuConfig::new(GpuMode::Gfxstream, None, GpuFlags::default()).unwrap();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::Gfxstream)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::Gfxstream);
-        assert_eq!(config.capsets(), GpuConfig::DEFAULT_GFXSTREAM_CAPSET_MASK);
+        assert_eq!(config.capsets(), DEFAULT_GFXSTREAM_CAPSET_MASK);
     }
 
     #[cfg(feature = "backend-gfxstream")]
     fn assert_invalid_gpu_config(mode: GpuMode, capset: GpuCapset, expected_capset: GpuCapset) {
-        let result = GpuConfig::new(mode, Some(capset), GpuFlags::new_default());
+        let result = GpuConfigBuilder::default()
+            .set_gpu_mode(mode)
+            .set_capset(capset)
+            .set_flags(GpuFlags::new_default())
+            .build();
         assert_matches!(
             result,
             Err(GpuConfigError::CapsetUnsupportedByMode(
@@ -296,12 +327,12 @@ mod tests {
     #[test]
     #[cfg(feature = "backend-virgl")]
     fn test_gpu_config_valid_combination() {
-        let config = GpuConfig::new(
-            GpuMode::VirglRenderer,
-            Some(GpuCapset::VIRGL2),
-            GpuFlags::default(),
-        )
-        .unwrap();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::VirglRenderer)
+            .set_capset(GpuCapset::VIRGL2)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
         assert_eq!(config.gpu_mode(), GpuMode::VirglRenderer);
     }
 
@@ -329,16 +360,20 @@ mod tests {
             use_gles: false,
             ..GpuFlags::new_default()
         };
-        let result = GpuConfig::new(GpuMode::Gfxstream, Some(capset), flags);
+        let result = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::Gfxstream)
+            .set_capset(capset)
+            .set_flags(flags)
+            .build();
         assert_matches!(result, Err(GpuConfigError::GlesRequiredByGfxstream));
     }
 
     #[test]
     fn test_default_num_capsets() {
         #[cfg(feature = "backend-virgl")]
-        assert_eq!(GpuConfig::DEFAULT_VIRGLRENDER_CAPSET_MASK.num_capsets(), 2);
+        assert_eq!(DEFAULT_VIRGLRENDER_CAPSET_MASK.num_capsets(), 2);
         #[cfg(feature = "backend-gfxstream")]
-        assert_eq!(GpuConfig::DEFAULT_GFXSTREAM_CAPSET_MASK.num_capsets(), 2);
+        assert_eq!(DEFAULT_GFXSTREAM_CAPSET_MASK.num_capsets(), 2);
     }
 
     #[test]
@@ -364,7 +399,11 @@ mod tests {
     fn test_fail_listener() {
         // This will fail the listeners and thread will panic.
         let socket_name = Path::new("/proc/-1/nonexistent");
-        let config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::VirglRenderer)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
 
         assert_matches!(
             start_backend(socket_name, config).unwrap_err(),

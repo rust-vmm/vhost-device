@@ -8,7 +8,9 @@ use std::{path::PathBuf, process::exit};
 
 use clap::{ArgAction, Parser, ValueEnum};
 use log::error;
-use vhost_device_gpu::{start_backend, GpuCapset, GpuConfig, GpuConfigError, GpuFlags, GpuMode};
+use vhost_device_gpu::{
+    start_backend, GpuCapset, GpuConfig, GpuConfigBuilder, GpuConfigError, GpuFlags, GpuMode,
+};
 
 #[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u64)]
@@ -135,7 +137,14 @@ impl From<GpuFlagsArgs> for GpuFlags {
 pub fn config_from_args(args: GpuArgs) -> Result<(PathBuf, GpuConfig), GpuConfigError> {
     let flags = GpuFlags::from(args.flags);
     let capset = args.capset.map(capset_names_into_capset);
-    let config = GpuConfig::new(args.gpu_mode, capset, flags)?;
+    let mut builder = GpuConfigBuilder::default()
+        .set_gpu_mode(args.gpu_mode)
+        .set_flags(flags);
+    if let Some(capset) = capset {
+        builder = builder.set_capset(capset);
+    }
+
+    let config = builder.build()?;
     Ok((args.socket_path, config))
 }
 

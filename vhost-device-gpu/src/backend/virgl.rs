@@ -698,7 +698,7 @@ mod virgl_cov_tests {
             create_vring, test_capset_operations, test_fence_operations, test_move_cursor,
             TestingDescChainArgs,
         },
-        GpuCapset, GpuConfig, GpuFlags, GpuMode,
+        GpuCapset, GpuConfigBuilder, GpuFlags, GpuMode,
     };
 
     fn fence_desc(r: VirtioGpuRing, id: u64, idx: u16, len: u32) -> FenceDescriptor {
@@ -788,11 +788,12 @@ mod virgl_cov_tests {
             assert!(call_b.read().is_err(), "no signal when no match");
 
             // Initialize virgl ONCE in this forked process; exercise adapter paths
-            let cfg = GpuConfig::new(
-                GpuMode::VirglRenderer,
-                Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
-                GpuFlags::default(),
-            ).expect("GpuConfig");
+            let cfg = GpuConfigBuilder::default()
+                .set_gpu_mode(GpuMode::VirglRenderer)
+                .set_capset(GpuCapset::VIRGL | GpuCapset::VIRGL2)
+                .set_flags(GpuFlags::default())
+                .build()
+                .expect("GpuConfig");
 
             let mem = GuestMemoryAtomic::new(
                 GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x20_000)]).unwrap()

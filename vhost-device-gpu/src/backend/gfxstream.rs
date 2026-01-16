@@ -735,7 +735,7 @@ mod gfx_fence_tests {
             create_vring, test_capset_operations, test_fence_operations, test_move_cursor,
             TestingDescChainArgs,
         },
-        GpuCapset, GpuFlags, GpuMode,
+        GpuCapset, GpuConfigBuilder, GpuFlags, GpuMode,
     };
 
     const CREATE_RESOURCE_2D_720P: ResourceCreate3d = ResourceCreate3d {
@@ -773,12 +773,12 @@ mod gfx_fence_tests {
     /// Returns None if gfxstream initialization fails (e.g., in CI without GPU
     /// drivers).
     fn new_gpu() -> Option<GfxstreamAdapter> {
-        let config = GpuConfig::new(
-            GpuMode::Gfxstream,
-            Some(GpuCapset::GFXSTREAM_VULKAN | GpuCapset::GFXSTREAM_GLES),
-            GpuFlags::default(),
-        )
-        .ok()?;
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::Gfxstream)
+            .set_capset(GpuCapset::GFXSTREAM_VULKAN | GpuCapset::GFXSTREAM_GLES)
+            .set_flags(GpuFlags::default())
+            .build()
+            .ok()?;
 
         let mem = vm_memory::GuestMemoryAtomic::new(
             vm_memory::GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x20_000)]).unwrap(),

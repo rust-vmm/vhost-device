@@ -253,7 +253,7 @@ mod tests {
     use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryMmap};
 
     use super::*;
-    use crate::{GpuFlags, GpuMode};
+    use crate::{GpuConfigBuilder, GpuFlags, GpuMode};
 
     fn create_null_adapter() -> NullAdapter {
         let (_, backend) = UnixStream::pair().unwrap();
@@ -262,7 +262,11 @@ mod tests {
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap(),
         );
         let vring = VringRwLock::new(mem, 0x100).unwrap();
-        let config = GpuConfig::new(GpuMode::Null, None, GpuFlags::default()).unwrap();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::Null)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
 
         NullAdapter::new(&vring, &config, Some(gpu_backend))
     }

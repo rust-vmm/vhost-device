@@ -816,7 +816,7 @@ mod tests {
         },
         renderer::Renderer,
         testutils::{create_vring, TestingDescChainArgs},
-        GpuCapset, GpuFlags, GpuMode,
+        GpuCapset, GpuConfigBuilder, GpuFlags, GpuMode,
     };
 
     // Create a mock for the Renderer trait
@@ -905,12 +905,12 @@ mod tests {
     const CONTROL_QUEUE_SIZE: u16 = 1024;
 
     fn init() -> (Arc<VhostUserGpuBackend>, GuestMemoryAtomic<GuestMemoryMmap>) {
-        let config = GpuConfig::new(
-            GpuMode::VirglRenderer,
-            Some(GpuCapset::VIRGL | GpuCapset::VIRGL2),
-            GpuFlags::default(),
-        )
-        .unwrap();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::VirglRenderer)
+            .set_capset(GpuCapset::VIRGL | GpuCapset::VIRGL2)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
         let backend = VhostUserGpuBackend::new(config).unwrap();
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap(),
@@ -1416,7 +1416,11 @@ mod tests {
     rusty_fork_test! {
         #[test]
         fn test_verify_backend() {
-            let gpu_config = GpuConfig::new(GpuMode::VirglRenderer, None, GpuFlags::default()).unwrap();
+            let gpu_config = GpuConfigBuilder::default()
+                .set_gpu_mode(GpuMode::VirglRenderer)
+                .set_flags(GpuFlags::default())
+                .build()
+                .unwrap();
             let backend = VhostUserGpuBackend::new(gpu_config).unwrap();
 
             assert_eq!(backend.num_queues(), NUM_QUEUES);

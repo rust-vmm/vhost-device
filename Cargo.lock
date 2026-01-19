@@ -474,7 +474,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc 0.2.180",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -623,7 +623,7 @@ dependencies = [
  "gobject-sys",
  "libc 0.2.180",
  "system-deps",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1560,7 +1560,7 @@ dependencies = [
  "errno",
  "libc 0.2.180",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -1829,7 +1829,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -2007,7 +2007,7 @@ dependencies = [
  "bitflags 2.10.0",
  "libc 0.2.180",
  "uuid",
- "vm-memory",
+ "vm-memory 0.17.2",
  "vmm-sys-util",
 ]
 
@@ -2026,7 +2026,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2047,7 +2047,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2066,7 +2066,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2090,7 +2090,7 @@ dependencies = [
  "virglrenderer",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2108,7 +2108,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2131,7 +2131,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2152,7 +2152,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2170,7 +2170,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2189,7 +2189,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2214,7 +2214,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2233,7 +2233,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2251,7 +2251,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2275,7 +2275,7 @@ dependencies = [
  "virtio-bindings",
  "virtio-queue",
  "virtio-vsock",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
  "vsock",
 ]
@@ -2291,7 +2291,7 @@ dependencies = [
  "vhost",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.17.2",
  "vmm-sys-util",
 ]
 
@@ -2332,7 +2332,7 @@ dependencies = [
  "libc 0.2.180",
  "log",
  "virtio-bindings",
- "vm-memory",
+ "vm-memory 0.17.2",
  "vmm-sys-util",
 ]
 
@@ -2344,14 +2344,23 @@ checksum = "8e7822f0d005c2451d4cdbb42cc9581cabb42a0fb64347efe5492fa548e8931a"
 dependencies = [
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.17.2",
 ]
 
 [[package]]
 name = "vm-memory"
-version = "0.17.1"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f39348a049689cabd3377cdd9182bf526ec76a6f823b79903896452e9d7a7380"
+checksum = "e201ed63fdaba7bdafd07176f2060ffa6949aa05559acbc3f5189824bb285428"
+dependencies = [
+ "vm-memory 0.18.0",
+]
+
+[[package]]
+name = "vm-memory"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b55e753c7725603745cb32b2287ef7ef3da05c03c7702cda3fa8abe25ae0465"
 dependencies = [
  "arc-swap",
  "bitflags 2.10.0",

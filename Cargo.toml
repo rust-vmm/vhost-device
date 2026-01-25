@@ -18,6 +18,15 @@ members = [
     "xtask",
 ]
 
+[workspace.dependencies]
+vhost = { version = "0.15", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.21"
+virtio-bindings = "0.2.5"
+virtio-queue = { version = "0.17", features = ["test-utils"] }
+vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }
+vmm-sys-util = "0.15"
+virtio-vsock = "0.11"
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 

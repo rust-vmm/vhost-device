@@ -22,12 +22,12 @@ clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
 thiserror = "2.0"
-vhost = { version = "0.15", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.21"
-virtio-bindings = "0.2.5"
-virtio-queue = "0.17"
-vm-memory = "0.17.1"
-vmm-sys-util = "0.15"
+vhost = { workspace = true }
+vhost-user-backend = { workspace = true }
+virtio-bindings = { workspace = true }
+virtio-queue = { workspace = true }
+vm-memory = { workspace = true }
+vmm-sys-util = { workspace = true }
 
 # Make alsa and pipewire backends available only on gnu
 [target.'cfg(target_env = "gnu")'.dependencies]

@@ -10,11 +10,12 @@ use std::{
 use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackend, VringRwLock};
+use vhost_user_backend::{VhostUserBackend, VringRwLock, VringT};
 use virtio_bindings::bindings::{
     virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
     virtio_ring::VIRTIO_RING_F_EVENT_IDX,
 };
+use virtio_queue::QueueT;
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le64};
 use vmm_sys_util::{
     epoll::EventSet,
@@ -353,6 +354,10 @@ impl VhostUserBackend for VhostUserVsockBackend {
             }
             BACKEND_EVENT => {
                 thread.process_backend_evt(evset);
+                if !vring_tx.get_ref().get_queue().ready() {
+                    // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+                    return Ok(());
+                }
                 if let Err(e) = thread.process_tx(vring_tx, evt_idx) {
                     match e {
                         Error::NoMemoryConfigured => {
@@ -364,7 +369,10 @@ impl VhostUserBackend for VhostUserVsockBackend {
             }
             SIBLING_VM_EVENT => {
                 let _ = thread.sibling_event_fd.read();
-                thread.process_raw_pkts(vring_rx, evt_idx)?;
+                if vring_rx.get_ref().get_queue().ready() {
+                    // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+                    thread.process_raw_pkts(vring_rx, evt_idx)?;
+                }
                 return Ok(());
             }
             _ => {
@@ -372,7 +380,8 @@ impl VhostUserBackend for VhostUserVsockBackend {
             }
         }
 
-        if device_event != EVT_QUEUE_EVENT {
+        if device_event != EVT_QUEUE_EVENT && vring_rx.get_ref().get_queue().ready() {
+            // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
             thread.process_rx(vring_rx, evt_idx)?;
         }
 

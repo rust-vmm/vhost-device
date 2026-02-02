@@ -22,15 +22,15 @@ log = "0.4"
 thiserror = "2.0"
 vhost = { version = "0.15", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.21"
-virtio-bindings = "0.2.5"
+virtio-bindings = "0.2.7"
 virtio-queue = "0.17"
-vm-memory = "0.17.1"
+vm-memory = "0.18.0"
 vmm-sys-util = "0.15"
 
 [dev-dependencies]
 assert_matches = "1.5"
 virtio-queue = { version = "0.17", features = ["test-utils"] }
-vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.18.0", features = ["backend-mmap", "backend-atomic"] }
 
 [lints]
 workspace = true

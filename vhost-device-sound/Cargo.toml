@@ -24,9 +24,9 @@ log = "0.4"
 thiserror = "2.0"
 vhost = { version = "0.15", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.21"
-virtio-bindings = "0.2.5"
+virtio-bindings = "0.2.7"
 virtio-queue = "0.17"
-vm-memory = "0.17.1"
+vm-memory = "0.18.0"
 vmm-sys-util = "0.15"
 
 # Make alsa and pipewire backends available only on gnu
@@ -41,7 +41,7 @@ gst-audio = {package = "gstreamer-audio", version = "0.24.2", optional = true, f
 rstest = "0.26.1"
 tempfile = "3.24"
 virtio-queue = { version = "0.17", features = ["test-utils"] }
-vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }
+vm-memory = { version = "0.18.0", features = ["backend-mmap", "backend-atomic"] }
 
 [target.'cfg(target_env = "gnu")'.dev-dependencies]
 rand = { version = "0.9.2" }

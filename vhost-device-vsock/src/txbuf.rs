@@ -36,6 +36,31 @@ impl LocalTxBuf {
         self.len() == 0
     }
 
+    /// Add new data from a byte slice to the tx buffer, push all or none.
+    /// Returns LocalTxBufFull error if space not sufficient.
+    pub fn push_bytes(&mut self, data: &[u8]) -> Result<()> {
+        if self.get_buf_size() as usize - self.len() < data.len() {
+            // Tx buffer is full
+            return Err(Error::LocalTxBufFull);
+        }
+
+        // Get index into buffer at which data can be inserted
+        let tail_idx = self.tail.0 as usize % self.get_buf_size() as usize;
+
+        // Check if we can fit the data buffer between head and end of buffer
+        let len = std::cmp::min(self.get_buf_size() as usize - tail_idx, data.len());
+        self.buf[tail_idx..tail_idx + len].copy_from_slice(&data[..len]);
+
+        // Check if there is more data to be wrapped around
+        if len < data.len() {
+            self.buf[..(data.len() - len)].copy_from_slice(&data[len..]);
+        }
+
+        // Increment tail by the amount of data that has been added to the buffer
+        self.tail += Wrapping(data.len() as u32);
+        Ok(())
+    }
+
     /// Add new data to the tx buffer, push all or none.
     /// Returns LocalTxBufFull error if space not sufficient.
     pub fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {

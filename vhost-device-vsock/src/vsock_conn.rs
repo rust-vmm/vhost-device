@@ -414,108 +414,12 @@ mod tests {
     };
 
     use super::*;
-    use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
+    use crate::{
+        test_utils::{prepare_desc_chain_vsock, HeadParams},
+        vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM},
+    };
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
-
-    struct HeadParams {
-        head_len: usize,
-        data_len: u32,
-    }
-
-    impl HeadParams {
-        fn new(head_len: usize, data_len: u32) -> Self {
-            Self { head_len, data_len }
-        }
-        fn construct_head(&self) -> Vec<u8> {
-            let mut header = vec![0_u8; self.head_len];
-            if self.head_len == PKT_HEADER_SIZE {
-                // Offset into the header for data length
-                const HDROFF_LEN: usize = 24;
-                LittleEndian::write_u32(&mut header[HDROFF_LEN..], self.data_len);
-            }
-            header
-        }
-    }
-
-    fn prepare_desc_chain_vsock(
-        write_only: bool,
-        head_params: &HeadParams,
-        data_chain_len: u16,
-        head_data_len: u32,
-    ) -> (
-        GuestMemoryAtomic<GuestMemoryMmap>,
-        DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
-    ) {
-        let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
-        let virt_queue = MockSplitQueue::new(&mem, 16);
-        let mut next_addr = virt_queue.desc_table().total_size() + 0x100;
-        let mut flags = 0;
-
-        if write_only {
-            flags |= VRING_DESC_F_WRITE;
-        }
-
-        let mut head_flags = if data_chain_len > 0 {
-            flags | VRING_DESC_F_NEXT
-        } else {
-            flags
-        };
-
-        // vsock packet header
-        // let header = vec![0 as u8; head_params.head_len];
-        let header = head_params.construct_head();
-        let head_desc = RawDescriptor::from(SplitDescriptor::new(
-            next_addr,
-            head_params.head_len as u32,
-            head_flags as u16,
-            1,
-        ));
-        mem.write(&header, SplitDescriptor::from(head_desc).addr())
-            .unwrap();
-        virt_queue.desc_table().store(0, head_desc).unwrap();
-        next_addr += head_params.head_len as u64;
-
-        // Put the descriptor index 0 in the first available ring position.
-        mem.write_obj(0u16, virt_queue.avail_addr().unchecked_add(4))
-            .unwrap();
-
-        // Set `avail_idx` to 1.
-        mem.write_obj(1u16, virt_queue.avail_addr().unchecked_add(2))
-            .unwrap();
-
-        // chain len excludes the head
-        for i in 0..(data_chain_len) {
-            // last descr in chain
-            if i == data_chain_len - 1 {
-                head_flags &= !VRING_DESC_F_NEXT;
-            }
-            // vsock data
-            let data = vec![0_u8; head_data_len as usize];
-            let data_desc = RawDescriptor::from(SplitDescriptor::new(
-                next_addr,
-                data.len() as u32,
-                head_flags as u16,
-                i + 2,
-            ));
-            mem.write(&data, SplitDescriptor::from(data_desc).addr())
-                .unwrap();
-            virt_queue.desc_table().store(i + 1, data_desc).unwrap();
-            next_addr += u64::from(head_data_len);
-        }
-
-        // Create descriptor chain from pre-filled memory
-        (
-            GuestMemoryAtomic::new(mem.clone()),
-            virt_queue
-                .create_queue::<Queue>()
-                .unwrap()
-                .iter(GuestMemoryAtomic::new(mem.clone()).memory())
-                .unwrap()
-                .next()
-                .unwrap(),
-        )
-    }
 
     struct VsockDummySocket {
         read_buffer: Arc<Mutex<VecDeque<u8>>>,

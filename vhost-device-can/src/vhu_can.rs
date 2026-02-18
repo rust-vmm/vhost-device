@@ -13,7 +13,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use log::{error, trace, warn};
+use log::{trace, warn};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};

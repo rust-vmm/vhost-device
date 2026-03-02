@@ -21,6 +21,14 @@ qemu-system-x86_64 ... \
   -numa node,memdev=mem
 ```
 
+### Options
+
+- `-r`, `--read-only`: Treat the disk images as read-only.
+
+- `--solid-state`: Tell the guest that this disk is non-rotational
+
+- `-s`, `--socket-path`: Location of vhost-user socket (required)
+
 ## Limitations
 
 We are currently only supporting a single request queue and do not support

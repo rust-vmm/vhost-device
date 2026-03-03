@@ -293,6 +293,7 @@ mod tests {
 
     use super::*;
     use crate::vhu_can::VhostUserCanBackend;
+    use crate::virtio_can::VIRTIO_CAN_TX;
 
     #[test]
     fn test_can_controller_creation() {
@@ -340,11 +341,11 @@ mod tests {
         let mut controller = CanController::new(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
-            msg_type: VIRTIO_CAN_RX.into(),
+            msg_type: VIRTIO_CAN_TX.into(),
             can_id: 123.into(),
             length: 64.into(),
             reserved: 0.into(),
-            flags: 0.into(),
+            flags: CAN_FRMF_TYPE_FD.into(),
             sdu: [0; 64],
         };
 

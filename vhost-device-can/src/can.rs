@@ -325,7 +325,7 @@ mod tests {
             can_id: 123.into(),
             length: 64.into(),
             reserved: 0.into(),
-            flags: 0.into(),
+            flags: CAN_FRMF_TYPE_FD.into(),
             sdu: [0; 64],
         };
 

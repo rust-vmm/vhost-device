@@ -323,7 +323,7 @@ mod tests {
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_RX.into(),
             can_id: 123.into(),
-            length: 64.into(),
+            length: 8.into(),
             reserved: 0.into(),
             flags: 0.into(),
             sdu: [0; 64],

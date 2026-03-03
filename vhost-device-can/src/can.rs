@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_creation() {
-        let can_name = "can".to_string();
+        let can_name = "can0".to_string();
 
         let controller = CanController::new(can_name.clone()).unwrap();
         assert_eq!(controller.can_name, can_name);
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_push_and_pop() {
-        let can_name = "can".to_string();
+        let can_name = "can0".to_string();
         let mut controller = CanController::new(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_config() {
-        let can_name = "can".to_string();
+        let can_name = "can0".to_string();
         let mut controller = CanController::new(can_name.clone()).unwrap();
 
         // Test config
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_operation() {
-        let can_name = "can".to_string();
+        let can_name = "can0".to_string();
         let controller = CanController::new(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_start_read_thread() {
-        let can_name = "can".to_string();
+        let can_name = "can0".to_string();
         let controller = CanController::new(can_name.clone()).unwrap();
         let arc_controller = Arc::new(RwLock::new(controller));
 
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_can_open_socket_fail() {
-        let err = CanController::new("can0".to_string()).unwrap_err();
+        let err = CanController::new("canx".to_string()).unwrap_err();
         assert_eq!(err, Error::SocketOpen);
     }
 }

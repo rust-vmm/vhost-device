@@ -1552,7 +1552,7 @@ mod tests {
     }
 
     #[test]
-    fn test_virtio_can_tx_device_started_test_send_fail() {
+    fn test_virtio_can_tx_device_started_test_send_success() {
         let controller =
             CanController::new("can0".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
@@ -1606,7 +1606,7 @@ mod tests {
             .map_err(|_| Error::DescriptorReadFailed)
             .unwrap();
 
-        assert_eq!(VIRTIO_CAN_RESULT_NOT_OK, can_frame_res);
+        assert_eq!(VIRTIO_CAN_RESULT_OK, can_frame_res);
     }
 
     #[test]

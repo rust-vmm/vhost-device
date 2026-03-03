@@ -31,8 +31,6 @@ pub(crate) enum Error {
     CouldNotFindCANDevs,
     #[error("Could not create can controller: {0}")]
     CouldNotCreateCanController(crate::can::Error),
-    #[error("Could not create can controller output socket: {0}")]
-    FailCreateCanControllerSocket(crate::can::Error),
     #[error("Could not create can backend: {0}")]
     CouldNotCreateBackend(crate::vhu_can::Error),
     #[error("Could not create daemon: {0}")]
@@ -82,11 +80,6 @@ pub(crate) fn start_backend_server(socket: PathBuf, can_devs: String) -> Result<
             VhostUserCanBackend::new(lockable_controller.clone())
                 .map_err(Error::CouldNotCreateBackend)?,
         ));
-        lockable_controller
-            .write()
-            .unwrap()
-            .open_can_socket()
-            .map_err(Error::FailCreateCanControllerSocket)?;
 
         let read_handle = CanController::start_read_thread(lockable_controller.clone());
 
@@ -165,13 +158,13 @@ mod tests {
     use assert_matches::assert_matches;
 
     use super::*;
-    use crate::{backend::Error::FailCreateCanControllerSocket, can::Error::SocketOpen, CanArgs};
+    use crate::{backend::Error::CouldNotCreateCanController, can::Error::SocketOpen, CanArgs};
 
     #[test]
-    fn test_can_valid_configuration() {
+    fn test_can_valid_args_missing_interface() {
         let valid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "can0".to_string(),
+            can_devices: "canx".to_string(),
             socket_count: 1,
         };
 
@@ -243,23 +236,23 @@ mod tests {
         let config = VuCanConfig {
             socket_path: PathBuf::from("/tmp/vhost.sock"),
             socket_count: 1,
-            can_devices: vec!["can0".to_string()],
+            can_devices: vec!["canx".to_string()],
         };
 
         assert_matches!(
             start_backend(config),
-            Err(FailCreateCanControllerSocket(SocketOpen))
+            Err(CouldNotCreateCanController(SocketOpen))
         );
     }
 
     #[test]
     fn test_can_valid_configuration_start_backend_server_fail() {
         let socket_path = PathBuf::from("/tmp/vhost.sock");
-        let can_devs = "can0".to_string();
+        let can_devs = "canx".to_string();
 
         assert_matches!(
             start_backend_server(socket_path, can_devs),
-            Err(FailCreateCanControllerSocket(SocketOpen))
+            Err(CouldNotCreateCanController(SocketOpen))
         );
     }
 }

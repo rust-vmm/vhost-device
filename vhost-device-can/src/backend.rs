@@ -164,7 +164,7 @@ mod tests {
     fn test_can_valid_configuration() {
         let valid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "can0".to_string(),
+            can_devices: "canx".to_string(),
             socket_count: 1,
         };
 
@@ -236,7 +236,7 @@ mod tests {
         let config = VuCanConfig {
             socket_path: PathBuf::from("/tmp/vhost.sock"),
             socket_count: 1,
-            can_devices: vec!["can0".to_string()],
+            can_devices: vec!["canx".to_string()],
         };
 
         assert_matches!(
@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn test_can_valid_configuration_start_backend_server_fail() {
         let socket_path = PathBuf::from("/tmp/vhost.sock");
-        let can_devs = "can0".to_string();
+        let can_devs = "canx".to_string();
 
         assert_matches!(
             start_backend_server(socket_path, can_devs),

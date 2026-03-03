@@ -161,10 +161,10 @@ mod tests {
     use crate::{backend::Error::CouldNotCreateCanController, can::Error::SocketOpen, CanArgs};
 
     #[test]
-    fn test_can_valid_configuration() {
+    fn test_can_valid_args_missing_interface() {
         let valid_args = CanArgs {
             socket_path: "/tmp/vhost.sock".to_string().into(),
-            can_devices: "can0".to_string(),
+            can_devices: "canx".to_string(),
             socket_count: 1,
         };
 

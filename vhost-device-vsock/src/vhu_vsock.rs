@@ -94,8 +94,8 @@ pub(crate) enum Error {
     EpollAdd(std::io::Error),
     #[error("Failed to modify evset associated with epoll")]
     EpollModify(std::io::Error),
-    #[error("Failed to read from unix stream")]
-    UnixRead(std::io::Error),
+    #[error("Failed to read from stream")]
+    StreamRead(std::io::Error),
     #[error("Failed to convert byte array to string")]
     ConvertFromUtf8(std::str::Utf8Error),
     #[error("Invalid vsock connection request from host")]
@@ -141,6 +141,10 @@ pub(crate) enum Error {
     EmptyRawPktsQueue,
     #[error("CID already in use by another vsock device")]
     CidAlreadyInUse,
+    #[error("Failed to write to guest memory")]
+    GuestMemoryWrite,
+    #[error("Failed to read from guest memory")]
+    GuestMemoryRead,
 }
 
 impl std::convert::From<Error> for std::io::Error {

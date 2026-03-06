@@ -62,6 +62,8 @@ pub(crate) enum VuMediaError {
     SendNotificationFailed,
     #[error("Can't create eventFd")]
     EventFdError,
+    #[error("Memory allocator failed")]
+    MemoryAllocatorFailed,
     #[error("Failed to handle event")]
     HandleEventNotEpollIn,
     #[error("No memory configured")]
@@ -200,7 +202,8 @@ where
                     queue: eventq.clone(),
                 },
                 VuMemoryMapper::new(thread.atomic_mem().unwrap().clone()),
-                VuBackend::new(thread.vu_req.as_ref().unwrap().clone()),
+                VuBackend::new(thread.vu_req.as_ref().unwrap().clone())
+                    .map_err(|_| VuMediaError::MemoryAllocatorFailed)?,
             )
             .unwrap();
             thread.set_media_worker(device);

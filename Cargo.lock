@@ -2354,6 +2354,7 @@ dependencies = [
  "vhost-user-backend 0.21.0 (git+https://github.com/rust-vmm/vhost?branch=main)",
  "virtio-bindings",
  "virtio-media",
+ "virtio-media-ffmpeg-decoder",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
@@ -2575,6 +2576,22 @@ dependencies = [
  "thiserror 1.0.69",
  "v4l2r 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "zerocopy",
+]
+
+[[package]]
+name = "virtio-media-ffmpeg-decoder"
+version = "0.0.7"
+source = "git+https://github.com/chromeos/virtio-media?rev=c6cc93a#c6cc93af5372d6aa37e370f88cfdb9288d27d66a"
+dependencies = [
+ "anyhow",
+ "bindgen 0.70.1",
+ "enumn",
+ "libc 0.2.182",
+ "log",
+ "nix 0.28.0",
+ "pkg-config",
+ "thiserror 1.0.69",
+ "virtio-media",
 ]
 
 [[package]]

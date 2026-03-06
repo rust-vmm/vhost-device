@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+mod media_allocator;
 mod media_backends;
 mod vhu_media;
 mod vhu_media_thread;
@@ -108,6 +109,22 @@ fn create_v4l2_proxy_device_config(device_path: &PathBuf) -> VirtioMediaDeviceCo
     config
 }
 
+fn create_ffmpeg_decoder_config() -> VirtioMediaDeviceConfig {
+    use v4l2r::ioctl::Capabilities;
+    let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
+    let card_name = "ffmpeg_decoder";
+    card[0..card_name.len()].copy_from_slice(card_name.as_bytes());
+    VirtioMediaDeviceConfig {
+        device_caps: (Capabilities::VIDEO_M2M_MPLANE
+            | Capabilities::EXT_PIX_FORMAT
+            | Capabilities::STREAMING
+            | Capabilities::DEVICE_CAPS)
+            .bits(),
+        device_type: 0,
+        card,
+    }
+}
+
 fn serve_simple_capture(media_config: &VuMediaConfig) -> Result<()> {
     let vu_media_backend = Arc::new(
         VuMediaBackend::new(
@@ -163,7 +180,37 @@ fn serve_v4l2_proxy_daemon(media_config: &VuMediaConfig) -> Result<()> {
     .unwrap();
 
     vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+    daemon
+        .serve(&media_config.socket_path)
+        .map_err(Error::ServeFailed)?;
 
+    Ok(())
+}
+
+fn serve_ffmpeg_decoder(media_config: &VuMediaConfig) -> Result<()> {
+    let vu_media_backend = Arc::new(
+        VuMediaBackend::new(
+            media_config.v4l2_device.as_path(),
+            create_ffmpeg_decoder_config(),
+            move |event_queue, _, host_mapper| {
+                Ok(virtio_media::devices::video_decoder::VideoDecoder::new(
+                    virtio_media_ffmpeg_decoder::FfmpegDecoder::new(),
+                    event_queue,
+                    host_mapper,
+                ))
+            },
+        )
+        .map_err(Error::CouldNotCreateBackend)?,
+    );
+
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-media".to_owned(),
+        vu_media_backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .unwrap();
+
+    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
     daemon
         .serve(&media_config.socket_path)
         .map_err(Error::ServeFailed)?;
@@ -177,6 +224,7 @@ pub(crate) fn start_backend(media_config: VuMediaConfig) -> Result<()> {
         match media_config.backend {
             BackendType::SimpleCapture => serve_simple_capture(&media_config),
             BackendType::V4l2Proxy => serve_v4l2_proxy_daemon(&media_config),
+            BackendType::FfmpegDecoder => serve_ffmpeg_decoder(&media_config),
         }?;
         debug!("Finishing backend");
     }

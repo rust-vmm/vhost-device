@@ -43,6 +43,7 @@ pub(crate) enum BackendType {
     #[default]
     SimpleCapture,
     V4l2Proxy,
+    FfmpegDecoder,
 }
 
 const QUEUE_SIZE: usize = 1024;

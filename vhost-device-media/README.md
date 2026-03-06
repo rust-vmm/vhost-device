@@ -25,7 +25,7 @@ vhost-device-media --socket-path <SOCKET> --v4l2-device <V4L2_DEVICE> --backend 
             Path to the V4L2 media device file. Defaults to /dev/video0.
 
      --backend <BACKEND>
-            Media backend to be used. [possible values: simple-capture, v4l2-proxy]
+            Media backend to be used. [possible values: simple-capture, v4l2-proxy, ffmpeg-decoder]
 
      -h, --help
             Print help
@@ -55,6 +55,7 @@ The following backends are available:
 
 - **simple-capture**: A simple video capture device generating a pattern, purely software-based and thus not requiring any kind of hardware. Can be used for testing purposes.
 - **v4l2-proxy**: A proxy device for host V4L2 devices, i.e. a device allowing to expose a host V4L2 device to the guest almost as-is.
+- **ffmpeg-decoder**: A software-based video decoder backend using FFmpeg.
 
 ## Limitations
 

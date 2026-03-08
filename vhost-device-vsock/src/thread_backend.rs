@@ -346,22 +346,20 @@ impl VsockThreadBackend {
             }
         }
 
-        // TODO: Rst if packet has unsupported type
         if pkt.type_() != VSOCK_TYPE_STREAM {
             info!("vsock: dropping packet of unknown type");
+            self.enq_rst(pkt.dst_port(), pkt.src_port());
             return Ok(());
         }
 
         let key = ConnMapKey::new(pkt.dst_port(), pkt.src_port());
 
-        // TODO: Handle cases where connection does not exist and packet op
-        // is not VSOCK_OP_REQUEST
         if !self.conn_map.contains_key(&key) {
             // The packet contains a new connection request
             if pkt.op() == VSOCK_OP_REQUEST {
                 self.handle_new_guest_conn(pkt);
             } else {
-                // TODO: send back RST
+                self.enq_rst(pkt.dst_port(), pkt.src_port());
             }
             return Ok(());
         }

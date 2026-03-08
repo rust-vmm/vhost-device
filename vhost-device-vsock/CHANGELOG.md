@@ -2,6 +2,8 @@
 ## Unreleased
 
 ### Added
+- [#943](https://github.com/rust-vmm/vhost-device/pull/943) Send RST to guest for packets not of type VSOCK_TYPE_STREAM 
+  or packets from previously unseen connections that aren't a connection request.
 
 ### Changed
 

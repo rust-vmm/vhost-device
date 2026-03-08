@@ -6,6 +6,7 @@
 ### Changed
 
 ### Fixed
+- [#943](https://github.com/rust-vmm/vhost-device/pull/943) Send RST to guest on failed connection attempts
 
 ### Deprecated
 

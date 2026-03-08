@@ -442,7 +442,7 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::UnixConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Unix(stream), pkt))
-                    .unwrap_or_else(|_| self.enq_rst());
+                    .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
             }
             #[cfg(feature = "backend_vsock")]
             BackendType::Vsock(vsock_info) => {
@@ -450,7 +450,7 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::VsockConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Vsock(stream), pkt))
-                    .unwrap_or_else(|_| self.enq_rst());
+                    .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
             }
         }
     }
@@ -496,9 +496,10 @@ impl VsockThreadBackend {
     }
 
     /// Enqueue RST packets to be sent to guest.
-    fn enq_rst(&mut self) {
-        // TODO
+    fn enq_rst(&mut self, local_port: u32, dst_port: u32) {
         log::debug!("New guest conn error: Enqueue RST");
+        self.backend_rxq
+            .push_front(ConnMapKey::new(local_port, dst_port));
     }
 
     /// Fill out RST pkt data.
@@ -594,8 +595,7 @@ mod tests {
 
         vtp.recv_pkt(&mut packet).unwrap();
 
-        // TODO: it is a nop for now
-        vtp.enq_rst();
+        vtp.enq_rst(packet.src_port(), packet.dst_port());
     }
 
     #[test]

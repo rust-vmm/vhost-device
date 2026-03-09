@@ -39,7 +39,7 @@ pub(crate) type Writer = virtio::DescriptorChainWriter<GuestMemoryLoadGuard<Gues
 pub(crate) type Reader = virtio::DescriptorChainReader<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 
 #[derive(ValueEnum, Debug, Clone, Eq, PartialEq)]
-pub(crate) enum BackendType {
+pub enum BackendType {
     #[cfg(feature = "simple-capture")]
     SimpleCapture,
     #[cfg(feature = "v4l2-proxy")]
@@ -56,7 +56,7 @@ pub const SHMEM_SIZE: u64 = 1 << 32;
 
 #[derive(Debug, ThisError)]
 /// Errors related to vhost-device-media daemon.
-pub(crate) enum VuMediaError {
+pub enum VuMediaError {
     #[error("Descriptor not found")]
     DescriptorNotFound,
     #[error("Failed to create a used descriptor")]

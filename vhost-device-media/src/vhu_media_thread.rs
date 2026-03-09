@@ -179,3 +179,146 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{os::fd::AsRawFd, sync::Arc};
+
+    use assert_matches::assert_matches;
+    use rstest::*;
+    use vhost_user_backend::VhostUserDaemon;
+    use virtio_media::poll::SessionPoller;
+    use vm_memory::GuestAddress;
+    use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+    use crate::vhu_media::test_utils::{
+        create_test_config, make_dummy_device, DummyDevice, DummyFn,
+    };
+
+    fn setup_test_memory() -> GuestMemoryAtomic<GuestMemoryMmap> {
+        GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        )
+    }
+
+    fn setup_test_vring(mem: &GuestMemoryAtomic<GuestMemoryMmap>) -> VringRwLock {
+        let vring = VringRwLock::new(mem.clone(), 0x1000).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+        vring
+    }
+
+    fn setup_test_backend_and_daemon() -> (
+        Arc<crate::vhu_media::VuMediaBackend<DummyDevice, DummyFn>>,
+        VhostUserDaemon<Arc<crate::vhu_media::VuMediaBackend<DummyDevice, DummyFn>>>,
+    ) {
+        let config = create_test_config();
+        let backend = Arc::new(
+            crate::vhu_media::VuMediaBackend::new(
+                std::path::Path::new("/dev/null"),
+                config,
+                make_dummy_device as DummyFn,
+            )
+            .unwrap(),
+        );
+        let daemon = VhostUserDaemon::new(
+            "vhost-device-media-test".to_owned(),
+            backend.clone(),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .unwrap();
+        (backend, daemon)
+    }
+
+    #[fixture]
+    fn dummy_eventfd() -> EventFd {
+        EventFd::new(0).expect("Could not create an EventFd")
+    }
+
+    #[rstest]
+    #[case::no_memory(VuMediaError::NoMemoryConfigured)]
+    #[case::missing_runner(VuMediaError::MissingRunner)]
+    fn test_error_handling(#[case] expected_error: VuMediaError) {
+        let mut thread = VhostUserMediaThread::<DummyDevice, DummyFn>::new().unwrap();
+
+        match expected_error {
+            VuMediaError::NoMemoryConfigured => {
+                // Test atomic_mem before initialization
+                assert_matches!(thread.atomic_mem(), Err(VuMediaError::NoMemoryConfigured));
+            }
+            VuMediaError::MissingRunner => {
+                // Test process_media_events before worker is set
+                assert_matches!(
+                    thread.process_media_events(0),
+                    Err(VuMediaError::MissingRunner)
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn test_queue_processing() {
+        let mem = setup_test_memory();
+        let vring = setup_test_vring(&mem);
+
+        let mut thread = VhostUserMediaThread::<DummyDevice, DummyFn>::new().unwrap();
+        thread.mem = Some(mem);
+
+        // We can't easily check the used length here without more mocking,
+        // but we can at least verify that the method runs without panicking.
+        assert!(thread.process_command_queue(&vring).is_ok());
+    }
+
+    #[test]
+    fn test_set_workers_and_missing_session_path() {
+        let (_backend, daemon) = setup_test_backend_and_daemon();
+        let mut handlers = daemon.get_epoll_handlers();
+
+        let mut thread = VhostUserMediaThread::<DummyDevice, DummyFn>::new().unwrap();
+        assert!(thread.need_media_worker());
+        thread.set_vring_workers(handlers.remove(0));
+        thread.set_media_worker(DummyDevice {});
+        assert!(!thread.need_media_worker());
+
+        assert_matches!(
+            thread.process_media_events(42),
+            Err(VuMediaError::MissingSession(42))
+        );
+    }
+
+    #[rstest]
+    #[case::session_0(0)]
+    #[case::session_7(7)]
+    #[case::session_42(42)]
+    #[case::session_100(100)]
+    fn test_media_session_add_remove_session(dummy_eventfd: EventFd, #[case] session_id: u32) {
+        let (_backend, daemon) = setup_test_backend_and_daemon();
+        let mut handlers = daemon.get_epoll_handlers();
+        let session_poller = MediaSession::new(handlers.remove(0));
+
+        // SAFETY: `borrowed` does not outlive `dummy_eventfd` in this test.
+        let borrowed = unsafe { BorrowedFd::borrow_raw(dummy_eventfd.as_raw_fd()) };
+        assert_matches!(session_poller.add_session(borrowed, session_id), Ok(()));
+        session_poller.remove_session(borrowed);
+    }
+
+    #[rstest]
+    #[case::session_0(0)]
+    #[case::session_1(1)]
+    #[case::session_99(99)]
+    fn test_process_media_events_missing_session(#[case] session_id: u32) {
+        let (_backend, daemon) = setup_test_backend_and_daemon();
+        let mut handlers = daemon.get_epoll_handlers();
+
+        let mut thread = VhostUserMediaThread::<DummyDevice, DummyFn>::new().unwrap();
+        thread.set_vring_workers(handlers.remove(0));
+        thread.set_media_worker(DummyDevice {});
+
+        assert_matches!(
+            thread.process_media_events(session_id),
+            Err(VuMediaError::MissingSession(id)) if id == session_id
+        );
+    }
+}

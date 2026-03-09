@@ -284,3 +284,166 @@ pub fn start_backend(media_config: VuMediaConfig) -> Result<()> {
         debug!("Finishing backend");
     }
 }
+
+#[cfg(test)]
+#[cfg(any(feature = "simple-capture", feature = "v4l2-proxy", feature = "ffmpeg"))]
+mod tests {
+    #[cfg(feature = "v4l2-proxy")]
+    use std::path::Path;
+
+    use rstest::*;
+    #[cfg(feature = "v4l2-proxy")]
+    use tempfile::tempdir;
+    #[cfg(any(feature = "simple-capture", feature = "ffmpeg"))]
+    use virtio_media::protocol::VirtioMediaDeviceConfig;
+
+    use super::*;
+
+    #[cfg(feature = "v4l2-proxy")]
+    #[rstest]
+    #[case("/dev/video0", V4l2DeviceType::Video)]
+    #[case("/dev/video1", V4l2DeviceType::Video)]
+    #[case("/dev/video99", V4l2DeviceType::Video)]
+    #[case("/dev/vbi0", V4l2DeviceType::Vbi)]
+    #[case("/dev/vbi1", V4l2DeviceType::Vbi)]
+    #[case("/dev/radio0", V4l2DeviceType::Radio)]
+    #[case("/dev/radio1", V4l2DeviceType::Radio)]
+    #[case("/dev/swradio0", V4l2DeviceType::Sdr)]
+    #[case("/dev/sdr0", V4l2DeviceType::Sdr)]
+    #[case("/dev/sdr1", V4l2DeviceType::Sdr)]
+    #[case("/dev/touch0", V4l2DeviceType::Touch)]
+    #[case("/dev/touch1", V4l2DeviceType::Touch)]
+    fn test_v4l2_device_type_from_path(
+        #[case] device_path: &str,
+        #[case] expected_type: V4l2DeviceType,
+    ) {
+        assert_eq!(
+            V4l2DeviceType::from_path(Path::new(device_path)) as u32,
+            expected_type as u32
+        );
+    }
+
+    #[cfg(feature = "v4l2-proxy")]
+    #[rstest]
+    #[case("/dev/unknown0")]
+    #[case("/dev/other")]
+    fn test_v4l2_device_type_from_path_unknown_defaults_to_video(#[case] device_path: &str) {
+        // Unknown device types should default to Video
+        assert_eq!(
+            V4l2DeviceType::from_path(Path::new(device_path)) as u32,
+            V4l2DeviceType::Video as u32
+        );
+    }
+
+    #[cfg(feature = "v4l2-proxy")]
+    #[rstest]
+    #[case("/")]
+    #[case("/dev/")]
+    fn test_v4l2_device_type_from_path_no_filename(#[case] device_path: &str) {
+        // Paths without a filename should default to Video
+        assert_eq!(
+            V4l2DeviceType::from_path(Path::new(device_path)) as u32,
+            V4l2DeviceType::Video as u32
+        );
+    }
+
+    #[cfg(feature = "v4l2-proxy")]
+    #[test]
+    fn test_v4l2_device_type_from_path_symlink() {
+        // Test symlink resolution by creating a temporary symlink
+        let temp_dir = tempdir().unwrap();
+        let target = temp_dir.path().join("vbi0");
+        let symlink = temp_dir.path().join("link-to-vbi0");
+
+        // Create a dummy file to symlink to
+        std::fs::File::create(&target).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &symlink).unwrap();
+
+        // On Unix, the symlink should resolve to the target (vbi0) -> Vbi
+        // On non-Unix, canonicalize fails, so it falls back to Video
+        let expected = if cfg!(unix) {
+            V4l2DeviceType::Vbi as u32
+        } else {
+            V4l2DeviceType::Video as u32
+        };
+        assert_eq!(V4l2DeviceType::from_path(&symlink) as u32, expected);
+    }
+
+    #[cfg(feature = "simple-capture")]
+    #[rstest]
+    #[case(create_simple_capture_device_config(), 13, b"simple_device")]
+    fn test_simple_capture_device_config_shape(
+        #[case] cfg: VirtioMediaDeviceConfig,
+        #[case] card_name_len: usize,
+        #[case] expected_card_prefix: &[u8],
+    ) {
+        assert_eq!(cfg.device_type, 0);
+        assert!(cfg.device_caps != 0);
+        assert_eq!(cfg.card.len(), VIRTIO_V4L2_CARD_NAME_LEN);
+        assert_eq!(&cfg.card[..card_name_len], expected_card_prefix);
+    }
+
+    #[cfg(feature = "ffmpeg")]
+    #[rstest]
+    #[case(create_ffmpeg_decoder_config(), 14, b"ffmpeg_decoder")]
+    fn test_ffmpeg_decoder_config_shape(
+        #[case] cfg: VirtioMediaDeviceConfig,
+        #[case] card_name_len: usize,
+        #[case] expected_card_prefix: &[u8],
+    ) {
+        assert_eq!(cfg.device_type, 0);
+        assert!(cfg.device_caps != 0);
+        assert_eq!(cfg.card.len(), VIRTIO_V4L2_CARD_NAME_LEN);
+        assert_eq!(&cfg.card[..card_name_len], expected_card_prefix);
+    }
+
+    /// Exercises the Display impls for `Error` variants that are never produced
+    /// by production code paths exercised in other tests.
+    #[test]
+    fn test_error_display() {
+        use std::path::PathBuf;
+
+        let e = Error::CouldNotOpenDevice(PathBuf::from("/dev/video0"), "no such file".to_string());
+        assert!(e.to_string().contains("Could not open device"));
+        assert!(e.to_string().contains("/dev/video0"));
+
+        let e = Error::CouldNotCreateBackend(VuMediaError::EventFdError);
+        assert!(e.to_string().contains("Could not create backend"));
+    }
+
+    /// Verify that start_backend with the null backend binds the socket and
+    /// keeps running without panicking.
+    #[test]
+    fn test_start_backend_null_binds_socket() {
+        use std::{thread, time::Duration};
+
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("vhost-media-null.sock");
+        let socket_path_check = socket_path.clone();
+
+        let config = VuMediaConfig {
+            socket_path,
+            v4l2_device: PathBuf::from("/dev/null"),
+            backend: BackendType::Null,
+        };
+
+        // start_backend loops; run it in a background thread.
+        let _handle = thread::spawn(move || start_backend(config));
+
+        // Poll until the daemon creates the socket file (up to 2 s).
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if socket_path_check.exists() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for null backend to bind socket"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}

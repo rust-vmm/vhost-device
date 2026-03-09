@@ -245,3 +245,172 @@ fn main() -> Result<()> {
 
     start_backend(VuMediaConfig::from(MediaArgs::parse()))
 }
+
+#[cfg(test)]
+mod tests {
+    use rstest::*;
+
+    use super::*;
+
+    #[rstest]
+    #[cfg_attr(
+        feature = "simple-capture",
+        case::simple_capture("simple-capture", BackendType::SimpleCapture)
+    )]
+    #[cfg_attr(
+        feature = "v4l2-proxy",
+        case::v4l2_proxy("v4l2-proxy", BackendType::V4l2Proxy)
+    )]
+    #[cfg_attr(
+        feature = "ffmpeg",
+        case::ffmpeg_decoder("ffmpeg-decoder", BackendType::FfmpegDecoder)
+    )]
+    fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
+        let args = MediaArgs::try_parse_from([
+            "vhost-device-media",
+            "--socket-path",
+            "/tmp/vmedia.sock",
+            "--backend",
+            backend_name,
+        ])
+        .unwrap();
+
+        assert_eq!(args.backend, backend);
+    }
+
+    #[rstest]
+    #[cfg_attr(
+        feature = "simple-capture",
+        case::simple_capture(
+            "simple-capture",
+            BackendType::SimpleCapture,
+            "/tmp/vmedia.sock",
+            "/dev/video7"
+        )
+    )]
+    #[cfg_attr(
+        feature = "v4l2-proxy",
+        case::v4l2_proxy_alt(
+            "v4l2-proxy",
+            BackendType::V4l2Proxy,
+            "/tmp/other.sock",
+            "/dev/video0"
+        )
+    )]
+    #[cfg_attr(
+        feature = "ffmpeg",
+        case::ffmpeg_decoder(
+            "ffmpeg-decoder",
+            BackendType::FfmpegDecoder,
+            "/tmp/ffmpeg.sock",
+            "/dev/video3"
+        )
+    )]
+    fn test_media_args_parse_explicit_values(
+        #[case] backend_name: &str,
+        #[case] expected_backend: BackendType,
+        #[case] socket: &str,
+        #[case] device: &str,
+    ) {
+        let args = MediaArgs::try_parse_from([
+            "vhost-device-media",
+            "--socket-path",
+            socket,
+            "--v4l2-device",
+            device,
+            "--backend",
+            backend_name,
+        ])
+        .unwrap();
+
+        assert_eq!(args.socket_path, PathBuf::from(socket));
+        assert_eq!(args.v4l2_device, PathBuf::from(device));
+        assert_eq!(args.backend, expected_backend);
+    }
+
+    #[test]
+    fn test_media_args_parse_defaults() {
+        let res = MediaArgs::try_parse_from([
+            "vhost-device-media",
+            "--socket-path",
+            "/tmp/vmedia-default.sock",
+        ]);
+
+        #[cfg(feature = "simple-capture")]
+        {
+            let args = res.unwrap();
+            assert_eq!(args.socket_path, PathBuf::from("/tmp/vmedia-default.sock"));
+            assert_eq!(args.v4l2_device, PathBuf::from("/dev/video0"));
+            // Default CLI backend is simple-capture.
+            assert_eq!(args.backend, BackendType::SimpleCapture);
+        }
+
+        #[cfg(not(feature = "simple-capture"))]
+        {
+            // If simple-capture is compiled out, the hardcoded default backend
+            // becomes invalid and clap should reject parsing.
+            assert!(res.is_err());
+        }
+    }
+
+    #[test]
+    fn test_media_args_parse_missing_socket_fails() {
+        let res = MediaArgs::try_parse_from(["vhost-device-media"]);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_media_args_parse_invalid_backend_fails() {
+        let res = MediaArgs::try_parse_from([
+            "vhost-device-media",
+            "--socket-path",
+            "/tmp/vmedia-invalid.sock",
+            "--backend",
+            "not-a-backend",
+        ]);
+        assert!(res.is_err());
+    }
+
+    #[cfg(feature = "simple-capture")]
+    #[rstest]
+    #[case(create_simple_capture_device_config(), 13, b"simple_device")]
+    fn test_simple_capture_device_config_shape(
+        #[case] cfg: VirtioMediaDeviceConfig,
+        #[case] card_name_len: usize,
+        #[case] expected_card_prefix: &[u8],
+    ) {
+        assert_eq!(cfg.device_type, 0);
+        assert!(cfg.device_caps != 0);
+        assert_eq!(cfg.card.len(), VIRTIO_V4L2_CARD_NAME_LEN);
+        assert_eq!(&cfg.card[..card_name_len], expected_card_prefix);
+    }
+
+    #[cfg(feature = "ffmpeg")]
+    #[rstest]
+    #[case(create_ffmpeg_decoder_config(), 14, b"ffmpeg_decoder")]
+    fn test_ffmpeg_decoder_config_shape(
+        #[case] cfg: VirtioMediaDeviceConfig,
+        #[case] card_name_len: usize,
+        #[case] expected_card_prefix: &[u8],
+    ) {
+        assert_eq!(cfg.device_type, 0);
+        assert!(cfg.device_caps != 0);
+        assert_eq!(cfg.card.len(), VIRTIO_V4L2_CARD_NAME_LEN);
+        assert_eq!(&cfg.card[..card_name_len], expected_card_prefix);
+    }
+
+    #[test]
+    #[cfg(feature = "simple-capture")]
+    fn test_from_media_args_for_vu_media_config() {
+        let args = MediaArgs {
+            socket_path: PathBuf::from("/tmp/a.sock"),
+            v4l2_device: PathBuf::from("/dev/video99"),
+            backend: BackendType::SimpleCapture,
+        };
+
+        let config = VuMediaConfig::from(args.clone());
+        assert_eq!(config.socket_path, args.socket_path);
+        assert_eq!(config.v4l2_device, args.v4l2_device);
+        assert_eq!(config.backend, args.backend);
+    }
+}

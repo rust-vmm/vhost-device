@@ -238,3 +238,96 @@ impl VirtioMediaGuestMemoryMapper for VuMemoryMapper {
         GuestMemoryMapping::new(&self.0, sgs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use vm_memory::{Bytes, GuestAddress};
+
+    use super::*;
+
+    fn sg(start: u64, len: u32) -> SgEntry {
+        // SAFETY: SgEntry is a plain C repr POD; we initialize required public
+        // fields and leave the private padding zeroed.
+        let mut entry: SgEntry = unsafe { std::mem::zeroed() };
+        entry.start = start;
+        entry.len = len;
+        entry
+    }
+
+    fn test_mem() -> GuestMemoryAtomic<GuestMemoryMmap> {
+        GuestMemoryAtomic::new(GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x4000)]).unwrap())
+    }
+
+    #[test]
+    fn test_guest_memory_mapping_new_reads_from_guest() {
+        let mem = test_mem();
+        mem.memory()
+            .write_slice(&[1, 2, 3, 4], GuestAddress(0x100))
+            .unwrap();
+        mem.memory()
+            .write_slice(&[9, 8, 7], GuestAddress(0x200))
+            .unwrap();
+
+        let sgs = vec![sg(0x100, 4), sg(0x200, 3)];
+
+        let mapping = GuestMemoryMapping::new(&mem, sgs).unwrap();
+        assert_eq!(mapping.data, vec![1, 2, 3, 4, 9, 8, 7]);
+        assert!(!mapping.dirty);
+    }
+
+    #[test]
+    fn test_guest_memory_mapping_drop_writes_back_when_dirty() {
+        let mem = test_mem();
+        mem.memory()
+            .write_slice(&[10, 11, 12, 13], GuestAddress(0x300))
+            .unwrap();
+
+        let sgs = vec![sg(0x300, 4)];
+
+        {
+            let mut mapping = GuestMemoryMapping::new(&mem, sgs).unwrap();
+            let _ = mapping.as_mut_ptr(); // mark dirty
+            mapping.data.copy_from_slice(&[42, 43, 44, 45]);
+        } // Drop writes back
+
+        let mut out = [0u8; 4];
+        mem.memory()
+            .read_slice(&mut out, GuestAddress(0x300))
+            .unwrap();
+        assert_eq!(out, [42, 43, 44, 45]);
+    }
+
+    #[test]
+    fn test_guest_memory_mapping_drop_no_write_when_clean() {
+        let mem = test_mem();
+        mem.memory()
+            .write_slice(&[21, 22, 23, 24], GuestAddress(0x380))
+            .unwrap();
+
+        let sgs = vec![sg(0x380, 4)];
+
+        {
+            let _mapping = GuestMemoryMapping::new(&mem, sgs).unwrap();
+            // not marked dirty
+        }
+
+        let mut out = [0u8; 4];
+        mem.memory()
+            .read_slice(&mut out, GuestAddress(0x380))
+            .unwrap();
+        assert_eq!(out, [21, 22, 23, 24]);
+    }
+
+    #[test]
+    fn test_vu_memory_mapper_new_mapping() {
+        let mem = test_mem();
+        mem.memory()
+            .write_slice(&[5, 6, 7], GuestAddress(0x120))
+            .unwrap();
+
+        let mapper = VuMemoryMapper::new(mem.clone());
+        let mapping = mapper.new_mapping(vec![sg(0x120, 3)]).unwrap();
+
+        assert_eq!(mapping.data, vec![5, 6, 7]);
+    }
+}

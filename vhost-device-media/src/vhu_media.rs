@@ -285,3 +285,378 @@ where
         Ok(VhostUserShMemConfig::new(1, &[SHMEM_SIZE]))
     }
 }
+
+// Shared test utilities for use across test modules
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use std::os::fd::BorrowedFd;
+
+    use virtio_media::{protocol::V4l2Ioctl, VirtioMediaDevice, VirtioMediaDeviceSession};
+
+    use super::*;
+
+    pub struct DummySession {}
+
+    impl VirtioMediaDeviceSession for DummySession {
+        fn poll_fd(&self) -> Option<BorrowedFd<'_>> {
+            None
+        }
+    }
+
+    pub struct DummyDevice {}
+
+    impl VirtioMediaDevice<Reader, Writer> for DummyDevice {
+        type Session = DummySession;
+
+        fn new_session(&mut self, _id: u32) -> std::result::Result<Self::Session, i32> {
+            Ok(DummySession {})
+        }
+
+        fn close_session(&mut self, _session: Self::Session) {}
+
+        fn do_ioctl(
+            &mut self,
+            _session: &mut Self::Session,
+            _ioctl: V4l2Ioctl,
+            _reader: &mut Reader,
+            _writer: &mut Writer,
+        ) -> std::result::Result<(), std::io::Error> {
+            Ok(())
+        }
+
+        fn do_mmap(
+            &mut self,
+            _session: &mut Self::Session,
+            _len: u32,
+            _prot: u32,
+        ) -> std::result::Result<(u64, u64), i32> {
+            Ok((0, 0))
+        }
+
+        fn do_munmap(&mut self, _offset: u64) -> std::result::Result<(), i32> {
+            Ok(())
+        }
+    }
+
+    pub type DummyFn = fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>;
+
+    pub fn make_dummy_device(
+        _: EventQueue,
+        _: VuMemoryMapper,
+        _: VuBackend,
+    ) -> MediaResult<DummyDevice> {
+        Ok(DummyDevice {})
+    }
+
+    pub fn create_test_config() -> VirtioMediaDeviceConfig {
+        VirtioMediaDeviceConfig {
+            device_caps: 0,
+            device_type: 0,
+            card: [0; 32],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{path::Path, sync::Arc};
+
+    use rstest::*;
+    use vhost_user_backend::{VhostUserDaemon, VringT};
+    use vm_memory::GuestAddress;
+
+    use super::{
+        test_utils::{create_test_config, make_dummy_device, DummyDevice},
+        *,
+    };
+
+    #[allow(clippy::type_complexity)]
+    fn create_test_backend() -> VuMediaBackend<
+        DummyDevice,
+        fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>,
+    > {
+        let config = create_test_config();
+        VuMediaBackend::new(
+            Path::new("/dev/null"),
+            config,
+            make_dummy_device
+                as fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>,
+        )
+        .unwrap()
+    }
+
+    fn setup_test_memory() -> GuestMemoryAtomic<GuestMemoryMmap> {
+        GuestMemoryAtomic::new(
+            GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
+        )
+    }
+
+    #[allow(dead_code)] // Useful helper for future tests
+    fn setup_test_vring(mem: &GuestMemoryAtomic<GuestMemoryMmap>, queue_size: u16) -> VringRwLock {
+        let vring = VringRwLock::new(mem.clone(), queue_size).unwrap();
+        vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring.set_queue_ready(true);
+        vring
+    }
+
+    fn setup_test_vrings(mem: &GuestMemoryAtomic<GuestMemoryMmap>) -> [VringRwLock; 2] {
+        let vring0 = VringRwLock::new(mem.clone(), 0x1000).unwrap();
+        vring0.set_queue_info(0x100, 0x200, 0x300).unwrap();
+        vring0.set_queue_ready(true);
+
+        let vring1 = VringRwLock::new(mem.clone(), 0x2000).unwrap();
+        vring1.set_queue_info(0x1100, 0x1200, 0x1300).unwrap();
+        vring1.set_queue_ready(true);
+
+        [vring0, vring1]
+    }
+
+    #[test]
+    fn test_backend_creation_and_features() {
+        let backend = create_test_backend();
+
+        assert_eq!(backend.num_queues(), NUM_QUEUES);
+        assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
+        assert_ne!(backend.features(), 0);
+        assert!(!backend.protocol_features().is_empty());
+    }
+
+    #[rstest]
+    #[case(0x12345678u32, 0, 8, 0x12345678u64)]
+    #[case(0x00000000u32, 0, 8, 0x00000000u64)]
+    #[case(0xFFFFFFFFu32, 0, 8, 0xFFFFFFFFu64)]
+    fn test_get_config(
+        #[case] device_caps: u32,
+        #[case] offset: u32,
+        #[case] size: u32,
+        #[case] expected: u64,
+    ) {
+        let mut config = create_test_config();
+        config.device_caps = device_caps;
+        let backend =
+            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device).unwrap();
+
+        let config_bytes = backend.get_config(offset, size);
+        assert_eq!(config_bytes.len(), size as usize);
+        let mut bytes_array = [0u8; 8];
+        bytes_array[..config_bytes.len()].copy_from_slice(&config_bytes);
+        let val = u64::from_le_bytes(bytes_array);
+        assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn test_get_config_partial_read() {
+        let mut config = create_test_config();
+        config.device_caps = 0xDEADBEEF;
+        let backend =
+            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device).unwrap();
+
+        // Test reading 4 bytes
+        let config_bytes = backend.get_config(0, 4);
+        assert_eq!(config_bytes.len(), 4);
+        let val = u32::from_le_bytes(config_bytes.try_into().unwrap());
+        assert_eq!(val, 0xDEADBEEF);
+    }
+
+    #[test]
+    fn test_get_config_out_of_bounds() {
+        let mut config = create_test_config();
+        config.device_caps = 0x12345678;
+        let backend =
+            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device).unwrap();
+
+        // Test reading out of bounds
+        let config_bytes = backend.get_config(1024, 8);
+        assert_eq!(config_bytes.len(), 0);
+    }
+
+    #[test]
+    fn test_exit_event() {
+        let backend = create_test_backend();
+
+        let exit_event = backend.exit_event(0);
+        assert!(exit_event.is_some());
+        let (consumer, notifier) = exit_event.unwrap();
+        notifier.notify().unwrap();
+        consumer.try_clone().unwrap();
+    }
+
+    #[test]
+    fn test_handle_event() {
+        let backend = create_test_backend();
+        let mem = setup_test_memory();
+        let vrings = setup_test_vrings(&mem);
+
+        backend.update_memory(mem).unwrap();
+
+        // Test a non-IN event
+        assert!(backend
+            .handle_event(COMMAND_Q, EventSet::OUT, &vrings, 0)
+            .is_err());
+
+        // TODO: We intentionally do not test the IN-path here because it
+        // requires a fully initialized backend request fd and worker
+        // setup.
+    }
+
+    /// Creates an Arc-wrapped backend with epoll handlers registered and a
+    /// DummyDevice media worker pre-installed on thread 0, so that
+    /// `handle_event` skips the worker-setup path entirely.
+    #[allow(clippy::type_complexity)]
+    fn create_ready_backend() -> (
+        Arc<
+            VuMediaBackend<
+                DummyDevice,
+                fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>,
+            >,
+        >,
+        GuestMemoryAtomic<GuestMemoryMmap>,
+        [VringRwLock; 2],
+    ) {
+        type Fn = fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>;
+        let config = create_test_config();
+        let backend = Arc::new(
+            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device as Fn).unwrap(),
+        );
+        let daemon = VhostUserDaemon::new(
+            "test".to_owned(),
+            backend.clone(),
+            GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+        )
+        .unwrap();
+        backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+
+        let mem = setup_test_memory();
+        let vrings = setup_test_vrings(&mem);
+        backend.update_memory(mem.clone()).unwrap();
+        backend.threads[0]
+            .lock()
+            .unwrap()
+            .set_media_worker(DummyDevice {});
+
+        (backend, mem, vrings)
+    }
+
+    /// Exercises the EVENT_Q match arm of `handle_event` (just logs a warning).
+    #[test]
+    fn test_handle_event_event_q_succeeds() {
+        let (backend, _mem, vrings) = create_ready_backend();
+        backend
+            .handle_event(EVENT_Q, EventSet::IN, &vrings, 0)
+            .unwrap();
+    }
+
+    /// Exercises the COMMAND_Q match arm when a media worker is already set up.
+    #[test]
+    fn test_handle_event_command_q_with_ready_worker() {
+        let (backend, _mem, vrings) = create_ready_backend();
+        backend
+            .handle_event(COMMAND_Q, EventSet::IN, &vrings, 0)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_vu_media_error_to_io_error() {
+        let err = VuMediaError::DescriptorNotFound;
+        let io_err: io::Error = err.into();
+        assert_eq!(io_err.kind(), io::ErrorKind::Other);
+        assert!(io_err.to_string().contains("Descriptor not found"));
+
+        let err = VuMediaError::MissingSession(42);
+        let io_err: io::Error = err.into();
+        assert!(io_err.to_string().contains("42"));
+
+        let err = VuMediaError::ProcessSessionEvent(7, -1);
+        let io_err: io::Error = err.into();
+        assert!(io_err.to_string().contains("7"));
+    }
+
+    #[test]
+    fn test_vu_media_error_display() {
+        assert_eq!(
+            VuMediaError::DescriptorNotFound.to_string(),
+            "Descriptor not found"
+        );
+        assert_eq!(
+            VuMediaError::AddUsedDescriptorFailed.to_string(),
+            "Failed to create a used descriptor"
+        );
+        assert_eq!(
+            VuMediaError::SendNotificationFailed.to_string(),
+            "Notification send failed"
+        );
+        assert_eq!(
+            VuMediaError::EventFdError.to_string(),
+            "Can't create eventFd"
+        );
+        assert_eq!(
+            VuMediaError::MemoryAllocatorFailed.to_string(),
+            "Memory allocator failed"
+        );
+        assert_eq!(
+            VuMediaError::HandleEventNotEpollIn.to_string(),
+            "Failed to handle event"
+        );
+        assert_eq!(
+            VuMediaError::NoMemoryConfigured.to_string(),
+            "No memory configured"
+        );
+        assert_eq!(
+            VuMediaError::MissingRunner.to_string(),
+            "Media Device Runner not initialised"
+        );
+        assert_eq!(
+            VuMediaError::NoRequestChannel.to_string(),
+            "No vhost-user request channel available"
+        );
+        assert_eq!(
+            VuMediaError::MissingSession(99).to_string(),
+            "Received event for non-registered session: 99"
+        );
+        assert_eq!(
+            VuMediaError::ProcessSessionEvent(3, -5).to_string(),
+            "Error while processing events for session 3: -5"
+        );
+    }
+
+    #[test]
+    fn test_get_shmem_config() {
+        let backend = create_test_backend();
+        let shmem = backend.get_shmem_config().unwrap();
+        assert_eq!(shmem.nregions, 1);
+        assert_eq!(shmem.memory_sizes[0], SHMEM_SIZE);
+    }
+
+    #[test]
+    fn test_set_event_idx() {
+        let backend = create_test_backend();
+
+        backend.set_event_idx(true);
+        assert!(backend.threads[0].lock().unwrap().event_idx);
+
+        backend.set_event_idx(false);
+        assert!(!backend.threads[0].lock().unwrap().event_idx);
+    }
+
+    #[test]
+    fn test_set_backend_req_fd() {
+        use std::os::unix::net::UnixStream;
+
+        use vhost::vhost_user::Backend;
+        let backend = create_test_backend();
+        let (sock, _peer) = UnixStream::pair().unwrap();
+        let req = Backend::from_stream(sock);
+        backend.set_backend_req_fd(req);
+        // Verify vu_req is now set on the thread
+        assert!(backend.threads[0].lock().unwrap().vu_req.is_some());
+    }
+
+    #[test]
+    fn test_update_memory() {
+        let backend = create_test_backend();
+        let mem = setup_test_memory();
+
+        backend.update_memory(mem).unwrap();
+        assert!(backend.threads[0].lock().unwrap().mem.is_some());
+    }
+}

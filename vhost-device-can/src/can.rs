@@ -50,10 +50,35 @@ pub(crate) enum Error {
 }
 
 #[derive(Debug)]
+pub(crate) enum CanSocketKind {
+    Fd(CanFdSocket),
+    #[cfg(test)]
+    Mock,
+}
+
+impl CanSocketKind {
+    pub fn write_frame(&self, frame: &CanAnyFrame) -> std::io::Result<()> {
+        match self {
+            CanSocketKind::Fd(socket) => socket.write_frame(frame),
+            #[cfg(test)]
+            CanSocketKind::Mock => Ok(()),
+        }
+    }
+
+    pub fn read_frame(&self) -> std::io::Result<CanAnyFrame> {
+        match self {
+            CanSocketKind::Fd(socket) => socket.read_frame(),
+            #[cfg(test)]
+            CanSocketKind::Mock => Err(std::io::ErrorKind::WouldBlock.into()),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct CanController {
     pub config: VirtioCanConfig,
     pub can_name: String,
-    pub can_socket: CanFdSocket,
+    pub can_socket: CanSocketKind,
     pub rx_event_fd: EventFd,
     rx_fifo: Queue<VirtioCanFrame>,
     pub status: bool,
@@ -84,7 +109,23 @@ impl CanController {
         Ok(CanController {
             config: VirtioCanConfig { status: 0x0.into() },
             can_name,
-            can_socket: socket,
+            can_socket: CanSocketKind::Fd(socket),
+            rx_event_fd: rx_efd,
+            rx_fifo,
+            status: true,
+            ctrl_state: CAN_CS_STOPPED,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_mock(can_name: String) -> Result<CanController> {
+        let rx_fifo = Queue::new();
+        let rx_efd = EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?;
+
+        Ok(CanController {
+            config: VirtioCanConfig { status: 0x0.into() },
+            can_name,
+            can_socket: CanSocketKind::Mock,
             rx_event_fd: rx_efd,
             rx_fifo,
             status: true,
@@ -279,14 +320,14 @@ mod tests {
     fn test_can_controller_creation() {
         let can_name = "can0".to_string();
 
-        let controller = CanController::new(can_name.clone()).unwrap();
+        let controller = CanController::new_mock(can_name.clone()).unwrap();
         assert_eq!(controller.can_name, can_name);
     }
 
     #[test]
     fn test_can_controller_push_and_pop() {
         let can_name = "can0".to_string();
-        let mut controller = CanController::new(can_name.clone()).unwrap();
+        let mut controller = CanController::new_mock(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_RX.into(),
@@ -308,7 +349,7 @@ mod tests {
     #[test]
     fn test_can_controller_config() {
         let can_name = "can0".to_string();
-        let mut controller = CanController::new(can_name.clone()).unwrap();
+        let mut controller = CanController::new_mock(can_name.clone()).unwrap();
 
         // Test config
         let config = controller.config();
@@ -318,7 +359,7 @@ mod tests {
     #[test]
     fn test_can_controller_operation() {
         let can_name = "can0".to_string();
-        let controller = CanController::new(can_name.clone()).unwrap();
+        let controller = CanController::new_mock(can_name.clone()).unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_RX.into(),
@@ -337,7 +378,7 @@ mod tests {
     #[test]
     fn test_can_controller_start_read_thread() {
         let can_name = "can0".to_string();
-        let controller = CanController::new(can_name.clone()).unwrap();
+        let controller = CanController::new_mock(can_name.clone()).unwrap();
         let arc_controller = Arc::new(RwLock::new(controller));
 
         // Test start_read_thread

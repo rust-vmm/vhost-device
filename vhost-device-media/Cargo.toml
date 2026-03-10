@@ -1,0 +1,48 @@
+[package]
+name = "vhost-device-media"
+version = "0.1.0"
+authors = ["Albert Esteve <aesteve@redhat.com>"]
+description = "A virtio-media device using the vhost-user protocol."
+repository = "https://github.com/rust-vmm/vhost-device"
+keywords = ["vhost", "media", "virt", "backend"]
+license = "Apache-2.0 OR BSD-3-Clause"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["v4l2-proxy"]
+v4l2-proxy = ["v4l2r"]
+ffmpeg = ["v4l2r", "virtio-media-ffmpeg-decoder"]
+simple-capture = ["v4l2r"]
+
+[dependencies]
+bitflags = "2.6.0"
+clap = { version = "4.5.20",  features = ["derive"] }
+env_logger = "0.11.5"
+epoll = "4.3.3"
+num_enum = "0.7.3"
+log = "0.4.22"
+libc = "0.2.162"
+thiserror = "2.0.3"
+anyhow = "1.0.93"
+futures-executor = { version = "0.3.31", features = ["thread-pool"] }
+vhost = { git = "https://github.com/rust-vmm/vhost", branch = "main", features = ["vhost-user-backend"] }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost", branch = "main"}
+virtio-bindings = "0.2.5"
+virtio-queue = "0.17.0"
+vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }
+vmm-sys-util = "0.15.0"
+ref-cast = "1.0.23"
+virtio-media = { git = "https://github.com/chromeos/virtio-media", rev = "c6cc93a"}
+virtio-media-ffmpeg-decoder = { git = "https://github.com/chromeos/virtio-media/", package = "virtio-media-ffmpeg-decoder", rev = "c6cc93a", optional = true}
+v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "7b44138", optional = true }
+zerocopy = { version = "0.8.27", features = ["derive"] }
+
+[dev-dependencies]
+assert_matches = "1.5.0"
+rstest = "0.26.1"
+tempfile = "3.14.0"
+virtio-queue = { version = "0.17.0", features = ["test-utils"] }
+vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }
+zerocopy = { version = "0.8.27", features = ["derive"] }

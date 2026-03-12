@@ -2176,6 +2176,7 @@ dependencies = [
  "rutabaga_gfx",
  "tempfile",
  "thiserror 2.0.18",
+ "uuid",
  "vhost",
  "vhost-user-backend",
  "virglrenderer",

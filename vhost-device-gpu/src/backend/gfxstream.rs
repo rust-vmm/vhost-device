@@ -17,6 +17,7 @@ use rutabaga_gfx::{
     ResourceCreate3D, Rutabaga, RutabagaBuilder, RutabagaComponentType, RutabagaFence,
     RutabagaFenceHandler, RutabagaHandle, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
 };
+use uuid::Uuid;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuEdidRequest, VhostUserGpuScanout, VhostUserGpuUpdate,
@@ -51,7 +52,7 @@ use crate::{
 const READ_RESOURCE_BYTES_PER_PIXEL: u32 = 4;
 
 // A local resource struct for the Gfxstream backend
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct GfxstreamResource {
     pub id: u32,
     pub width: u32,
@@ -59,6 +60,7 @@ pub struct GfxstreamResource {
     scanouts: common::AssociatedScanouts,
     pub info_3d: Option<rutabaga_gfx::Resource3DInfo>,
     pub handle: Option<Arc<RutabagaHandle>>,
+    pub uuid: Uuid,
 }
 
 impl GfxstreamResource {
@@ -85,6 +87,7 @@ impl GfxstreamResource {
             scanouts: AssociatedScanouts::default(),
             info_3d: None,
             handle: None,
+            uuid: Uuid::new_v4(),
         }
     }
 }
@@ -285,6 +288,7 @@ impl Renderer for GfxstreamAdapter {
             scanouts: AssociatedScanouts::default(),
             info_3d: None,
             handle: None,
+            uuid: Uuid::new_v4(),
         };
         debug_assert!(
             !self.resources.contains_key(&resource_id),
@@ -425,9 +429,15 @@ impl Renderer for GfxstreamAdapter {
             })
     }
 
-    fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
-        error!("Not implemented: resource_assign_uuid");
-        Err(ErrUnspec)
+    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
+        debug!("resource_assign_uuid for resource {}", resource_id);
+        let resource = self
+            .resources
+            .get(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+        Ok(GpuResponse::OkResourceUuid {
+            uuid: *resource.uuid.as_bytes(),
+        })
     }
 
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
@@ -1124,7 +1134,10 @@ mod gfx_fence_tests {
             id: 1,
             width: 64,
             height: 64,
-            ..Default::default()
+            scanouts: common::AssociatedScanouts::default(),
+            info_3d: None,
+            handle: None,
+            uuid: Uuid::new_v4(),
         };
         // 64 * 64 * 4 BPP = 16384
         assert_eq!(
@@ -1140,7 +1153,10 @@ mod gfx_fence_tests {
             id: 1,
             width: u32::MAX,
             height: u32::MAX,
-            ..Default::default()
+            scanouts: common::AssociatedScanouts::default(),
+            info_3d: None,
+            handle: None,
+            uuid: Uuid::new_v4(),
         };
         r.calculate_size().unwrap_err();
     }
@@ -1153,7 +1169,10 @@ mod gfx_fence_tests {
             id: 1,
             width: big as u32,
             height: 1,
-            ..Default::default()
+            scanouts: common::AssociatedScanouts::default(),
+            info_3d: None,
+            handle: None,
+            uuid: Uuid::new_v4(),
         };
         // On 64-bit this should error; if it happens to fit on 32-bit, the guard still
         // holds elsewhere.

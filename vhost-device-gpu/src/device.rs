@@ -62,7 +62,7 @@ use virtio_bindings::{
     },
     virtio_gpu::{
         VIRTIO_GPU_F_CONTEXT_INIT, VIRTIO_GPU_F_EDID, VIRTIO_GPU_F_RESOURCE_BLOB,
-        VIRTIO_GPU_F_VIRGL,
+        VIRTIO_GPU_F_RESOURCE_UUID, VIRTIO_GPU_F_VIRGL,
     },
 };
 use virtio_queue::{QueueOwnedT, Reader, Writer};
@@ -231,8 +231,8 @@ impl VhostUserGpuBackendInner {
             }
             GpuCommand::UpdateCursor(req) => Self::handle_update_cursor(renderer, req),
             GpuCommand::MoveCursor(req) => Self::handle_move_cursor(renderer, req),
-            GpuCommand::ResourceAssignUuid(_) => {
-                panic!("virtio_gpu: GpuCommand::ResourceAssignUuid unimplemented")
+            GpuCommand::ResourceAssignUuid(req) => {
+                renderer.resource_assign_uuid(req.resource_id.into())
             }
             GpuCommand::GetCapsetInfo(req) => renderer.get_capset_info(req.capset_index.into()),
             GpuCommand::GetCapset(req) => {
@@ -700,6 +700,7 @@ impl VhostUserBackend for VhostUserGpuBackend {
             | (1 << VIRTIO_RING_F_EVENT_IDX)
             | (1 << VIRTIO_GPU_F_VIRGL)
             | (1 << VIRTIO_GPU_F_RESOURCE_BLOB)
+            | (1 << VIRTIO_GPU_F_RESOURCE_UUID)
             | (1 << VIRTIO_GPU_F_CONTEXT_INIT)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
@@ -805,22 +806,24 @@ mod tests {
 
     use super::*;
     use crate::{
+        backend::virgl::VirglRendererAdapter,
         gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
         protocol::{
             virtio_gpu_ctrl_hdr, virtio_gpu_ctx_create, virtio_gpu_ctx_destroy,
             virtio_gpu_ctx_resource, virtio_gpu_get_capset, virtio_gpu_get_capset_info,
-            virtio_gpu_mem_entry, virtio_gpu_rect, virtio_gpu_resource_attach_backing,
+            virtio_gpu_mem_entry, virtio_gpu_rect, virtio_gpu_resource_assign_uuid,
+            virtio_gpu_resource_attach_backing, virtio_gpu_resource_create_2d,
             virtio_gpu_resource_detach_backing, virtio_gpu_resource_flush,
             virtio_gpu_resource_unref, virtio_gpu_set_scanout,
-            GpuResponse::{OkCapset, OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
-            VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE, VIRTIO_GPU_CMD_CTX_CREATE,
-            VIRTIO_GPU_CMD_CTX_DESTROY, VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE,
-            VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING, VIRTIO_GPU_CMD_RESOURCE_CREATE_2D,
-            VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING, VIRTIO_GPU_CMD_RESOURCE_FLUSH,
-            VIRTIO_GPU_CMD_SET_SCANOUT, VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D,
-            VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D,
-            VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM, VIRTIO_GPU_RESP_ERR_UNSPEC,
-            VIRTIO_GPU_RESP_OK_NODATA,
+            GpuResponse::{self, OkCapset, OkCapsetInfo, OkDisplayInfo, OkEdid, OkNoData},
+            VIRTIO_GPU_BIND_RENDER_TARGET, VIRTIO_GPU_CMD_CTX_ATTACH_RESOURCE,
+            VIRTIO_GPU_CMD_CTX_CREATE, VIRTIO_GPU_CMD_CTX_DESTROY,
+            VIRTIO_GPU_CMD_CTX_DETACH_RESOURCE, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING,
+            VIRTIO_GPU_CMD_RESOURCE_CREATE_2D, VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING,
+            VIRTIO_GPU_CMD_RESOURCE_FLUSH, VIRTIO_GPU_CMD_SET_SCANOUT,
+            VIRTIO_GPU_CMD_TRANSFER_FROM_HOST_3D, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D,
+            VIRTIO_GPU_CMD_TRANSFER_TO_HOST_3D, VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
+            VIRTIO_GPU_RESP_ERR_UNSPEC, VIRTIO_GPU_RESP_OK_NODATA, VIRTIO_GPU_TEXTURE_2D,
         },
         renderer::Renderer,
         testutils::{create_vring, TestingDescChainArgs},
@@ -1114,6 +1117,16 @@ mod tests {
                 .return_once(|_, _, _| Ok(OkNoData));
         });
         assert_matches!(result, Ok(OkNoData));
+
+        let cmd = GpuCommand::ResourceAssignUuid(virtio_gpu_resource_assign_uuid::default());
+        let result = test_cmd(cmd, |g| {
+            g.expect_resource_assign_uuid().return_once(|_| {
+                Ok(GpuResponse::OkResourceUuid {
+                    uuid: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+                })
+            });
+        });
+        assert_matches!(result, Ok(GpuResponse::OkResourceUuid { .. }));
     }
 
     fn create_control_vring(
@@ -1421,6 +1434,43 @@ mod tests {
         assert_eq!(backend.features() & (1 << VIRTIO_GPU_F_EDID), 0);
     }
 
+    #[cfg(feature = "backend-virgl")]
+    #[test]
+    fn test_resource_uuid_assignment() {
+        let (_, mem) = init();
+        let config = GpuConfigBuilder::default()
+            .set_gpu_mode(GpuMode::VirglRenderer)
+            .set_capset(GpuCapset::VIRGL)
+            .set_flags(GpuFlags::default())
+            .build()
+            .unwrap();
+
+        let (control_vring, _, _) = create_control_vring(&mem, &[]);
+        let mut adapter = VirglRendererAdapter::new(&control_vring, &config, None).unwrap();
+
+        let resource_id = 42;
+        let create_req = ResourceCreate3d {
+            target: VIRTIO_GPU_TEXTURE_2D,
+            format: VIRTIO_GPU_FORMAT_R8G8B8A8_UNORM,
+            bind: VIRTIO_GPU_BIND_RENDER_TARGET,
+            width: 1024,
+            height: 768,
+            depth: 1,
+            array_size: 0,
+            last_level: 0,
+            nr_samples: 0,
+            flags: 0,
+        };
+        adapter.resource_create_3d(resource_id, create_req).unwrap();
+
+        let uuid = match adapter.resource_assign_uuid(resource_id).unwrap() {
+            GpuResponse::OkResourceUuid { uuid } => uuid,
+            other => panic!("Expected OkResourceUuid, got {:?}", other),
+        };
+
+        assert_ne!(uuid, [0u8; 16], "UUID should not be all zeros");
+    }
+
     rusty_fork_test! {
         #[test]
         fn test_verify_backend() {
@@ -1433,7 +1483,7 @@ mod tests {
 
             assert_eq!(backend.num_queues(), NUM_QUEUES);
             assert_eq!(backend.max_queue_size(), QUEUE_SIZE);
-            assert_eq!(backend.features(), 0x0101_7100_001B);
+            assert_eq!(backend.features(), 0x0101_7100_001F);
             assert_eq!(
                 backend.protocol_features(),
                 VhostUserProtocolFeatures::CONFIG | VhostUserProtocolFeatures::MQ

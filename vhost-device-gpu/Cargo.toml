@@ -36,6 +36,7 @@ virtio-queue = "0.17.0"
 vm-memory = "0.17.1"
 vmm-sys-util = "0.15.0"
 bitflags = "2.11.0"
+uuid = { version = "1.19", features = ["v4"] }
 
 [dev-dependencies]
 assert_matches = "1.5"

@@ -118,8 +118,8 @@ impl Renderer for NullAdapter {
     }
 
     fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
-        trace!("NullAdapter::resource_assign_uuid - no-op");
-        Ok(GpuResponse::OkNoData)
+        trace!("NullAdapter::resource_assign_uuid - returning zero UUID");
+        Ok(GpuResponse::OkResourceUuid { uuid: [0u8; 16] })
     }
 
     fn get_capset_info(&self, _capset_index: u32) -> VirtioGpuResult {
@@ -452,9 +452,14 @@ mod tests {
     fn test_null_adapter_misc_operations() {
         let adapter = create_null_adapter();
 
-        // Verify assigning UUID to resource succeeds
+        // Verify assigning UUID to resource succeeds with zero UUID
         let result = adapter.resource_assign_uuid(1);
-        assert!(matches!(result, Ok(GpuResponse::OkNoData)));
+        match result {
+            Ok(GpuResponse::OkResourceUuid { uuid }) => {
+                assert_eq!(uuid, [0u8; 16], "Null adapter should return zero UUID");
+            }
+            _ => panic!("Expected OkResourceUuid"),
+        }
 
         // Verify no event poll fd is provided (null backend has no events)
         let event_fd = adapter.get_event_poll_fd();

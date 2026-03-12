@@ -15,6 +15,7 @@ use libc::c_void;
 use log::{debug, error, trace, warn};
 use rutabaga_gfx::RutabagaFence;
 use thiserror::Error as ThisError;
+use uuid::Uuid;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuDMABUFScanout, VhostUserGpuDMABUFScanout2,
@@ -73,6 +74,7 @@ pub struct GpuResource {
     // resource. Resource could be used for multiple scanouts.
     pub scanouts: AssociatedScanouts,
     pub backing_iovecs: Arc<Mutex<Option<Vec<Iovec>>>>,
+    pub uuid: Uuid,
 }
 
 fn sglist_to_iovecs(
@@ -211,6 +213,7 @@ impl Renderer for VirglRendererAdapter {
             virgl_resource,
             scanouts: AssociatedScanouts::default(),
             backing_iovecs: Arc::new(Mutex::new(None)),
+            uuid: Uuid::new_v4(),
         };
         self.resources.insert(resource_id, local_resource);
         Ok(OkNoData)
@@ -357,9 +360,15 @@ impl Renderer for VirglRendererAdapter {
             })
     }
 
-    fn resource_assign_uuid(&self, _resource_id: u32) -> VirtioGpuResult {
-        error!("Not implemented: resource_assign_uuid");
-        Err(ErrUnspec)
+    fn resource_assign_uuid(&self, resource_id: u32) -> VirtioGpuResult {
+        debug!("resource_assign_uuid for resource {}", resource_id);
+        let resource = self
+            .resources
+            .get(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+        Ok(GpuResponse::OkResourceUuid {
+            uuid: *resource.uuid.as_bytes(),
+        })
     }
 
     fn get_capset_info(&self, index: u32) -> VirtioGpuResult {
@@ -947,10 +956,10 @@ mod virgl_cov_tests {
                 Err(GpuResponse::ErrUnspec)
             );
 
-            // Test resource_assign_uuid (not implemented)
+            // Test resource_assign_uuid with invalid resource
             assert_matches!(
-                gpu.resource_assign_uuid(1),
-                Err(GpuResponse::ErrUnspec)
+                gpu.resource_assign_uuid(999),
+                Err(GpuResponse::ErrInvalidResourceId)
             );
 
             // Test display_info (should fail without frontend)

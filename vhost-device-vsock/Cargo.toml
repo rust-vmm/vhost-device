@@ -23,10 +23,10 @@ log = "0.4"
 thiserror = "2.0"
 vhost = { version = "0.15", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.21"
-virtio-bindings = "0.2.5"
+virtio-bindings = "0.2.7"
 virtio-queue = "0.17"
 virtio-vsock = "0.11"
-vm-memory = "0.17.1"
+vm-memory = "0.18.0"
 vmm-sys-util = "0.15"
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.2", optional = true }

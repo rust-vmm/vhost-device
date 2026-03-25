@@ -266,48 +266,38 @@ impl VsockThreadBackend {
     pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Pop an event from the backend_rxq
         let key = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
-        let conn = match self.conn_map.get_mut(&key) {
-            Some(conn) => conn,
-            None => {
-                // assume that the connection does not exist
-                return Ok(());
+        match self.conn_map.get_mut(&key) {
+            // We received a packet meant for a connection we are aware of
+            Some(conn) => {
+                if conn.rx_queue.peek() == Some(RxOps::Reset) {
+                    let conn = self.conn_map.remove(&key).unwrap();
+                    self.listener_map.remove(&conn.stream.as_raw_fd());
+                    self.stream_map.remove(&conn.stream.as_raw_fd());
+                    self.local_port_set.remove(&conn.local_port);
+                    VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
+                        .unwrap_or_else(|err| {
+                            warn!(
+                                "Could not remove epoll listener for fd {:?}: {:?}",
+                                conn.stream.as_raw_fd(),
+                                err
+                            )
+                        });
+
+                    // Initialize the packet header to contain a VSOCK_OP_RST operation
+                    self.build_rst_pkt(pkt, conn.guest_cid, conn.local_port, conn.peer_port);
+                    return Ok(());
+                }
+
+                // Handle other packet types per connection
+                conn.recv_pkt(pkt)
             }
-        };
-
-        if conn.rx_queue.peek() == Some(RxOps::Reset) {
-            // Handle RST events here
-            let conn = self.conn_map.remove(&key).unwrap();
-            self.listener_map.remove(&conn.stream.as_raw_fd());
-            self.stream_map.remove(&conn.stream.as_raw_fd());
-            self.local_port_set.remove(&conn.local_port);
-            VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
-                .unwrap_or_else(|err| {
-                    warn!(
-                        "Could not remove epoll listener for fd {:?}: {:?}",
-                        conn.stream.as_raw_fd(),
-                        err
-                    )
-                });
-
-            // Initialize the packet header to contain a VSOCK_OP_RST operation
-            pkt.set_op(VSOCK_OP_RST)
-                .set_src_cid(VSOCK_HOST_CID)
-                .set_dst_cid(conn.guest_cid)
-                .set_src_port(conn.local_port)
-                .set_dst_port(conn.peer_port)
-                .set_len(0)
-                .set_type(VSOCK_TYPE_STREAM)
-                .set_flags(0)
-                .set_buf_alloc(0)
-                .set_fwd_cnt(0);
-
-            return Ok(());
+            None => {
+                // we got a packet for a connection not in the map.
+                // it must be a rst
+                self.build_rst_pkt(pkt, self.guest_cid, key.local_port, key.peer_port);
+                Ok(())
+            }
         }
-
-        // Handle other packet types per connection
-        conn.recv_pkt(pkt)?;
-
-        Ok(())
     }
 
     /// Deliver a guest generated packet to its destination in the backend.
@@ -358,22 +348,20 @@ impl VsockThreadBackend {
             }
         }
 
-        // TODO: Rst if packet has unsupported type
         if pkt.type_() != VSOCK_TYPE_STREAM {
             info!("vsock: dropping packet of unknown type");
+            self.enq_rst(pkt.dst_port(), pkt.src_port());
             return Ok(());
         }
 
         let key = ConnMapKey::new(pkt.dst_port(), pkt.src_port());
 
-        // TODO: Handle cases where connection does not exist and packet op
-        // is not VSOCK_OP_REQUEST
         if !self.conn_map.contains_key(&key) {
             // The packet contains a new connection request
             if pkt.op() == VSOCK_OP_REQUEST {
                 self.handle_new_guest_conn(pkt);
             } else {
-                // TODO: send back RST
+                self.enq_rst(pkt.dst_port(), pkt.src_port());
             }
             return Ok(());
         }
@@ -452,7 +440,7 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::UnixConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Unix(stream), pkt))
-                    .unwrap_or_else(|_| self.enq_rst());
+                    .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
             }
             #[cfg(feature = "backend_vsock")]
             BackendType::Vsock(vsock_info) => {
@@ -460,7 +448,7 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::VsockConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Vsock(stream), pkt))
-                    .unwrap_or_else(|_| self.enq_rst());
+                    .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
             }
         }
     }
@@ -506,9 +494,30 @@ impl VsockThreadBackend {
     }
 
     /// Enqueue RST packets to be sent to guest.
-    fn enq_rst(&mut self) {
-        // TODO
+    fn enq_rst(&mut self, local_port: u32, dst_port: u32) {
         log::debug!("New guest conn error: Enqueue RST");
+        self.backend_rxq
+            .push_front(ConnMapKey::new(local_port, dst_port));
+    }
+
+    /// Fill out RST pkt data.
+    fn build_rst_pkt<B: BitmapSlice>(
+        &self,
+        pkt: &mut VsockPacket<B>,
+        cid: u64,
+        src_port: u32,
+        dst_port: u32,
+    ) {
+        pkt.set_op(VSOCK_OP_RST)
+            .set_src_cid(VSOCK_HOST_CID)
+            .set_dst_cid(cid)
+            .set_src_port(src_port)
+            .set_dst_port(dst_port)
+            .set_len(0)
+            .set_type(VSOCK_TYPE_STREAM)
+            .set_flags(0)
+            .set_buf_alloc(0)
+            .set_fwd_cnt(0);
     }
 }
 
@@ -584,8 +593,7 @@ mod tests {
 
         vtp.recv_pkt(&mut packet).unwrap();
 
-        // TODO: it is a nop for now
-        vtp.enq_rst();
+        vtp.enq_rst(packet.src_port(), packet.dst_port());
     }
 
     #[test]

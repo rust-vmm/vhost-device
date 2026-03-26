@@ -15,10 +15,7 @@ use std::{
 use log::{info, warn};
 use virtio_queue::Writer;
 use virtio_vsock::packet::{PacketHeader, VsockPacketRx, VsockPacketTx, PKT_HEADER_SIZE};
-use vm_memory::{
-    bitmap::BitmapSlice, ByteValued, ReadVolatile, VolatileMemoryError, VolatileSlice,
-    WriteVolatile,
-};
+use vm_memory::{bitmap::BitmapSlice, ByteValued};
 #[cfg(feature = "backend_vsock")]
 use vsock::VsockStream;
 
@@ -149,72 +146,6 @@ impl VsockStreamIo for StreamType {
             Err(std::io::Error::last_os_error())
         } else {
             Ok(bytes_written.try_into().unwrap())
-        }
-    }
-}
-
-impl ReadVolatile for StreamType {
-    fn read_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &mut VolatileSlice<'_, B>,
-    ) -> StdResult<usize, VolatileMemoryError> {
-        match self {
-            StreamType::Unix(stream) => stream.read_volatile(buf),
-            // Copied from vm_memory crate's ReadVolatile implementation for UnixStream
-            #[cfg(feature = "backend_vsock")]
-            StreamType::Vsock(stream) => {
-                let fd = stream.as_raw_fd();
-                let guard = buf.ptr_guard_mut();
-
-                let dst = guard.as_ptr().cast::<libc::c_void>();
-
-                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to
-                // by `dst` is valid for writes of length `buf.len() by the
-                // invariants upheld by the constructor of `VolatileSlice`.
-                let bytes_read = unsafe { libc::read(fd, dst, buf.len()) };
-
-                if bytes_read < 0 {
-                    // We don't know if a partial read might have happened, so mark everything as
-                    // dirty
-                    buf.bitmap().mark_dirty(0, buf.len());
-
-                    Err(VolatileMemoryError::IOError(std::io::Error::last_os_error()))
-                } else {
-                    let bytes_read = bytes_read.try_into().unwrap();
-                    buf.bitmap().mark_dirty(0, bytes_read);
-                    Ok(bytes_read)
-                }
-            }
-        }
-    }
-}
-
-impl WriteVolatile for StreamType {
-    fn write_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &VolatileSlice<'_, B>,
-    ) -> StdResult<usize, VolatileMemoryError> {
-        match self {
-            StreamType::Unix(stream) => stream.write_volatile(buf),
-            // Copied from vm_memory crate's WriteVolatile implementation for UnixStream
-            #[cfg(feature = "backend_vsock")]
-            StreamType::Vsock(stream) => {
-                let fd = stream.as_raw_fd();
-                let guard = buf.ptr_guard();
-
-                let src = guard.as_ptr().cast::<libc::c_void>();
-
-                // SAFETY: We got a valid file descriptor from `AsRawFd`. The memory pointed to
-                // by `src` is valid for reads of length `buf.len() by the
-                // invariants upheld by the constructor of `VolatileSlice`.
-                let bytes_written = unsafe { libc::write(fd, src, buf.len()) };
-
-                if bytes_written < 0 {
-                    Err(VolatileMemoryError::IOError(std::io::Error::last_os_error()))
-                } else {
-                    Ok(bytes_written.try_into().unwrap())
-                }
-            }
         }
     }
 }

@@ -414,7 +414,7 @@ mod tests {
 
     use virtio_queue::Writer;
     use virtio_vsock::packet::PKT_HEADER_SIZE;
-    use vm_memory::{GuestAddressSpace, ReadVolatile, VolatileSlice};
+    use vm_memory::GuestAddressSpace;
 
     use super::*;
     use crate::{
@@ -506,23 +506,6 @@ mod tests {
     impl Read for VsockDummySocket {
         fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
             self.read_buffer.lock().unwrap().read(buf)
-        }
-    }
-
-    impl ReadVolatile for VsockDummySocket {
-        fn read_volatile<B: BitmapSlice>(
-            &mut self,
-            buf: &mut VolatileSlice<B>,
-        ) -> std::result::Result<usize, vm_memory::VolatileMemoryError> {
-            // Similar to the std's Read impl, we only read on the head. Since
-            // we drain the head, successive reads will cover the rest of the
-            // queue.
-            let mut read_buffer = self.read_buffer.lock().unwrap();
-            let (head, _) = read_buffer.as_slices();
-            let n = ReadVolatile::read_volatile(&mut &head[..], buf)?;
-            read_buffer.drain(..n);
-
-            Ok(n)
         }
     }
 

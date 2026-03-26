@@ -418,7 +418,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        test_utils::{prepare_desc_chain_vsock, HeadParams},
+        test_utils::prepare_desc_chain_vsock,
         vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM},
     };
 
@@ -602,9 +602,6 @@ mod tests {
 
     #[test]
     fn test_vsock_conn_init_pkt() {
-        // parameters for packet head construction
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 10);
-
         let dummy_file = VsockDummySocket::new();
         let conn_local = VsockConnection::new_local_init(
             dummy_file,
@@ -632,9 +629,6 @@ mod tests {
 
     #[test]
     fn test_vsock_conn_recv_pkt() {
-        // parameters for packet head construction
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
-
         let (mut host_socket, backend_socket) = VsockDummySocket::pair();
         let mut conn_local = VsockConnection::new_local_init(
             backend_socket,
@@ -649,10 +643,11 @@ mod tests {
         let mut packet_header = PacketHeader::default();
 
         // VSOCK_OP_REQUEST: new local conn request
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         conn_local.rx_queue.enqueue(RxOps::Request);
         let op_req = conn_local.recv_pkt(&mut packet_header, &mut pkt);
         op_req.unwrap();
@@ -661,10 +656,11 @@ mod tests {
 
         // VSOCK_OP_RST: reset if connection not established
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_rst = conn_local.recv_pkt(&mut packet_header, &mut pkt);
         op_rst.unwrap();
@@ -673,10 +669,11 @@ mod tests {
 
         // VSOCK_OP_CREDIT_UPDATE: need credit update from peer/guest
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         conn_local.connect = true;
         conn_local.rx_queue.enqueue(RxOps::Rw);
         conn_local.fwd_cnt = Wrapping(1024);
@@ -688,10 +685,11 @@ mod tests {
 
         // VSOCK_OP_SHUTDOWN: zero data read from stream/file
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         conn_local.peer_buf_alloc = 65536;
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_zero_read_shutdown = conn_local.recv_pkt(&mut packet_header, &mut pkt);
@@ -707,10 +705,11 @@ mod tests {
 
         // VSOCK_OP_RW: finite data read from stream/file
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         let payload = b"hello";
         host_socket.write_all(payload).unwrap();
         conn_local.rx_queue.enqueue(RxOps::Rw);
@@ -724,10 +723,11 @@ mod tests {
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         conn_local.rx_queue.enqueue(RxOps::Response);
         let op_response = conn_local.recv_pkt(&mut packet_header, &mut pkt);
         op_response.unwrap();
@@ -737,10 +737,11 @@ mod tests {
 
         // VSOCK_OP_CREDIT_UPDATE: guest needs credit update
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         conn_local.rx_queue.enqueue(RxOps::CreditUpdate);
         let op_credit_update = conn_local.recv_pkt(&mut packet_header, &mut pkt);
         assert!(!conn_local.rx_queue.pending_rx());
@@ -750,19 +751,17 @@ mod tests {
 
         // non-existent request
         packet_header = PacketHeader::default();
-        let (mem, descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
-        let mem = mem.memory();
+        let (mem, descr_chain) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
+        let mem_ref = mem.memory();
         let mut pkt =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
+            VsockPacketRx::from_rx_virtq_chain(mem_ref.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
         let op_error = conn_local.recv_pkt(&mut packet_header, &mut pkt);
         assert!(op_error.is_err());
     }
 
     #[test]
     fn test_vsock_conn_send_pkt() {
-        // parameters for packet head construction
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
-
         // new locally inititated connection
         let (mut host_socket, backend_socket) = VsockDummySocket::pair();
         let mut conn_local = VsockConnection::new_local_init(
@@ -776,7 +775,7 @@ mod tests {
         );
 
         // write only descriptor chain
-        let (mem, descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
+        let (mem, descr_chain) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, b"hello");
         let mem = mem.memory();
         let mut pkt =
             VsockPacketTx::from_tx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -802,7 +801,6 @@ mod tests {
 
         // VSOCK_OP_RW
         pkt.header_mut().set_op(VSOCK_OP_RW);
-        // TODO: Data is already written in the descriptor by prepare_desc_chain_vsock
         let rw_response = conn_local.send_pkt(&mut pkt);
         rw_response.unwrap();
         let mut resp_buf = vec![0; 5];

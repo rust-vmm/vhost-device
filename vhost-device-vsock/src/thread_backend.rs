@@ -516,8 +516,8 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     use crate::vhu_vsock::VsockProxyInfo;
     use crate::{
-        test_utils::{prepare_desc_chain_vsock, HeadParams},
-        vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW},
+        test_utils::prepare_desc_chain_vsock,
+        vhu_vsock::{BackendType, VSOCK_OP_RW},
     };
 
     const DATA_LEN: usize = 16;
@@ -546,13 +546,13 @@ mod tests {
 
         assert!(!vtp.pending_rx());
 
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
-        let (mem, descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
+        let (mem, descr_chain) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, b"hello");
         let mem = mem.memory();
         let mut packet =
             VsockPacketTx::from_tx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
 
-        let (mem_rx, descr_chain_rx) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem_rx, descr_chain_rx) =
+            prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem_rx = mem_rx.memory();
 
         let mut packet_rx =
@@ -698,8 +698,7 @@ mod tests {
         let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
         let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
 
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
-        let (mem, descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
+        let (mem, descr_chain) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, b"hello");
         let mem = mem.memory();
 
         // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.

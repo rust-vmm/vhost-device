@@ -13,32 +13,11 @@ use vm_memory::{
     GuestMemoryMmap,
 };
 
-pub(crate) struct HeadParams {
-    head_len: usize,
-    data_len: u32,
-}
-
-impl HeadParams {
-    pub(crate) fn new(head_len: usize, data_len: u32) -> Self {
-        Self { head_len, data_len }
-    }
-
-    fn construct_head(&self) -> Vec<u8> {
-        let mut header = vec![0_u8; self.head_len];
-        if self.head_len == PKT_HEADER_SIZE {
-            // Offset into the header for data length
-            const HDROFF_LEN: usize = 24;
-            LittleEndian::write_u32(&mut header[HDROFF_LEN..], self.data_len);
-        }
-        header
-    }
-}
-
 pub(crate) fn prepare_desc_chain_vsock(
     write_only: bool,
-    head_params: &HeadParams,
+    head_len: usize,
     data_chain_len: u16,
-    head_data_len: u32,
+    data: &[u8],
 ) -> (
     GuestMemoryAtomic<GuestMemoryMmap>,
     DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
@@ -59,18 +38,23 @@ pub(crate) fn prepare_desc_chain_vsock(
     };
 
     // vsock packet header
-    // let header = vec![0 as u8; head_params.head_len];
-    let header = head_params.construct_head();
+    let mut header = vec![0_u8; head_len];
+    if head_len == PKT_HEADER_SIZE {
+        // Offset into the header for data length
+        const HDROFF_LEN: usize = 24;
+        LittleEndian::write_u32(&mut header[HDROFF_LEN..], data.len() as u32);
+    }
+
     let head_desc = RawDescriptor::from(SplitDescriptor::new(
         next_addr,
-        head_params.head_len as u32,
+        head_len as u32,
         head_flags as u16,
         1,
     ));
     mem.write(&header, SplitDescriptor::from(head_desc).addr())
         .unwrap();
     virt_queue.desc_table().store(0, head_desc).unwrap();
-    next_addr += head_params.head_len as u64;
+    next_addr += head_len as u64;
 
     // Put the descriptor index 0 in the first available ring position.
     mem.write_obj(0u16, virt_queue.avail_addr().unchecked_add(4))
@@ -87,17 +71,16 @@ pub(crate) fn prepare_desc_chain_vsock(
             head_flags &= !VRING_DESC_F_NEXT;
         }
         // vsock data
-        let data = vec![0_u8; head_data_len as usize];
         let data_desc = RawDescriptor::from(SplitDescriptor::new(
             next_addr,
             data.len() as u32,
             head_flags as u16,
             i + 2,
         ));
-        mem.write(&data, SplitDescriptor::from(data_desc).addr())
+        mem.write(data, SplitDescriptor::from(data_desc).addr())
             .unwrap();
         virt_queue.desc_table().store(i + 1, data_desc).unwrap();
-        next_addr += u64::from(head_data_len);
+        next_addr += data.len() as u64;
     }
 
     // Create descriptor chain from pre-filled memory

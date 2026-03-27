@@ -129,6 +129,18 @@ In this configuration:
 - The host must have vsock support (e.g., `vsock_loopback` kernel module loaded)
 - For testing, you can load the module with: `modprobe vsock_loopback`
 
+## Live migration
+
+This device implementation advertises support for live migrations by offering the VHOST_USER_PROTOCOL_F_DEVICE_STATE protocol feature, however this doesn't work with Qemu yet as it marks its vsock frontend as "unmigratable". This feature does work with CrosVm and potentially other virtual machine managers.
+
+The device itself doesn't save or restore any state during a live migration. It relies instead on the frontend to save the vring's states and negotiated features. It also expects the the frontend to "kick" the queues that have pending buffers in it since the driver probably kicked those queues before the migration and won't do it again.
+
+The state saving flow is trivial as the device doesn't save any state as mentioned.
+
+The state loading flow is a bit more complicated because the virtio-vsock spec mandates that the device must send a VIRTIO_VSOCK_EVENT_TRANSPORT_RESET event to the driver. During a restore the backend is started no differently than during a regular boot. When the frontend sends the VHOST_USER_SET_DEVICE_STATE_FD command with LOAD direction the backend doesn't load anything, but it takes note that a transport reset event needs to be sent to the driver via the event vring when possible. In order to make sure this event is sent when the queue is ready, the backend waits for the event queue to be kicked before sending the event. While these kicks usually come from the driver, this particular one is actually sent by the vhost-user frontend. This implementation depends on the frontend to kick all queues with pending buffers after a restore because the driver is unlikely to do so as it probably did it before the snapshot was taken.
+
+In response to the transport reset event the driver drops any existing connections and reads the configuration space again. To prevent the driver from dropping any new connections established after the restore the backend doesn't forward any packets from outside the VM to the driver until it has read the configuration space. In fact, because the backend doesn't know at start time whether this is a restore or a clean boot, it always waits until after the driver has read the configuration space to start forwarding packets between the outside world and the driver.
+
 ## Usage
 
 Run the vhost-device-vsock device with unix domain socket backend:

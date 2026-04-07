@@ -527,11 +527,11 @@ impl VhostUserVsockThread {
                 self.thread_backend.local_port_set.insert(alloc_local_port);
                 return Ok(alloc_local_port);
             } else {
+                alloc_local_port = alloc_local_port.wrapping_add(1);
                 if alloc_local_port == self.local_port.0 {
-                    // We have exhausted our search and wrapped back to the current port number
+                    // We have exhausted our search and wrapped back to the starting port
                     return Err(Error::NoFreeLocalPort);
                 }
-                alloc_local_port += 1;
             }
         }
     }

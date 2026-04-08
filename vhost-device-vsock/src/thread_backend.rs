@@ -595,6 +595,24 @@ mod tests {
         vtp.recv_pkt(&mut packet).unwrap();
 
         vtp.enq_rst(packet.src_port(), packet.dst_port());
+
+        // check that receiving should yield rst when we send an invalid type
+        packet.set_type(10);
+        packet.set_op(VSOCK_OP_RW);
+        vtp.send_pkt(&packet).unwrap();
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert!(packet.op() == VSOCK_OP_RST);
+
+        // check that receiving should yield rst when we send a packet with ports that
+        // aren't in the connection map and the operation isn't a connection request
+        packet.set_type(VSOCK_TYPE_STREAM);
+        packet.set_dst_cid(VSOCK_HOST_CID);
+        packet.set_src_cid(CID);
+        packet.set_dst_port(12345);
+        packet.set_op(VSOCK_OP_RW);
+        vtp.send_pkt(&packet).unwrap();
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert!(packet.op() == VSOCK_OP_RST);
     }
 
     #[test]
@@ -764,6 +782,77 @@ mod tests {
         assert_eq!(recvd_data_raw[1], 0xFEu8);
         assert_eq!(recvd_data_raw[2], 0xBAu8);
         assert_eq!(recvd_data_raw[3], 0xBEu8);
+
+        test_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_recv_pkt_rst_cleans_up_conn() {
+        const CID: u64 = 3;
+        const LOCAL_PORT: u32 = 6000;
+        const PEER_PORT: u32 = 7000;
+
+        let epoll_fd = epoll::create(false).unwrap();
+        let groups_set: HashSet<String> = vec![GROUP_NAME.to_string()].into_iter().collect();
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+        let vsock_socket_path = test_dir.path().join("test_rst_cleanup.vsock");
+
+        let mut vtp = VsockThreadBackend::new(
+            BackendType::UnixDomainSocket(vsock_socket_path),
+            epoll_fd,
+            CID,
+            CONN_TX_BUF_SIZE,
+            Arc::new(RwLock::new(groups_set)),
+            cid_map,
+        );
+
+        // Create a unix stream pair. One end backs the connection (cloned so that
+        // the original can also be placed in stream_map, mirroring add_new_guest_conn).
+        let (stream_a, _stream_b) = std::os::unix::net::UnixStream::pair().unwrap();
+        let conn_stream = StreamType::Unix(stream_a.try_clone().unwrap());
+        let conn_stream_fd = conn_stream.as_raw_fd();
+
+        let mut conn = VsockConnection::new_local_init(
+            conn_stream,
+            VSOCK_HOST_CID,
+            LOCAL_PORT,
+            CID,
+            PEER_PORT,
+            epoll_fd,
+            CONN_TX_BUF_SIZE,
+        );
+        conn.rx_queue.enqueue(RxOps::Reset);
+
+        let key = ConnMapKey::new(LOCAL_PORT, PEER_PORT);
+
+        vtp.conn_map.insert(key.clone(), conn);
+        vtp.listener_map.insert(conn_stream_fd, key.clone());
+        vtp.stream_map
+            .insert(conn_stream_fd, StreamType::Unix(stream_a));
+        vtp.local_port_set.insert(LOCAL_PORT);
+        vtp.backend_rxq.push_back(key.clone());
+
+        let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
+        let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+        // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
+        let mut packet = unsafe { VsockPacket::new(hdr_raw, Some(data_raw)).unwrap() };
+
+        vtp.recv_pkt(&mut packet).unwrap();
+
+        // The packet should be a RST addressed back to the guest peer
+        assert_eq!(packet.op(), VSOCK_OP_RST);
+        assert_eq!(packet.src_cid(), VSOCK_HOST_CID);
+        assert_eq!(packet.dst_cid(), CID);
+        assert_eq!(packet.src_port(), LOCAL_PORT);
+        assert_eq!(packet.dst_port(), PEER_PORT);
+
+        // The connection should have been removed from all tracking structures
+        assert!(!vtp.conn_map.contains_key(&key));
+        assert!(!vtp.listener_map.contains_key(&conn_stream_fd));
+        assert!(!vtp.stream_map.contains_key(&conn_stream_fd));
+        assert!(!vtp.local_port_set.contains(&LOCAL_PORT));
 
         test_dir.close().unwrap();
     }

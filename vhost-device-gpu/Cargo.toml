@@ -20,8 +20,8 @@ backend-gfxstream = ["rutabaga_gfx/gfxstream"]
 backend-virgl = ["dep:virglrenderer"]
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
-env_logger = "0.11.9"
+clap = { version = "4.6", features = ["derive"] }
+env_logger = "0.11.10"
 libc = "0.2"
 log = "0.4"
 
@@ -42,6 +42,6 @@ uuid = { version = "1.19", features = ["v4"] }
 assert_matches = "1.5"
 mockall = "0.14.0"
 rusty-fork = "0.3.1"
-tempfile = "3.26"
+tempfile = "3.27"
 virtio-queue = { version = "0.17", features = ["test-utils"] }
 vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }

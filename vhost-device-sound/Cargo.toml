@@ -44,7 +44,7 @@ virtio-queue = { version = "0.17", features = ["test-utils"] }
 vm-memory = { version = "0.17.1", features = ["backend-mmap", "backend-atomic"] }
 
 [target.'cfg(target_env = "gnu")'.dev-dependencies]
-rand = { version = "0.10.0" }
+rand = { version = "0.10.1" }
 rusty-fork = { version = "0.3.1" }
 
 [lints]

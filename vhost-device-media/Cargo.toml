@@ -15,6 +15,7 @@ default = ["v4l2-proxy"]
 v4l2-proxy = ["v4l2r"]
 ffmpeg = ["v4l2r", "virtio-media-ffmpeg-decoder"]
 simple-capture = ["v4l2r"]
+xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 
 [dependencies]
 bitflags = "2.6.0"

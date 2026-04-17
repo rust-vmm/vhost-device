@@ -10,7 +10,6 @@ use std::{
     io::{self, Result as IoResult},
 };
 
-use log::error;
 use nix::libc;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};

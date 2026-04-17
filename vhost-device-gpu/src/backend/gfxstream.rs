@@ -25,7 +25,7 @@ use vhost::vhost_user::{
     GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
-use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
+use vm_memory::{GuestAddress, GuestMemoryBackend, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{

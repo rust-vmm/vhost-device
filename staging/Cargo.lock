@@ -850,8 +850,7 @@ dependencies = [
 [[package]]
 name = "vhost"
 version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c76d90ce3c6b37d610a5304c9a445cfff580cf8b4b9fd02fb256aaf68552c28a"
+source = "git+https://github.com/XanClic/vhost.git?branch=vm-memory-0.18#bf6da463b862027b3a4372c3b68f90f9770f3db6"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -879,7 +878,7 @@ dependencies = [
  "v4l2r",
  "vhost",
  "vhost-user-backend",
- "virtio-bindings",
+ "virtio-bindings 0.2.6",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
@@ -888,13 +887,12 @@ dependencies = [
 [[package]]
 name = "vhost-user-backend"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "783587813a59c42c36519a6e12bb31eb2d7fa517377428252ba4cc2312584243"
+source = "git+https://github.com/XanClic/vhost.git?branch=vm-memory-0.18#bf6da463b862027b3a4372c3b68f90f9770f3db6"
 dependencies = [
  "libc",
  "log",
  "vhost",
- "virtio-bindings",
+ "virtio-bindings 0.2.6",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
@@ -907,23 +905,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "804f498a26d5a63be7bbb8bdcd3869c3f286c4c4a17108905276454da0caf8cb"
 
 [[package]]
+name = "virtio-bindings"
+version = "0.2.7"
+source = "git+https://github.com/luigix25/vm-virtio.git?branch=fix_vsock#79927ec7ca8d4fd530b1f2b54ed7a31cd590d503"
+
+[[package]]
 name = "virtio-queue"
 version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e358084f32ed165fddb41d98ff1b7ff3c08b9611d8d6114a1b422e2e85688baf"
+source = "git+https://github.com/luigix25/vm-virtio.git?branch=fix_vsock#79927ec7ca8d4fd530b1f2b54ed7a31cd590d503"
 dependencies = [
  "libc",
  "log",
- "virtio-bindings",
+ "virtio-bindings 0.2.7",
  "vm-memory",
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vm-memory"
-version = "0.17.1"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f39348a049689cabd3377cdd9182bf526ec76a6f823b79903896452e9d7a7380"
+checksum = "9b55e753c7725603745cb32b2287ef7ef3da05c03c7702cda3fa8abe25ae0465"
 dependencies = [
  "arc-swap",
  "bitflags 2.11.0",

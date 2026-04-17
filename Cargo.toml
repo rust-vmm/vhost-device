@@ -9,6 +9,7 @@ members = [
     "vhost-device-i2c",
     "vhost-device-input",
     "vhost-device-rng",
+    "vhost-device-rtc",
     "vhost-device-scsi",
     "vhost-device-scmi",
     "vhost-device-sound",

@@ -378,12 +378,16 @@ impl<T: 'static + InputDevice + Sync + Send> VhostUserBackendMut for VuInputBack
         result
     }
 
-    // In virtio spec https://docs.oasis-open.org/virtio/virtio/v1.2/cs01/virtio-v1.2-cs01.pdf,
-    // section "5.8.5.1 Driver Requirements: Device Initialization", it doesn't
-    // mention to use 'offset' argument, so set it as unused.
-    fn set_config(&mut self, _offset: u32, buf: &[u8]) -> io::Result<()> {
-        self.select = buf[0];
-        self.subsel = buf[1];
+    fn set_config(&mut self, offset: u32, buf: &[u8]) -> io::Result<()> {
+        // The virtio-input config space has select at offset 0 and subsel at offset 1
+        // The VMM may write them separately or together
+        for (i, &byte) in buf.iter().enumerate() {
+            match offset as usize + i {
+                0 => self.select = byte,
+                1 => self.subsel = byte,
+                _ => {}
+            }
+        }
 
         Ok(())
     }

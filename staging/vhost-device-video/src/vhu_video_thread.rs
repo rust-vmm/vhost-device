@@ -13,7 +13,7 @@ use log::{debug, warn};
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::{desc::split::Descriptor as SplitDescriptor, QueueOwnedT};
 use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend,
     GuestMemoryMmap,
 };
 use vmm_sys_util::epoll::EventSet;

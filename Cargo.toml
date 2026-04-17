@@ -54,3 +54,9 @@ missing_safety_doc = "deny"
 undocumented_unsafe_blocks = "deny"
 option_if_let_else = "allow"
 cloned_ref_to_slice_refs = "allow"
+
+[patch.crates-io]
+virtio-vsock = { git = "https://github.com/luigix25/vm-virtio.git", branch = "fix_vsock" }
+virtio-queue = { git = "https://github.com/luigix25/vm-virtio.git", branch = "fix_vsock" }
+vhost = { git = "https://github.com/XanClic/vhost.git", branch = "vm-memory-0.18" }
+vhost-user-backend = { git = "https://github.com/XanClic/vhost.git", branch = "vm-memory-0.18" }

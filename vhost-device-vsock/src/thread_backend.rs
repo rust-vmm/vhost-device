@@ -510,7 +510,7 @@ mod tests {
     use tempfile::tempdir;
     use virtio_vsock::packet_rw::{VsockPacketRx, VsockPacketTx};
     use virtio_vsock::PKT_HEADER_SIZE;
-    use vm_memory::GuestAddressSpace;
+    use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace};
     #[cfg(feature = "backend_vsock")]
     use vsock::{VsockListener, VMADDR_CID_ANY, VMADDR_CID_LOCAL};
 
@@ -519,12 +519,11 @@ mod tests {
     use crate::vhu_vsock::VsockProxyInfo;
     use crate::{
         test_utils::prepare_desc_chain_vsock,
-        vhu_vsock::{BackendType, VSOCK_OP_RW},
+        vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW},
     };
 
-    //const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
-    //const QUEUE_SIZE: usize = 1024;
+    const QUEUE_SIZE: usize = 1024;
     const GROUP_NAME: &str = "default";
     const VSOCK_PEER_PORT: u32 = 1234;
 
@@ -625,14 +624,13 @@ mod tests {
         test_vsock_thread_backend(backend_info);
     }
 
-    //TODO: fix tests
-    /*
     #[test]
     fn test_vsock_thread_backend_sibling_vms() {
         const CID: u64 = 3;
         const SIBLING_CID: u64 = 4;
         const SIBLING2_CID: u64 = 5;
         const SIBLING_LISTENING_PORT: u32 = 1234;
+        const DATA: &[u8] = b"hello";
 
         let test_dir = tempdir().expect("Could not create a temp test directory.");
 
@@ -696,79 +694,80 @@ mod tests {
 
         assert!(!vtp.pending_raw_pkts());
 
-        let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
-        let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+        // Build a TX descriptor chain: header (len field = DATA.len()) + data buffer = DATA.
+        let (mem_tx, descr_chain_tx) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, DATA);
+        let mem_tx = mem_tx.memory();
+        let mut pkt_tx =
+            VsockPacketTx::from_tx_virtq_chain(mem_tx.deref(), descr_chain_tx, CONN_TX_BUF_SIZE)
+                .unwrap();
 
-        let (mem, descr_chain) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, b"hello");
-        let mem = mem.memory();
+        // Set header fields for an RW packet destined for the sibling VM.
+        pkt_tx.header_mut().set_type(VSOCK_TYPE_STREAM);
+        pkt_tx.header_mut().set_src_cid(CID);
+        pkt_tx.header_mut().set_dst_cid(SIBLING_CID);
+        pkt_tx.header_mut().set_dst_port(SIBLING_LISTENING_PORT);
+        pkt_tx.header_mut().set_op(VSOCK_OP_RW);
 
-        // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
-        let mut packet =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE)
+        // Verify empty-queue error before any packet is queued.
+        let (mem_rx, descr_chain_rx) =
+            prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; DATA.len()]);
+        let mem_rx = mem_rx.memory();
+        let mut pkt_rx =
+            VsockPacketRx::from_rx_virtq_chain(mem_rx.deref(), descr_chain_rx, CONN_TX_BUF_SIZE)
                 .unwrap();
         assert_eq!(
-            vtp.recv_raw_pkt(&mut packet).unwrap_err().to_string(),
+            sibling_backend.threads[0]
+                .lock()
+                .unwrap()
+                .thread_backend
+                .recv_raw_pkt(&mut pkt_rx)
+                .unwrap_err()
+                .to_string(),
             Error::EmptyRawPktsQueue.to_string()
         );
 
-
-        packet.header_mut().set_type(VSOCK_TYPE_STREAM);
-        packet.header_mut().set_src_cid(CID);
-        packet.header_mut().set_dst_cid(SIBLING_CID);
-        packet.header_mut().set_dst_port(SIBLING_LISTENING_PORT);
-        packet.header_mut().set_op(VSOCK_OP_RW);
-        packet.header_mut().set_len(DATA_LEN as u32);
-
-        //Payload is hello
-        /*packet
-            .data_slice()
-            .unwrap()
-            .copy_from(&[0xCAu8, 0xFEu8, 0xBAu8, 0xBEu8]);
-        */
-
-        vtp.send_pkt(&mut &packet).unwrap();
+        vtp.send_pkt(&mut pkt_tx).unwrap();
         assert!(sibling_backend.threads[0]
             .lock()
             .unwrap()
             .thread_backend
             .pending_raw_pkts());
 
-        packet.header_mut().set_dst_cid(SIBLING2_CID);
-        vtp.send_pkt(&mut &packet).unwrap();
-        // packet should be discarded since sibling2 is not in the same group
+        // Packet to sibling2 is dropped: vtp has group3, sibling2 only has group1 — disjoint.
+        pkt_tx.header_mut().set_dst_cid(SIBLING2_CID);
+        vtp.send_pkt(&mut pkt_tx).unwrap();
         assert!(!sibling2_backend.threads[0]
             .lock()
             .unwrap()
             .thread_backend
             .pending_raw_pkts());
 
-        let mut recvd_pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
-        let (recvd_hdr_raw, recvd_data_raw) = recvd_pkt_raw.split_at_mut(PKT_HEADER_SIZE);
-
-        let mut recvd_packet =
-            // SAFETY: Safe as recvd_hdr_raw and recvd_data_raw are guaranteed to be valid.
-            unsafe { VsockPacket::new(recvd_hdr_raw, Some(recvd_data_raw)).unwrap() };
+        // Deliver the queued packet to the sibling and verify header + payload.
+        // prepare_desc_chain_vsock places the first buffer at:
+        //   desc_table_size(16 entries × 16 bytes = 256) + 0x100 = 0x200.
+        // The data buffer immediately follows the header.
+        let hdr_addr = GuestAddress(0x200);
+        let data_addr = hdr_addr.unchecked_add(PKT_HEADER_SIZE as u64);
 
         sibling_backend.threads[0]
             .lock()
             .unwrap()
             .thread_backend
-            .recv_raw_pkt(&mut recvd_packet)
+            .recv_raw_pkt(&mut pkt_rx)
             .unwrap();
 
-        assert_eq!(recvd_packet.type_(), VSOCK_TYPE_STREAM);
-        assert_eq!(recvd_packet.src_cid(), CID);
-        assert_eq!(recvd_packet.dst_cid(), SIBLING_CID);
-        assert_eq!(recvd_packet.dst_port(), SIBLING_LISTENING_PORT);
-        assert_eq!(recvd_packet.op(), VSOCK_OP_RW);
-        assert_eq!(recvd_packet.len(), DATA_LEN as u32);
+        let recvd_header = mem_rx.read_obj::<PacketHeader>(hdr_addr).unwrap();
+        assert_eq!(recvd_header.type_(), VSOCK_TYPE_STREAM);
+        assert_eq!(recvd_header.src_cid(), CID);
+        assert_eq!(recvd_header.dst_cid(), SIBLING_CID);
+        assert_eq!(recvd_header.dst_port(), SIBLING_LISTENING_PORT);
+        assert_eq!(recvd_header.op(), VSOCK_OP_RW);
+        assert_eq!(recvd_header.len(), DATA.len() as u32);
 
-        assert_eq!(recvd_data_raw[0], 0xCAu8);
-        assert_eq!(recvd_data_raw[1], 0xFEu8);
-        assert_eq!(recvd_data_raw[2], 0xBAu8);
-        assert_eq!(recvd_data_raw[3], 0xBEu8);
+        let mut recvd_data = [0u8; DATA.len()];
+        mem_rx.read(&mut recvd_data, data_addr).unwrap();
+        assert_eq!(&recvd_data, DATA);
 
         test_dir.close().unwrap();
     }
- */
 }

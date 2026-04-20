@@ -626,148 +626,148 @@ mod tests {
 
     //TODO: fix tests
     /*
-    #[test]
-    fn test_vsock_thread_backend_sibling_vms() {
-        const CID: u64 = 3;
-        const SIBLING_CID: u64 = 4;
-        const SIBLING2_CID: u64 = 5;
-        const SIBLING_LISTENING_PORT: u32 = 1234;
+       #[test]
+       fn test_vsock_thread_backend_sibling_vms() {
+           const CID: u64 = 3;
+           const SIBLING_CID: u64 = 4;
+           const SIBLING2_CID: u64 = 5;
+           const SIBLING_LISTENING_PORT: u32 = 1234;
 
-        let test_dir = tempdir().expect("Could not create a temp test directory.");
+           let test_dir = tempdir().expect("Could not create a temp test directory.");
 
-        let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
-        let sibling_vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_backend_sibling.socket");
-        let sibling_vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_backend_sibling.vsock");
-        let sibling2_vhost_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_backend_sibling2.socket");
-        let sibling2_vsock_socket_path = test_dir
-            .path()
-            .join("test_vsock_thread_backend_sibling2.vsock");
+           let vsock_socket_path = test_dir.path().join("test_vsock_thread_backend.vsock");
+           let sibling_vhost_socket_path = test_dir
+               .path()
+               .join("test_vsock_thread_backend_sibling.socket");
+           let sibling_vsock_socket_path = test_dir
+               .path()
+               .join("test_vsock_thread_backend_sibling.vsock");
+           let sibling2_vhost_socket_path = test_dir
+               .path()
+               .join("test_vsock_thread_backend_sibling2.socket");
+           let sibling2_vsock_socket_path = test_dir
+               .path()
+               .join("test_vsock_thread_backend_sibling2.vsock");
 
-        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+           let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
 
-        let sibling_config = VsockConfig::new(
-            SIBLING_CID,
-            sibling_vhost_socket_path,
-            BackendType::UnixDomainSocket(sibling_vsock_socket_path),
-            CONN_TX_BUF_SIZE,
-            QUEUE_SIZE,
-            vec!["group1", "group2", "group3"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-        );
+           let sibling_config = VsockConfig::new(
+               SIBLING_CID,
+               sibling_vhost_socket_path,
+               BackendType::UnixDomainSocket(sibling_vsock_socket_path),
+               CONN_TX_BUF_SIZE,
+               QUEUE_SIZE,
+               vec!["group1", "group2", "group3"]
+                   .into_iter()
+                   .map(String::from)
+                   .collect(),
+           );
 
-        let sibling2_config = VsockConfig::new(
-            SIBLING2_CID,
-            sibling2_vhost_socket_path,
-            BackendType::UnixDomainSocket(sibling2_vsock_socket_path),
-            CONN_TX_BUF_SIZE,
-            QUEUE_SIZE,
-            vec!["group1"].into_iter().map(String::from).collect(),
-        );
+           let sibling2_config = VsockConfig::new(
+               SIBLING2_CID,
+               sibling2_vhost_socket_path,
+               BackendType::UnixDomainSocket(sibling2_vsock_socket_path),
+               CONN_TX_BUF_SIZE,
+               QUEUE_SIZE,
+               vec!["group1"].into_iter().map(String::from).collect(),
+           );
 
-        let sibling_backend =
-            Arc::new(VhostUserVsockBackend::new(sibling_config, cid_map.clone()).unwrap());
-        let sibling2_backend =
-            Arc::new(VhostUserVsockBackend::new(sibling2_config, cid_map.clone()).unwrap());
+           let sibling_backend =
+               Arc::new(VhostUserVsockBackend::new(sibling_config, cid_map.clone()).unwrap());
+           let sibling2_backend =
+               Arc::new(VhostUserVsockBackend::new(sibling2_config, cid_map.clone()).unwrap());
 
-        let epoll_fd = epoll::create(false).unwrap();
+           let epoll_fd = epoll::create(false).unwrap();
 
-        let groups_set: HashSet<String> = vec!["groupA", "groupB", "group3"]
-            .into_iter()
-            .map(String::from)
-            .collect();
+           let groups_set: HashSet<String> = vec!["groupA", "groupB", "group3"]
+               .into_iter()
+               .map(String::from)
+               .collect();
 
-        let mut vtp = VsockThreadBackend::new(
-            BackendType::UnixDomainSocket(vsock_socket_path),
-            epoll_fd,
-            CID,
-            CONN_TX_BUF_SIZE,
-            Arc::new(RwLock::new(groups_set)),
-            cid_map,
-        );
+           let mut vtp = VsockThreadBackend::new(
+               BackendType::UnixDomainSocket(vsock_socket_path),
+               epoll_fd,
+               CID,
+               CONN_TX_BUF_SIZE,
+               Arc::new(RwLock::new(groups_set)),
+               cid_map,
+           );
 
-        assert!(!vtp.pending_raw_pkts());
+           assert!(!vtp.pending_raw_pkts());
 
-        let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
-        let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+           let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
+           let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
 
-        let (mem, descr_chain) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, b"hello");
-        let mem = mem.memory();
+           let (mem, descr_chain) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, b"hello");
+           let mem = mem.memory();
 
-        // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
-        let mut packet =
-            VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE)
-                .unwrap();
-        assert_eq!(
-            vtp.recv_raw_pkt(&mut packet).unwrap_err().to_string(),
-            Error::EmptyRawPktsQueue.to_string()
-        );
+           // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
+           let mut packet =
+               VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE)
+                   .unwrap();
+           assert_eq!(
+               vtp.recv_raw_pkt(&mut packet).unwrap_err().to_string(),
+               Error::EmptyRawPktsQueue.to_string()
+           );
 
 
-        packet.header_mut().set_type(VSOCK_TYPE_STREAM);
-        packet.header_mut().set_src_cid(CID);
-        packet.header_mut().set_dst_cid(SIBLING_CID);
-        packet.header_mut().set_dst_port(SIBLING_LISTENING_PORT);
-        packet.header_mut().set_op(VSOCK_OP_RW);
-        packet.header_mut().set_len(DATA_LEN as u32);
+           packet.header_mut().set_type(VSOCK_TYPE_STREAM);
+           packet.header_mut().set_src_cid(CID);
+           packet.header_mut().set_dst_cid(SIBLING_CID);
+           packet.header_mut().set_dst_port(SIBLING_LISTENING_PORT);
+           packet.header_mut().set_op(VSOCK_OP_RW);
+           packet.header_mut().set_len(DATA_LEN as u32);
 
-        //Payload is hello
-        /*packet
-            .data_slice()
-            .unwrap()
-            .copy_from(&[0xCAu8, 0xFEu8, 0xBAu8, 0xBEu8]);
-        */
+           //Payload is hello
+           /*packet
+               .data_slice()
+               .unwrap()
+               .copy_from(&[0xCAu8, 0xFEu8, 0xBAu8, 0xBEu8]);
+           */
 
-        vtp.send_pkt(&mut &packet).unwrap();
-        assert!(sibling_backend.threads[0]
-            .lock()
-            .unwrap()
-            .thread_backend
-            .pending_raw_pkts());
+           vtp.send_pkt(&mut &packet).unwrap();
+           assert!(sibling_backend.threads[0]
+               .lock()
+               .unwrap()
+               .thread_backend
+               .pending_raw_pkts());
 
-        packet.header_mut().set_dst_cid(SIBLING2_CID);
-        vtp.send_pkt(&mut &packet).unwrap();
-        // packet should be discarded since sibling2 is not in the same group
-        assert!(!sibling2_backend.threads[0]
-            .lock()
-            .unwrap()
-            .thread_backend
-            .pending_raw_pkts());
+           packet.header_mut().set_dst_cid(SIBLING2_CID);
+           vtp.send_pkt(&mut &packet).unwrap();
+           // packet should be discarded since sibling2 is not in the same group
+           assert!(!sibling2_backend.threads[0]
+               .lock()
+               .unwrap()
+               .thread_backend
+               .pending_raw_pkts());
 
-        let mut recvd_pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
-        let (recvd_hdr_raw, recvd_data_raw) = recvd_pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+           let mut recvd_pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
+           let (recvd_hdr_raw, recvd_data_raw) = recvd_pkt_raw.split_at_mut(PKT_HEADER_SIZE);
 
-        let mut recvd_packet =
-            // SAFETY: Safe as recvd_hdr_raw and recvd_data_raw are guaranteed to be valid.
-            unsafe { VsockPacket::new(recvd_hdr_raw, Some(recvd_data_raw)).unwrap() };
+           let mut recvd_packet =
+               // SAFETY: Safe as recvd_hdr_raw and recvd_data_raw are guaranteed to be valid.
+               unsafe { VsockPacket::new(recvd_hdr_raw, Some(recvd_data_raw)).unwrap() };
 
-        sibling_backend.threads[0]
-            .lock()
-            .unwrap()
-            .thread_backend
-            .recv_raw_pkt(&mut recvd_packet)
-            .unwrap();
+           sibling_backend.threads[0]
+               .lock()
+               .unwrap()
+               .thread_backend
+               .recv_raw_pkt(&mut recvd_packet)
+               .unwrap();
 
-        assert_eq!(recvd_packet.type_(), VSOCK_TYPE_STREAM);
-        assert_eq!(recvd_packet.src_cid(), CID);
-        assert_eq!(recvd_packet.dst_cid(), SIBLING_CID);
-        assert_eq!(recvd_packet.dst_port(), SIBLING_LISTENING_PORT);
-        assert_eq!(recvd_packet.op(), VSOCK_OP_RW);
-        assert_eq!(recvd_packet.len(), DATA_LEN as u32);
+           assert_eq!(recvd_packet.type_(), VSOCK_TYPE_STREAM);
+           assert_eq!(recvd_packet.src_cid(), CID);
+           assert_eq!(recvd_packet.dst_cid(), SIBLING_CID);
+           assert_eq!(recvd_packet.dst_port(), SIBLING_LISTENING_PORT);
+           assert_eq!(recvd_packet.op(), VSOCK_OP_RW);
+           assert_eq!(recvd_packet.len(), DATA_LEN as u32);
 
-        assert_eq!(recvd_data_raw[0], 0xCAu8);
-        assert_eq!(recvd_data_raw[1], 0xFEu8);
-        assert_eq!(recvd_data_raw[2], 0xBAu8);
-        assert_eq!(recvd_data_raw[3], 0xBEu8);
+           assert_eq!(recvd_data_raw[0], 0xCAu8);
+           assert_eq!(recvd_data_raw[1], 0xFEu8);
+           assert_eq!(recvd_data_raw[2], 0xBAu8);
+           assert_eq!(recvd_data_raw[3], 0xBEu8);
 
-        test_dir.close().unwrap();
-    }
- */
+           test_dir.close().unwrap();
+       }
+    */
 }

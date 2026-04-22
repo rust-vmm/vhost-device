@@ -14,7 +14,7 @@ current terminal.
 The "network" backend creates a local TCP port (specified on vhost-device-console
 arguments) and allows input/output to the guest console via that socket.
 
-This program is tested with QEMU's `vhost-user-device-pci` device.
+This program can be used with QEMU's `vhost-user-test-device-pci` device.
 Examples' section below.
 
 ## Synopsis
@@ -108,14 +108,14 @@ host# qemu-system                                               \
 >       which implements `vhost-user-console` device.
 > - https://github.com/virtualopensystems/qemu/tree/vhu-console-rfc
 
-2) Using `vhost-user-device-pci`:
+2) Using `vhost-user-test-device-pci` (requires QEMU version 10.2 or newer)
 ```text
 host# qemu-system                                                                   \
     <normal QEMU options>                                                           \
     -machine <machine options>,memory-backend=mem0                                  \
     -object memory-backend-memfd,id=mem0,size=<Guest RAM size>                      \ # size == -m size
     -chardev socket,id=con0,path=/tmp/console.sock0                                 \
-    -device vhost-user-device-pci,chardev=con0,virtio-id=3,num_vqs=4,config_size=12 \
+    -device vhost-user-test-device-pci,chardev=con0,virtio-id=3,num_vqs=4,config_size=12 \
     ...
 ```
 

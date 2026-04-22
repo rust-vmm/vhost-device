@@ -8,7 +8,7 @@ the vhost-user frontend device. The 'can-devices' represents a list of
 CAN/FD devices appears in the host system which vhost-device-can will 
 forward messages to and from the frontend side.
 
-This program is tested with QEMU's `vhost-user-device-pci` device.
+This program is tested with QEMU's `vhost-user-test-device-pci` device.
 Examples' section below.
 
 ## Synopsis
@@ -91,14 +91,14 @@ The QEMU invocation needs to create a chardev socket the device can
 use to communicate as well as share the guests memory over a memfd.
 
 There are two option for running QEMU with vhost-device-can:
-1) Using `vhost-user-device-pci` available upstream since QEMU `v8.2.0`:
+1) Using `vhost-user-test-device-pci`  (requires QEMU version 10.2 or newer):
 ```text
 host# qemu-system                                                                    \
     -m 4096                                                                          \
     -numa node,memdev=mem                                                            \
     -object memory-backend-memfd,id=mem,size=4G,share=on                             \
     -chardev socket,id=can0,path=/tmp/can.sock                                       \
-    -device vhost-user-device-pci,chardev=can0,virtio-id=36,num_vqs=3,config_size=16 \
+    -device vhost-user-test-device-pci,chardev=can0,virtio-id=36,num_vqs=3,config_size=16 \
     ...
 ```
 2) Using `vhost-user-can-pci`:

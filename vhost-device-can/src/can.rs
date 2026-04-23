@@ -367,6 +367,8 @@ mod tests {
 
         // Test start_read_thread
         let thread_handle = CanController::start_read_thread(arc_controller.clone());
+
+        arc_controller.write().unwrap().exit_read_thread();
         assert!(thread_handle.join().is_ok());
     }
 

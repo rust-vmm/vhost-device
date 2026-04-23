@@ -221,7 +221,7 @@ impl VhostUserCanBackend {
         };
         let res_len = response.length.to_native();
         let res_can_id = response.can_id.to_native();
-        let mut res_flags = response.flags.to_native();
+        let res_flags = response.flags.to_native();
 
         // If we receive an error message check if that's a busoff.
         // If no just drop the message, otherwise update config and return.
@@ -270,18 +270,6 @@ impl VhostUserCanBackend {
             }
             // If remote transfer request is enabled add the according flag
             can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_RTR).into();
-        }
-
-        // Treat Vcan interface as CANFD if MTU is set to 64 bytes.
-        //
-        // Vcan can not be configured as CANFD interface, but it is
-        // possible to configure its MTU to 64 bytes. So if a messages
-        // bigger than 8 bytes is being received we consider it as
-        // CANFD message.
-        let can_name = self.controller.read().unwrap().can_name.clone();
-        if self.check_features(VIRTIO_CAN_F_CAN_FD) && res_len > 8 && can_name == "vcan0" {
-            res_flags |= CAN_FRMF_TYPE_FD;
-            warn!("\n\n\nCANFD VCAN0\n\n");
         }
 
         // Check if CAN/FD length is out-of-range (based on negotiated features)
@@ -2005,45 +1993,6 @@ mod tests {
         assert_eq!(
             vu_can_backend.check_rx_frame(frame).unwrap_err(),
             Error::InvalidCanLength(62)
-        );
-    }
-
-    #[test]
-    fn test_virtio_can_check_rx_canfd_vcan0() {
-        let controller =
-            CanController::new("vcan0".to_string()).expect("Could not build controller");
-        let controller = Arc::new(RwLock::new(controller));
-        let mut vu_can_backend =
-            VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
-
-        // Enable VIRTIO_CAN_F_CAN_FD feature
-        vu_can_backend.acked_features((1 << VIRTIO_CAN_F_CAN_FD) | (1 << VIRTIO_CAN_F_CAN_CLASSIC));
-
-        // If VIRTIO_CAN_F_CAN_FD  and VIRTIO_CAN_F_CAN_CLASSIC are negotiated
-        // and interface is "vcan0" check if return message has
-        // VIRTIO_CAN_FLAGS_FD in flags and has been treated as CANFD frame.
-        let frame = VirtioCanFrame {
-            msg_type: 0.into(),
-            can_id: 0.into(),
-            length: 48.into(),
-            reserved: 0.into(),
-            flags: 0.into(),
-            sdu: [0; 64],
-        };
-
-        assert_eq!(
-            vu_can_backend
-                .check_rx_frame(frame)
-                .unwrap()
-                .flags
-                .to_native()
-                & VIRTIO_CAN_FLAGS_FD,
-            VIRTIO_CAN_FLAGS_FD
-        );
-
-        assert_eq!(
-            vu_can_backend.check_rx_frame(frame).unwrap().length,
-            frame.length
         );
     }
 

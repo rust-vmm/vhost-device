@@ -50,10 +50,27 @@ pub(crate) enum Error {
 }
 
 #[derive(Debug)]
+pub(crate) enum CanSocketKind {
+    Fd(CanFdSocket),
+    #[cfg(test)]
+    Mock,
+}
+
+impl CanSocketKind {
+    pub fn write_frame(&self, frame: &CanAnyFrame) -> std::io::Result<()> {
+        match self {
+            CanSocketKind::Fd(socket) => socket.write_frame(frame),
+            #[cfg(test)]
+            CanSocketKind::Mock => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct CanController {
     pub config: VirtioCanConfig,
     pub can_name: String,
-    pub can_socket: Option<CanFdSocket>,
+    pub can_socket: Option<CanSocketKind>,
     pub rx_event_fd: EventFd,
     rx_fifo: Queue<VirtioCanFrame>,
     pub status: bool,
@@ -78,6 +95,30 @@ impl CanController {
             status: true,
             ctrl_state: CAN_CS_STOPPED,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_mock() -> Result<CanController> {
+        let rx_fifo = Queue::new();
+        let rx_efd = EventFd::new(EFD_NONBLOCK).map_err(|_| Error::EventFdFailed)?;
+
+        Ok(CanController {
+            config: VirtioCanConfig { status: 0x0.into() },
+            can_name: "vcan-mock".to_string(),
+            can_socket: Some(CanSocketKind::Mock),
+            rx_event_fd: rx_efd,
+            rx_fifo,
+            status: true,
+            ctrl_state: CAN_CS_STOPPED,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_test() -> Result<CanController> {
+        if let Ok(iface) = std::env::var("TEST_CAN_INTERFACE") {
+            return CanController::new(iface);
+        }
+        CanController::new_mock()
     }
 
     pub fn print_can_frame(canframe: VirtioCanFrame) {
@@ -128,8 +169,14 @@ impl CanController {
     }
 
     pub fn open_can_socket(&mut self) -> Result<()> {
+        // Mock already provides a socket; do not overwrite it with a real open.
+        #[cfg(test)]
+        if matches!(self.can_socket, Some(CanSocketKind::Mock)) {
+            return Ok(());
+        }
+
         self.can_socket = match CanFdSocket::open(&self.can_name) {
-            Ok(socket) => Some(socket),
+            Ok(socket) => Some(CanSocketKind::Fd(socket)),
             Err(_) => {
                 warn!("Error opening CAN socket");
                 return Err(Error::SocketOpen);
@@ -159,6 +206,21 @@ impl CanController {
     }
 
     pub fn read_can_socket(controller: Arc<RwLock<CanController>>) -> Result<()> {
+        // Mock has no real socket to read from; wait until the thread is asked to exit.
+        #[cfg(test)]
+        if matches!(
+            controller.read().unwrap().can_socket,
+            Some(CanSocketKind::Mock)
+        ) {
+            loop {
+                if !controller.read().unwrap().status {
+                    log::debug!("exit read can thread");
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+
         let can_name = &controller.read().unwrap().can_name.clone();
         log::debug!("Start reading from {can_name} socket!");
         let socket = match CanFdSocket::open(can_name) {
@@ -297,16 +359,13 @@ mod tests {
 
     #[test]
     fn test_can_controller_creation() {
-        let can_name = "can".to_string();
-
-        let controller = CanController::new(can_name.clone()).unwrap();
-        assert_eq!(controller.can_name, can_name);
+        let controller = CanController::new_test().unwrap();
+        assert!(!controller.can_name.is_empty());
     }
 
     #[test]
     fn test_can_controller_push_and_pop() {
-        let can_name = "can".to_string();
-        let mut controller = CanController::new(can_name.clone()).unwrap();
+        let mut controller = CanController::new_test().unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_RX.into(),
@@ -327,8 +386,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_config() {
-        let can_name = "can".to_string();
-        let mut controller = CanController::new(can_name.clone()).unwrap();
+        let mut controller = CanController::new_test().unwrap();
 
         // Test config
         let config = controller.config();
@@ -337,8 +395,7 @@ mod tests {
 
     #[test]
     fn test_can_controller_operation() {
-        let can_name = "can".to_string();
-        let mut controller = CanController::new(can_name.clone()).unwrap();
+        let mut controller = CanController::new_test().unwrap();
 
         let frame = VirtioCanFrame {
             msg_type: VIRTIO_CAN_TX.into(),
@@ -349,20 +406,16 @@ mod tests {
             sdu: [0; 64],
         };
 
-        match controller.open_can_socket() {
-            Ok(_) => {
-                // Test operation
-                let operation_result = controller.can_out(frame);
-                assert!(operation_result.is_ok());
-            }
-            Err(_) => warn!("There is no CAN interface with {can_name} name"),
-        }
+        controller
+            .open_can_socket()
+            .expect("failed to open CAN interface");
+
+        assert!(controller.can_out(frame).is_ok());
     }
 
     #[test]
     fn test_can_controller_start_read_thread() {
-        let can_name = "can".to_string();
-        let controller = CanController::new(can_name.clone()).unwrap();
+        let controller = CanController::new_test().unwrap();
         let arc_controller = Arc::new(RwLock::new(controller));
 
         // Test start_read_thread
@@ -375,7 +428,7 @@ mod tests {
     #[test]
     fn test_can_open_socket_fail() {
         let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+            CanController::new("nonexistent_can".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 
@@ -388,7 +441,7 @@ mod tests {
     #[test]
     fn test_can_read_socket_fail() {
         let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+            CanController::new("nonexistent_can".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
 

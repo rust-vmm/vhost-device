@@ -272,16 +272,12 @@ impl VhostUserCanBackend {
             can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_RTR).into();
         }
 
-        // Treat Vcan interface as CANFD if MTU is set to 64 bytes.
-        //
-        // Vcan can not be configured as CANFD interface, but it is
-        // possible to configure its MTU to 64 bytes. So if a messages
-        // bigger than 8 bytes is being received we consider it as
-        // CANFD message.
-        let can_name = self.controller.read().unwrap().can_name.clone();
-        if self.check_features(VIRTIO_CAN_F_CAN_FD) && res_len > 8 && can_name == "vcan0" {
+        // Classic CAN frames cannot exceed 8 bytes. If CAN-FD has been
+        // negotiated and the frame length is > 8, treat it as a CAN-FD
+        // frame. This also covers virtual interfaces (vcan) which do not
+        // distinguish between CAN and CAN-FD at the socket level.
+        if self.check_features(VIRTIO_CAN_F_CAN_FD) && res_len > 8 {
             res_flags |= CAN_FRMF_TYPE_FD;
-            warn!("\n\n\nCANFD VCAN0\n\n");
         }
 
         // Check if CAN/FD length is out-of-range (based on negotiated features)

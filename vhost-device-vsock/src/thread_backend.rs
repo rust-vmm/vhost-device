@@ -266,48 +266,38 @@ impl VsockThreadBackend {
     pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Pop an event from the backend_rxq
         let key = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
-        let conn = match self.conn_map.get_mut(&key) {
-            Some(conn) => conn,
-            None => {
-                // assume that the connection does not exist
-                return Ok(());
+        match self.conn_map.get_mut(&key) {
+            // We received a packet meant for a connection we are aware of
+            Some(conn) => {
+                if conn.rx_queue.peek() == Some(RxOps::Reset) {
+                    let conn = self.conn_map.remove(&key).unwrap();
+                    self.listener_map.remove(&conn.stream.as_raw_fd());
+                    self.stream_map.remove(&conn.stream.as_raw_fd());
+                    self.local_port_set.remove(&conn.local_port);
+                    VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
+                        .unwrap_or_else(|err| {
+                            warn!(
+                                "Could not remove epoll listener for fd {:?}: {:?}",
+                                conn.stream.as_raw_fd(),
+                                err
+                            )
+                        });
+
+                    // Initialize the packet header to contain a VSOCK_OP_RST operation
+                    self.build_rst_pkt(pkt, conn.guest_cid, conn.local_port, conn.peer_port);
+                    return Ok(());
+                }
+
+                // Handle other packet types per connection
+                conn.recv_pkt(pkt)
             }
-        };
-
-        if conn.rx_queue.peek() == Some(RxOps::Reset) {
-            // Handle RST events here
-            let conn = self.conn_map.remove(&key).unwrap();
-            self.listener_map.remove(&conn.stream.as_raw_fd());
-            self.stream_map.remove(&conn.stream.as_raw_fd());
-            self.local_port_set.remove(&conn.local_port);
-            VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
-                .unwrap_or_else(|err| {
-                    warn!(
-                        "Could not remove epoll listener for fd {:?}: {:?}",
-                        conn.stream.as_raw_fd(),
-                        err
-                    )
-                });
-
-            // Initialize the packet header to contain a VSOCK_OP_RST operation
-            pkt.set_op(VSOCK_OP_RST)
-                .set_src_cid(VSOCK_HOST_CID)
-                .set_dst_cid(conn.guest_cid)
-                .set_src_port(conn.local_port)
-                .set_dst_port(conn.peer_port)
-                .set_len(0)
-                .set_type(VSOCK_TYPE_STREAM)
-                .set_flags(0)
-                .set_buf_alloc(0)
-                .set_fwd_cnt(0);
-
-            return Ok(());
+            None => {
+                // we got a packet for a connection not in the map.
+                // it must be a rst
+                self.build_rst_pkt(pkt, self.guest_cid, key.local_port, key.peer_port);
+                Ok(())
+            }
         }
-
-        // Handle other packet types per connection
-        conn.recv_pkt(pkt)?;
-
-        Ok(())
     }
 
     /// Deliver a guest generated packet to its destination in the backend.
@@ -358,22 +348,20 @@ impl VsockThreadBackend {
             }
         }
 
-        // TODO: Rst if packet has unsupported type
         if pkt.type_() != VSOCK_TYPE_STREAM {
             info!("vsock: dropping packet of unknown type");
+            self.enq_rst(pkt.dst_port(), pkt.src_port());
             return Ok(());
         }
 
         let key = ConnMapKey::new(pkt.dst_port(), pkt.src_port());
 
-        // TODO: Handle cases where connection does not exist and packet op
-        // is not VSOCK_OP_REQUEST
         if !self.conn_map.contains_key(&key) {
             // The packet contains a new connection request
             if pkt.op() == VSOCK_OP_REQUEST {
                 self.handle_new_guest_conn(pkt);
             } else {
-                // TODO: send back RST
+                self.enq_rst(pkt.dst_port(), pkt.src_port());
             }
             return Ok(());
         }
@@ -452,7 +440,7 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::UnixConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Unix(stream), pkt))
-                    .unwrap_or_else(|_| self.enq_rst());
+                    .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
             }
             #[cfg(feature = "backend_vsock")]
             BackendType::Vsock(vsock_info) => {
@@ -460,7 +448,7 @@ impl VsockThreadBackend {
                     .and_then(|stream| stream.set_nonblocking(true).map(|_| stream))
                     .map_err(Error::VsockConnect)
                     .and_then(|stream| self.add_new_guest_conn(StreamType::Vsock(stream), pkt))
-                    .unwrap_or_else(|_| self.enq_rst());
+                    .unwrap_or_else(|_| self.enq_rst(pkt.dst_port(), pkt.src_port()));
             }
         }
     }
@@ -506,9 +494,30 @@ impl VsockThreadBackend {
     }
 
     /// Enqueue RST packets to be sent to guest.
-    fn enq_rst(&mut self) {
-        // TODO
+    fn enq_rst(&mut self, local_port: u32, dst_port: u32) {
         log::debug!("New guest conn error: Enqueue RST");
+        self.backend_rxq
+            .push_front(ConnMapKey::new(local_port, dst_port));
+    }
+
+    /// Fill out RST pkt data.
+    fn build_rst_pkt<B: BitmapSlice>(
+        &self,
+        pkt: &mut VsockPacket<B>,
+        cid: u64,
+        src_port: u32,
+        dst_port: u32,
+    ) {
+        pkt.set_op(VSOCK_OP_RST)
+            .set_src_cid(VSOCK_HOST_CID)
+            .set_dst_cid(cid)
+            .set_src_port(src_port)
+            .set_dst_port(dst_port)
+            .set_len(0)
+            .set_type(VSOCK_TYPE_STREAM)
+            .set_flags(0)
+            .set_buf_alloc(0)
+            .set_fwd_cnt(0);
     }
 }
 
@@ -584,8 +593,25 @@ mod tests {
 
         vtp.recv_pkt(&mut packet).unwrap();
 
-        // TODO: it is a nop for now
-        vtp.enq_rst();
+        vtp.enq_rst(packet.src_port(), packet.dst_port());
+
+        // check that receiving should yield rst when we send an invalid type
+        packet.set_type(10);
+        packet.set_op(VSOCK_OP_RW);
+        vtp.send_pkt(&packet).unwrap();
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert!(packet.op() == VSOCK_OP_RST);
+
+        // check that receiving should yield rst when we send a packet with ports that
+        // aren't in the connection map and the operation isn't a connection request
+        packet.set_type(VSOCK_TYPE_STREAM);
+        packet.set_dst_cid(VSOCK_HOST_CID);
+        packet.set_src_cid(CID);
+        packet.set_dst_port(12345);
+        packet.set_op(VSOCK_OP_RW);
+        vtp.send_pkt(&packet).unwrap();
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert!(packet.op() == VSOCK_OP_RST);
     }
 
     #[test]
@@ -755,6 +781,77 @@ mod tests {
         assert_eq!(recvd_data_raw[1], 0xFEu8);
         assert_eq!(recvd_data_raw[2], 0xBAu8);
         assert_eq!(recvd_data_raw[3], 0xBEu8);
+
+        test_dir.close().unwrap();
+    }
+
+    #[test]
+    fn test_recv_pkt_rst_cleans_up_conn() {
+        const CID: u64 = 3;
+        const LOCAL_PORT: u32 = 6000;
+        const PEER_PORT: u32 = 7000;
+
+        let epoll_fd = epoll::create(false).unwrap();
+        let groups_set: HashSet<String> = vec![GROUP_NAME.to_string()].into_iter().collect();
+        let cid_map: Arc<RwLock<CidMap>> = Arc::new(RwLock::new(HashMap::new()));
+
+        let test_dir = tempdir().expect("Could not create a temp test directory.");
+        let vsock_socket_path = test_dir.path().join("test_rst_cleanup.vsock");
+
+        let mut vtp = VsockThreadBackend::new(
+            BackendType::UnixDomainSocket(vsock_socket_path),
+            epoll_fd,
+            CID,
+            CONN_TX_BUF_SIZE,
+            Arc::new(RwLock::new(groups_set)),
+            cid_map,
+        );
+
+        // Create a unix stream pair. One end backs the connection (cloned so that
+        // the original can also be placed in stream_map, mirroring add_new_guest_conn).
+        let (stream_a, _stream_b) = std::os::unix::net::UnixStream::pair().unwrap();
+        let conn_stream = StreamType::Unix(stream_a.try_clone().unwrap());
+        let conn_stream_fd = conn_stream.as_raw_fd();
+
+        let mut conn = VsockConnection::new_local_init(
+            conn_stream,
+            VSOCK_HOST_CID,
+            LOCAL_PORT,
+            CID,
+            PEER_PORT,
+            epoll_fd,
+            CONN_TX_BUF_SIZE,
+        );
+        conn.rx_queue.enqueue(RxOps::Reset);
+
+        let key = ConnMapKey::new(LOCAL_PORT, PEER_PORT);
+
+        vtp.conn_map.insert(key.clone(), conn);
+        vtp.listener_map.insert(conn_stream_fd, key.clone());
+        vtp.stream_map
+            .insert(conn_stream_fd, StreamType::Unix(stream_a));
+        vtp.local_port_set.insert(LOCAL_PORT);
+        vtp.backend_rxq.push_back(key.clone());
+
+        let mut pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN];
+        let (hdr_raw, data_raw) = pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+        // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
+        let mut packet = unsafe { VsockPacket::new(hdr_raw, Some(data_raw)).unwrap() };
+
+        vtp.recv_pkt(&mut packet).unwrap();
+
+        // The packet should be a RST addressed back to the guest peer
+        assert_eq!(packet.op(), VSOCK_OP_RST);
+        assert_eq!(packet.src_cid(), VSOCK_HOST_CID);
+        assert_eq!(packet.dst_cid(), CID);
+        assert_eq!(packet.src_port(), LOCAL_PORT);
+        assert_eq!(packet.dst_port(), PEER_PORT);
+
+        // The connection should have been removed from all tracking structures
+        assert!(!vtp.conn_map.contains_key(&key));
+        assert!(!vtp.listener_map.contains_key(&conn_stream_fd));
+        assert!(!vtp.stream_map.contains_key(&conn_stream_fd));
+        assert!(!vtp.local_port_set.contains(&LOCAL_PORT));
 
         test_dir.close().unwrap();
     }

@@ -230,8 +230,8 @@ impl VsockConfig {
 /// the corresponding connection.
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
 pub(crate) struct ConnMapKey {
-    local_port: u32,
-    peer_port: u32,
+    pub(crate) local_port: u32,
+    pub(crate) peer_port: u32,
 }
 
 impl ConnMapKey {

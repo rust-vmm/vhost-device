@@ -30,7 +30,7 @@ vm-memory = { workspace = true }
 vmm-sys-util = { workspace = true }
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.4", optional = true }
-libc = { version = "0.2.185", optional = true }
+libc = { version = "0.2.186", optional = true }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

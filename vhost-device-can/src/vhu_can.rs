@@ -272,16 +272,12 @@ impl VhostUserCanBackend {
             can_rx.flags = (can_rx.flags.to_native() | VIRTIO_CAN_FLAGS_RTR).into();
         }
 
-        // Treat Vcan interface as CANFD if MTU is set to 64 bytes.
-        //
-        // Vcan can not be configured as CANFD interface, but it is
-        // possible to configure its MTU to 64 bytes. So if a messages
-        // bigger than 8 bytes is being received we consider it as
-        // CANFD message.
-        let can_name = self.controller.read().unwrap().can_name.clone();
-        if self.check_features(VIRTIO_CAN_F_CAN_FD) && res_len > 8 && can_name == "vcan0" {
+        // Classic CAN frames cannot exceed 8 bytes. If CAN-FD has been
+        // negotiated and the frame length is > 8, treat it as a CAN-FD
+        // frame. This also covers virtual interfaces (vcan) which do not
+        // distinguish between CAN and CAN-FD at the socket level.
+        if self.check_features(VIRTIO_CAN_F_CAN_FD) && res_len > 8 {
             res_flags |= CAN_FRMF_TYPE_FD;
-            warn!("\n\n\nCANFD VCAN0\n\n");
         }
 
         // Check if CAN/FD length is out-of-range (based on negotiated features)
@@ -777,8 +773,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_empty_requests() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -801,8 +796,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_empty_handle_request() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -873,8 +867,7 @@ mod tests {
     #[test]
     fn test_virtio_can_ctrl_request() {
         // Initialize can device and vhost-device-can backend
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1100,8 +1093,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_tx_unknown_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1123,8 +1115,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_tx_can_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1171,8 +1162,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_tx_canfd_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller).expect("Could not build vhucan device");
@@ -1278,8 +1268,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_tx_rtr_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1340,8 +1329,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_tx_eff_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1401,8 +1389,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_tx_general_tests() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1498,8 +1485,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_tx_device_stopped_test() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1554,7 +1540,7 @@ mod tests {
     #[test]
     fn test_virtio_can_tx_device_started_test_send_fail() {
         let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+            CanController::new("nonexistent_can".to_string()).expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1611,8 +1597,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_tx_device_started_check_frame_fail() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1666,8 +1651,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_err_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1709,8 +1693,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_features_not_negotiated() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1746,8 +1729,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_eff_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1814,8 +1796,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_rtr_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1878,8 +1859,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_can_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1925,8 +1905,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_canfd_frame() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -2010,8 +1989,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_check_rx_canfd_vcan0() {
-        let controller =
-            CanController::new("vcan0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -2049,8 +2027,7 @@ mod tests {
 
     #[test]
     fn test_virtio_can_rx_request() {
-        let controller =
-            CanController::new("can0".to_string()).expect("Could not build controller");
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");

@@ -79,7 +79,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -90,7 +90,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -137,6 +137,26 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "bindgen"
+version = "0.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+dependencies = [
+ "bitflags 2.11.1",
+ "cexpr",
+ "clang-sys",
+ "itertools 0.13.0",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 1.1.0",
+ "shlex",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
@@ -151,7 +171,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash",
+ "rustc-hash 2.1.2",
  "shlex",
  "syn 2.0.117",
 ]
@@ -232,6 +252,12 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
@@ -326,7 +352,7 @@ dependencies = [
  "encode_unicode",
  "libc 0.2.186",
  "unicode-width",
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -448,6 +474,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
+name = "enumn"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f9ed6b3789237c8a0c1c505af1c7eb2c560df6186f01b098c3a1064ea532f38"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "env_filter"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -493,7 +530,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc 0.2.186",
- "windows-sys 0.61.1",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -652,7 +689,7 @@ dependencies = [
  "gobject-sys",
  "libc 0.2.186",
  "system-deps",
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -978,9 +1015,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libc"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7222002e5385b4d9327755661e3847c970e8fbf9dea6da8c57f16e8cfbff53a8"
+checksum = "e136bfa874086c78f34d6eba98c423fefe464ce57f38164d16893ba8ed358e70"
 
 [[package]]
 name = "libgpiod"
@@ -1001,7 +1038,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae4417fe6c528d48e1982b8fc7fdd9999013065cb8b4978369c2e4fea69ad4df"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "system-deps",
 ]
 
@@ -1038,7 +1075,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "901049455d2eb6decf9058235d745237952f4804bc584c5fcb41412e6adcc6e0"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "cc",
  "system-deps",
 ]
@@ -1124,7 +1161,7 @@ dependencies = [
  "libc 0.2.186",
  "log",
  "wasi",
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1192,13 +1229,25 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
+dependencies = [
+ "bitflags 2.11.1",
+ "cfg-if",
+ "cfg_aliases 0.1.1",
+ "libc 0.2.186",
+]
+
+[[package]]
+name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.1",
  "libc 0.2.186",
  "memoffset",
 ]
@@ -1211,7 +1260,7 @@ checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.1",
  "libc 0.2.186",
 ]
 
@@ -1223,7 +1272,7 @@ checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
- "cfg_aliases",
+ "cfg_aliases 0.2.1",
  "libc 0.2.186",
  "memoffset",
 ]
@@ -1276,6 +1325,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_enum"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1207a7e20ad57b847bbddc6776b968420d38292bbfe2089accff5e19e82454c"
+dependencies = [
+ "num_enum_derive",
+ "rustversion",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1320,6 +1391,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
 name = "pastey"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1354,7 +1431,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb028afee0d6ca17020b090e3b8fa2d7de23305aef975c7e5192a5050246ea36"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "libspa-sys",
  "system-deps",
 ]
@@ -1494,6 +1571,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-cast"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d"
+dependencies = [
+ "ref-cast-impl",
+]
+
+[[package]]
+name = "ref-cast-impl"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1576,6 +1673,12 @@ dependencies = [
 
 [[package]]
 name = "rustc-hash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
@@ -1599,7 +1702,7 @@ dependencies = [
  "errno",
  "libc 0.2.186",
  "linux-raw-sys",
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1868,7 +1971,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.61.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2032,6 +2135,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "v4l2r"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b609e6cc820e3f95dac66f8ef4efbdf1f39b8d119ec16e6476f797ec95ebaa7"
+dependencies = [
+ "anyhow",
+ "bindgen 0.70.1",
+ "bitflags 2.11.1",
+ "enumn",
+ "log",
+ "nix 0.28.0",
+ "paste",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "v4l2r"
+version = "0.0.7"
+source = "git+https://github.com/Gnurou/v4l2r?rev=7b44138#7b441383125ae583017a1c18b3fc9ec6c88ddbe8"
+dependencies = [
+ "anyhow",
+ "bindgen 0.70.1",
+ "bitflags 2.11.1",
+ "enumn",
+ "log",
+ "nix 0.28.0",
+ "paste",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "version-compare"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2057,6 +2191,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhost"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee90657203a8644e9a0860a0db6a7887d8ef0c7bc09fc22dfa4ae75df65bac86"
+dependencies = [
+ "bitflags 2.11.1",
+ "libc 0.2.186",
+ "uuid",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "vhost-device-can"
 version = "0.1.0"
 dependencies = [
@@ -2067,8 +2214,8 @@ dependencies = [
  "queues",
  "socketcan",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2088,8 +2235,8 @@ dependencies = [
  "log",
  "queues",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2107,8 +2254,8 @@ dependencies = [
  "libgpiod",
  "log",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2131,8 +2278,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virglrenderer",
  "virtio-bindings",
  "virtio-queue",
@@ -2150,8 +2297,8 @@ dependencies = [
  "libc 0.2.186",
  "log",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2173,12 +2320,42 @@ dependencies = [
  "rand",
  "tempfile",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
+]
+
+[[package]]
+name = "vhost-device-media"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "bitflags 2.11.1",
+ "clap",
+ "env_logger",
+ "epoll",
+ "futures-executor",
+ "libc 0.2.186",
+ "log",
+ "num_enum",
+ "ref-cast",
+ "rstest",
+ "tempfile",
+ "thiserror 2.0.18",
+ "v4l2r 0.0.7 (git+https://github.com/Gnurou/v4l2r?rev=7b44138)",
+ "vhost 0.16.0",
+ "vhost-user-backend 0.22.0",
+ "virtio-bindings",
+ "virtio-media",
+ "virtio-media-ffmpeg-decoder",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2194,8 +2371,8 @@ dependencies = [
  "rand",
  "tempfile",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2213,8 +2390,8 @@ dependencies = [
  "log",
  "nix 0.31.2",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2231,8 +2408,8 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2250,8 +2427,8 @@ dependencies = [
  "log",
  "tempfile",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2275,8 +2452,8 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2294,8 +2471,8 @@ dependencies = [
  "libc 0.2.186",
  "log",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2312,8 +2489,8 @@ dependencies = [
  "libc 0.2.186",
  "log",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2335,8 +2512,8 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.18",
- "vhost",
- "vhost-user-backend",
+ "vhost 0.15.0",
+ "vhost-user-backend 0.21.0",
  "virtio-bindings",
  "virtio-queue",
  "virtio-vsock",
@@ -2353,7 +2530,22 @@ checksum = "783587813a59c42c36519a6e12bb31eb2d7fa517377428252ba4cc2312584243"
 dependencies = [
  "libc 0.2.186",
  "log",
- "vhost",
+ "vhost 0.15.0",
+ "virtio-bindings",
+ "virtio-queue",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "vhost-user-backend"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5925983d8fb537752ad3e26604c0a17abfa5de77cb6773a096c8a959c9eca0f"
+dependencies = [
+ "libc 0.2.186",
+ "log",
+ "vhost 0.16.0",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -2366,7 +2558,7 @@ version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6906bec0a34658c4a81933153a784f9f8d8bcdbe67dcf9e58ea7b67fd1f8ec0b"
 dependencies = [
- "libc 1.0.0-alpha.1",
+ "libc 1.0.0-alpha.3",
  "log",
  "thiserror 2.0.18",
  "virglrenderer-sys",
@@ -2378,15 +2570,46 @@ version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e1cd0732acd1881433c4689bb2d359d64b9a64ddf64ab7231d9db35edbd181a"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "pkg-config",
 ]
 
 [[package]]
 name = "virtio-bindings"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "804f498a26d5a63be7bbb8bdcd3869c3f286c4c4a17108905276454da0caf8cb"
+checksum = "091f1f09cfbf2a78563b562e7a949465cce1aef63b6065645188d995162f8868"
+
+[[package]]
+name = "virtio-media"
+version = "0.0.7"
+source = "git+https://github.com/chromeos/virtio-media?rev=c6cc93a#c6cc93af5372d6aa37e370f88cfdb9288d27d66a"
+dependencies = [
+ "anyhow",
+ "enumn",
+ "libc 0.2.186",
+ "log",
+ "nix 0.28.0",
+ "thiserror 1.0.69",
+ "v4l2r 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zerocopy",
+]
+
+[[package]]
+name = "virtio-media-ffmpeg-decoder"
+version = "0.0.7"
+source = "git+https://github.com/chromeos/virtio-media?rev=c6cc93a#c6cc93af5372d6aa37e370f88cfdb9288d27d66a"
+dependencies = [
+ "anyhow",
+ "bindgen 0.70.1",
+ "enumn",
+ "libc 0.2.186",
+ "log",
+ "nix 0.28.0",
+ "pkg-config",
+ "thiserror 1.0.69",
+ "virtio-media",
+]
 
 [[package]]
 name = "virtio-queue"
@@ -2597,9 +2820,9 @@ dependencies = [
 
 [[package]]
 name = "windows-sys"
-version = "0.61.1"
+version = "0.61.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f109e41dd4a3c848907eb83d5a42ea98b3769495597450cf6d153507b166f0f"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]

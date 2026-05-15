@@ -266,48 +266,33 @@ impl VsockThreadBackend {
     pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Pop an event from the backend_rxq
         let key = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
-        let conn = match self.conn_map.get_mut(&key) {
-            Some(conn) => conn,
-            None => {
-                // assume that the connection does not exist
-                return Ok(());
+        match self.conn_map.get_mut(&key) {
+            // We received a packet meant for a connection we are aware of
+            Some(conn) => {
+                if conn.rx_queue.peek() == Some(RxOps::Reset) {
+                    let conn = self.conn_map.remove(&key).unwrap();
+                    self.listener_map.remove(&conn.stream.as_raw_fd());
+                    self.stream_map.remove(&conn.stream.as_raw_fd());
+                    self.local_port_set.remove(&conn.local_port);
+                    VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
+                        .unwrap_or_else(|err| {
+                            warn!(
+                                "Could not remove epoll listener for fd {:?}: {:?}",
+                                conn.stream.as_raw_fd(),
+                                err
+                            )
+                        });
+
+                    // Initialize the packet header to contain a VSOCK_OP_RST operation
+                    self.fill_rst_pkt(pkt, conn.guest_cid, conn.local_port, conn.peer_port);
+                    return Ok(());
+                }
+
+                // Handle other packet types per connection
+                conn.recv_pkt(pkt)
             }
-        };
-
-        if conn.rx_queue.peek() == Some(RxOps::Reset) {
-            // Handle RST events here
-            let conn = self.conn_map.remove(&key).unwrap();
-            self.listener_map.remove(&conn.stream.as_raw_fd());
-            self.stream_map.remove(&conn.stream.as_raw_fd());
-            self.local_port_set.remove(&conn.local_port);
-            VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
-                .unwrap_or_else(|err| {
-                    warn!(
-                        "Could not remove epoll listener for fd {:?}: {:?}",
-                        conn.stream.as_raw_fd(),
-                        err
-                    )
-                });
-
-            // Initialize the packet header to contain a VSOCK_OP_RST operation
-            pkt.set_op(VSOCK_OP_RST)
-                .set_src_cid(VSOCK_HOST_CID)
-                .set_dst_cid(conn.guest_cid)
-                .set_src_port(conn.local_port)
-                .set_dst_port(conn.peer_port)
-                .set_len(0)
-                .set_type(VSOCK_TYPE_STREAM)
-                .set_flags(0)
-                .set_buf_alloc(0)
-                .set_fwd_cnt(0);
-
-            return Ok(());
+            None => Ok(()),
         }
-
-        // Handle other packet types per connection
-        conn.recv_pkt(pkt)?;
-
-        Ok(())
     }
 
     /// Deliver a guest generated packet to its destination in the backend.

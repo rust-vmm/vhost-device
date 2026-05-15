@@ -510,6 +510,26 @@ impl VsockThreadBackend {
         // TODO
         log::debug!("New guest conn error: Enqueue RST");
     }
+
+    /// Fill out RST pkt data.
+    fn fill_rst_pkt<B: BitmapSlice>(
+        &self,
+        pkt: &mut VsockPacket<B>,
+        cid: u64,
+        src_port: u32,
+        dst_port: u32,
+    ) {
+        pkt.set_op(VSOCK_OP_RST)
+            .set_src_cid(VSOCK_HOST_CID)
+            .set_dst_cid(cid)
+            .set_src_port(src_port)
+            .set_dst_port(dst_port)
+            .set_len(0)
+            .set_type(VSOCK_TYPE_STREAM)
+            .set_flags(0)
+            .set_buf_alloc(0)
+            .set_fwd_cnt(0);
+    }
 }
 
 #[cfg(test)]

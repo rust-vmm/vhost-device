@@ -291,7 +291,10 @@ impl VsockThreadBackend {
                 // Handle other packet types per connection
                 conn.recv_pkt(pkt)
             }
-            None => Ok(()),
+            None => {
+                self.fill_rst_pkt(pkt, self.guest_cid, key.local_port, key.peer_port);
+                Ok(())
+            }
         }
     }
 

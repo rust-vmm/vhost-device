@@ -20,9 +20,11 @@ pub mod renderer;
 pub(crate) mod testutils;
 
 #[cfg(feature = "backend-virgl")]
-use std::fs::File;
+use std::fs::OpenOptions;
 #[cfg(feature = "backend-virgl")]
 use std::os::fd::OwnedFd;
+#[cfg(feature = "backend-virgl")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     fmt::{Display, Formatter},
     path::{Path, PathBuf},
@@ -134,7 +136,7 @@ pub struct GpuConfig {
     capset: GpuCapset,
     flags: GpuFlags,
     #[cfg(feature = "backend-virgl")]
-    render_server_fd: Option<OwnedFd>,
+    gpu_device_fd: Option<OwnedFd>,
 }
 
 #[derive(Debug, Default)]
@@ -209,8 +211,17 @@ impl GpuConfigBuilder {
         }
 
         #[cfg(feature = "backend-virgl")]
-        let render_server_fd = if let Some(gpu_device) = self.gpu_device {
-            let fd = File::open(&gpu_device)
+        let gpu_device_fd = if let Some(gpu_device) = self.gpu_device {
+            // Open DRM device with the same flags virglrenderer uses for GBM:
+            // - O_NOCTTY: Don't make this the controlling terminal
+            // - O_NONBLOCK: Non-blocking I/O (required for DRM ioctls)
+            // This fd will be duplicated and passed to virglrenderer via get_drm_fd
+            // callback
+            let fd = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(libc::O_NOCTTY | libc::O_NONBLOCK)
+                .open(&gpu_device)
                 .map(Into::into)
                 .map_err(|e| GpuConfigError::InvalidGpuDevice(gpu_device, e))?;
             Some(fd)
@@ -223,7 +234,7 @@ impl GpuConfigBuilder {
             capset,
             flags,
             #[cfg(feature = "backend-virgl")]
-            render_server_fd,
+            gpu_device_fd,
         })
     }
 }
@@ -284,8 +295,8 @@ impl GpuConfig {
     }
 
     #[cfg(feature = "backend-virgl")]
-    pub fn render_server_fd(&self) -> Option<&OwnedFd> {
-        self.render_server_fd.as_ref()
+    pub fn gpu_device_fd(&self) -> Option<&OwnedFd> {
+        self.gpu_device_fd.as_ref()
     }
 }
 

@@ -180,7 +180,7 @@ impl VirglRendererAdapter {
             fence_state.clone(),
         ));
 
-        let render_server_fd = match config.render_server_fd() {
+        let drm_fd = match config.gpu_device_fd() {
             Some(fd) => Some(
                 fd.try_clone()
                     .map_err(VirglAdapterError::CloneGpuDeviceFd)?,
@@ -188,7 +188,7 @@ impl VirglRendererAdapter {
             None => None,
         };
 
-        let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, render_server_fd)
+        let renderer = VirglRenderer::init(virglrenderer_flags, fence_handler, None, drm_fd)
             .map_err(VirglAdapterError::InitVirglRenderer)?;
         Ok(Self {
             renderer,

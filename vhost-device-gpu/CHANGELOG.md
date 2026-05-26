@@ -10,6 +10,7 @@
 ### Changed
 
 ### Fixed
+- [[#967] (https://github.com/rust-vmm/vhost-device/pull/967) vhost-device-gpu: Fix DRM device selection with --gpu-device option
 
 ### Deprecated
 

@@ -379,7 +379,7 @@ impl Renderer for VirglRendererAdapter {
             2 => CAPSET_ID_VENUS,
             _ => return Err(ErrInvalidParameter),
         };
-        let (version, size) = self.renderer.get_capset_info(index);
+        let (version, size) = self.renderer.get_capset_info(capset_id);
         Ok(OkCapsetInfo {
             capset_id,
             version,

@@ -376,7 +376,7 @@ impl Renderer for VirglRendererAdapter {
         let capset_id = match index {
             0 => CAPSET_ID_VIRGL,
             1 => CAPSET_ID_VIRGL2,
-            3 => CAPSET_ID_VENUS,
+            2 => CAPSET_ID_VENUS,
             _ => return Err(ErrInvalidParameter),
         };
         let (version, size) = self.renderer.get_capset_info(index);
@@ -938,7 +938,7 @@ mod virgl_cov_tests {
             assert_matches!(gpu.flush_resource(0, dirty), Ok(GpuResponse::OkNoData));
 
             // Test capset queries
-            for index in [0, 1, 3] {
+            for index in [0, 1, 2] {
                 test_capset_operations(&gpu, index);
             }
 

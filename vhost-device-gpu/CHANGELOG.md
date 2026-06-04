@@ -10,6 +10,7 @@
 ### Changed
 
 ### Fixed
+- [[#969] (https://github.com/rust-vmm/vhost-device/pull/970) vhost-device-gpu: Fix get_capset_info parameter
 - [[#967] (https://github.com/rust-vmm/vhost-device/pull/967) vhost-device-gpu: Fix DRM device selection with --gpu-device option
 
 ### Deprecated

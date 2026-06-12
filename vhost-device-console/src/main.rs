@@ -12,7 +12,6 @@ mod virtio_console;
 use std::{path::PathBuf, process::exit};
 
 use clap::Parser;
-use log::error;
 
 use crate::console::BackendType;
 
@@ -81,7 +80,7 @@ impl TryFrom<ConsoleArgs> for VuConsoleConfig {
 fn main() {
     env_logger::init();
     if let Err(e) = VuConsoleConfig::try_from(ConsoleArgs::parse()).and_then(start_backend) {
-        error!("{e}");
+        log::error!("{e}");
         exit(1);
     }
 }

@@ -6,7 +6,6 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use clap::ValueEnum;
-use log::trace;
 
 use crate::virtio_console::VirtioConsoleConfig;
 
@@ -37,7 +36,7 @@ impl ConsoleController {
     }
 
     pub fn config(&self) -> &VirtioConsoleConfig {
-        trace!("Get config");
+        log::trace!("Get config");
         &self.config
     }
 }

@@ -13,7 +13,6 @@ use std::{
     thread::Builder,
 };
 
-use log::info;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
@@ -141,7 +140,7 @@ pub fn start_backend(config: VuConsoleConfig) -> Result<()> {
         .enumerate()
     {
         let tcp_addr = tcp_addr.clone();
-        info!("thread_id: {thread_id}, socket: {socket:?}");
+        log::info!("thread_id: {thread_id}, socket: {socket:?}");
 
         let name = format!("vhu-console-{tcp_addr}");
         let sender = senders.clone();

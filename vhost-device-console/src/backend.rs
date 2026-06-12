@@ -48,7 +48,7 @@ pub enum Error {
 pub struct VuConsoleConfig {
     pub socket_path: PathBuf,
     pub backend: BackendType,
-    pub tcp_port: String,
+    pub tcp_port: u32,
     pub socket_count: u32,
     pub max_queue_size: usize,
 }
@@ -74,12 +74,10 @@ impl VuConsoleConfig {
     }
 
     pub fn generate_tcp_addrs(&self) -> Vec<String> {
-        let tcp_port_base = self.tcp_port.clone();
+        let port_num = self.tcp_port;
 
-        let make_tcp_port = |i: u32| -> String {
-            let port_num: u32 = tcp_port_base.clone().parse().unwrap();
-            "127.0.0.1:".to_owned() + &(port_num + i).to_string()
-        };
+        let make_tcp_port =
+            |i: u32| -> String { "127.0.0.1:".to_owned() + &(port_num + i).to_string() };
 
         (0..self.socket_count).map(make_tcp_port).collect()
     }
@@ -188,7 +186,7 @@ mod tests {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: 12345,
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -201,7 +199,7 @@ mod tests {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: 12345,
             socket_count: 0,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -217,7 +215,7 @@ mod tests {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
             backend: BackendType::Nested,
-            tcp_port: String::from("12345"),
+            tcp_port: 12345,
             socket_count: 2,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -233,7 +231,7 @@ mod tests {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: 12345,
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -246,7 +244,7 @@ mod tests {
         let args = ConsoleArgs {
             socket_path: String::from("/tmp/vhost.sock").into(),
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: 12345,
             socket_count: 2,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -276,7 +274,7 @@ mod tests {
         let args = ConsoleArgs {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
             backend: BackendType::Network,
-            tcp_port: String::from("12345"),
+            tcp_port: 12345,
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };
@@ -289,7 +287,7 @@ mod tests {
         let config = VuConsoleConfig {
             socket_path: String::from("/not_a_dir/vhost.sock").into(),
             backend: BackendType::Network,
-            tcp_port: String::from("12346"),
+            tcp_port: 12346,
             socket_count: 1,
             max_queue_size: DEFAULT_QUEUE_SIZE,
         };

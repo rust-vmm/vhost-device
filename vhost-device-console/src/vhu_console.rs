@@ -14,7 +14,7 @@ use std::{
 };
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use log::{error, trace, warn};
+use log::{trace, warn};
 use queues::{IsQueue, Queue};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};

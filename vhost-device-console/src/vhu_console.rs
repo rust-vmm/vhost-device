@@ -14,7 +14,6 @@ use std::{
 };
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use log::{trace, warn};
 use queues::{IsQueue, Queue};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
@@ -336,10 +335,10 @@ impl VhostUserConsoleBackend {
         };
         match ctrl_msg.event.to_native() {
             VIRTIO_CONSOLE_DEVICE_READY => {
-                trace!("VIRTIO_CONSOLE_DEVICE_READY");
+                log::trace!("VIRTIO_CONSOLE_DEVICE_READY");
 
                 if ctrl_msg.value != 1 {
-                    trace!("Guest failure in adding device");
+                    log::trace!("Guest failure in adding device");
                     return Ok(());
                 }
 
@@ -350,10 +349,10 @@ impl VhostUserConsoleBackend {
                     .map_err(|_| Error::RxCtrlQueueAddFailed)?;
             }
             VIRTIO_CONSOLE_PORT_READY => {
-                trace!("VIRTIO_CONSOLE_PORT_READY");
+                log::trace!("VIRTIO_CONSOLE_PORT_READY");
 
                 if ctrl_msg.value != 1 {
-                    trace!("Guest failure in adding port for device");
+                    log::trace!("Guest failure in adding port for device");
                     return Ok(());
                 }
 
@@ -373,10 +372,10 @@ impl VhostUserConsoleBackend {
                     .map_err(|_| Error::RxCtrlQueueAddFailed)?;
             }
             VIRTIO_CONSOLE_PORT_OPEN => {
-                trace!("VIRTIO_CONSOLE_PORT_OPEN");
+                log::trace!("VIRTIO_CONSOLE_PORT_OPEN");
             }
             other => {
-                trace!("Unknown control event: {other}");
+                log::trace!("Unknown control event: {other}");
                 return Err(Error::HandleEventUnknown(other));
             }
         };
@@ -579,7 +578,7 @@ impl VhostUserConsoleBackend {
                         stream_raw_fd,
                         epoll::Events::EPOLLIN,
                     ) {
-                        warn!("Failed to register with epoll: {err:?}");
+                        log::warn!("Failed to register with epoll: {err:?}");
                     }
 
                     let stream: Box<dyn ReadWrite + Send + Sync> = Box::new(stream);
@@ -625,7 +624,7 @@ impl VhostUserConsoleBackend {
                         self.epoll_fd.as_raw_fd(),
                         self.stream_fd.expect("No stream fd"),
                     ) {
-                        warn!("Failed to register with epoll: {err:?}");
+                        log::warn!("Failed to register with epoll: {err:?}");
                     }
                     return;
                 }

@@ -36,7 +36,6 @@ impl ConsoleController {
     }
 
     pub fn config(&self) -> &VirtioConsoleConfig {
-        log::trace!("Get config");
         &self.config
     }
 }

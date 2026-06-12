@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
+    collections::VecDeque,
     io::{self, Read, Result as IoResult, Write},
     net::TcpListener,
     os::fd::{AsRawFd, RawFd},
@@ -14,7 +15,6 @@ use std::{
 };
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use queues::{IsQueue, Queue};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost_user_backend::{VhostUserBackendMut, VringEpollHandler, VringRwLock, VringT};
@@ -128,13 +128,13 @@ pub struct VhostUserConsoleBackend {
     controller: Arc<RwLock<ConsoleController>>,
     acked_features: u64,
     event_idx: bool,
-    rx_ctrl_fifo: Queue<VirtioConsoleControl>,
-    rx_data_fifo: Queue<u8>,
+    rx_ctrl_fifo: VecDeque<VirtioConsoleControl>,
+    rx_data_fifo: VecDeque<u8>,
     epoll_fd: i32,
     stream_fd: Option<i32>,
     pub ready: bool,
     pub ready_to_write: bool,
-    pub output_queue: Queue<String>,
+    pub output_queue: VecDeque<String>,
     pub stdin: Option<Box<dyn Read + Send + Sync>>,
     pub listener: Option<TcpListener>,
     pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
@@ -158,14 +158,14 @@ impl VhostUserConsoleBackend {
             max_queue_size,
             controller,
             event_idx: false,
-            rx_ctrl_fifo: Queue::new(),
-            rx_data_fifo: Queue::new(),
+            rx_ctrl_fifo: VecDeque::new(),
+            rx_data_fifo: VecDeque::new(),
             epoll_fd: epoll::create(false).map_err(|_| Error::EpollFdCreate)?,
             stream_fd: None,
             acked_features: 0x0,
             ready: false,
             ready_to_write: false,
-            output_queue: Queue::new(),
+            output_queue: VecDeque::new(),
             stdin: None,
             stream: None,
             listener: None,
@@ -212,15 +212,12 @@ impl VhostUserConsoleBackend {
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
             let avail_data_len = writer.available_bytes();
-            let queue_len = self.rx_data_fifo.size();
+            let queue_len = self.rx_data_fifo.len();
             let min_limit = std::cmp::min(queue_len, avail_data_len);
 
             for _i in 0..min_limit {
-                let response: u8 = match self.rx_data_fifo.remove() {
-                    Ok(item) => item,
-                    _ => {
-                        return Ok(true);
-                    }
+                let Some(response) = self.rx_data_fifo.pop_front() else {
+                    return Ok(true);
                 };
 
                 writer
@@ -266,9 +263,7 @@ impl VhostUserConsoleBackend {
                 print!("{my_string}");
                 io::stdout().flush().unwrap();
             } else {
-                self.output_queue
-                    .add(my_string)
-                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
+                self.output_queue.push_back(my_string);
                 self.write_tcp_stream();
             }
 
@@ -298,15 +293,10 @@ impl VhostUserConsoleBackend {
                 .writer(&atomic_mem)
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
-            let ctrl_msg: VirtioConsoleControl = match self.rx_ctrl_fifo.remove() {
-                Ok(item) => {
-                    used_flag = true;
-                    item
-                }
-                _ => {
-                    return Ok(used_flag);
-                }
+            let Some(ctrl_msg) = self.rx_ctrl_fifo.pop_front() else {
+                return Ok(used_flag);
             };
+            used_flag = true;
 
             let mut buffer: Vec<u8> = Vec::new();
             buffer.extend_from_slice(&ctrl_msg.to_le_bytes());
@@ -344,9 +334,7 @@ impl VhostUserConsoleBackend {
 
                 self.ready = true;
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_PORT_ADD.into();
-                self.rx_ctrl_fifo
-                    .add(ctrl_msg_reply)
-                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
+                self.rx_ctrl_fifo.push_back(ctrl_msg_reply);
             }
             VIRTIO_CONSOLE_PORT_READY => {
                 log::trace!("VIRTIO_CONSOLE_PORT_READY");
@@ -357,19 +345,13 @@ impl VhostUserConsoleBackend {
                 }
 
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_CONSOLE_PORT.into();
-                self.rx_ctrl_fifo
-                    .add(ctrl_msg_reply)
-                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
+                self.rx_ctrl_fifo.push_back(ctrl_msg_reply);
 
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_PORT_NAME.into();
-                self.rx_ctrl_fifo
-                    .add(ctrl_msg_reply)
-                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
+                self.rx_ctrl_fifo.push_back(ctrl_msg_reply);
 
                 ctrl_msg_reply.event = VIRTIO_CONSOLE_PORT_OPEN.into();
-                self.rx_ctrl_fifo
-                    .add(ctrl_msg_reply)
-                    .map_err(|_| Error::RxCtrlQueueAddFailed)?;
+                self.rx_ctrl_fifo.push_back(ctrl_msg_reply);
             }
             VIRTIO_CONSOLE_PORT_OPEN => {
                 log::trace!("VIRTIO_CONSOLE_PORT_OPEN");
@@ -594,14 +576,8 @@ impl VhostUserConsoleBackend {
 
     fn write_tcp_stream(&mut self) {
         if let Some(stream) = self.stream.as_mut() {
-            while self.output_queue.size() > 0 {
-                let byte_stream = self
-                    .output_queue
-                    .remove()
-                    .expect("Error removing element from output queue")
-                    .into_bytes();
-
-                if let Err(e) = stream.write_all(&byte_stream) {
+            while let Some(string) = self.output_queue.pop_back() {
+                if let Err(e) = stream.write_all(string.as_bytes()) {
                     log::error!("Error writing to stream: {e}");
                 }
             }
@@ -630,7 +606,7 @@ impl VhostUserConsoleBackend {
                 }
                 if self.ready_to_write {
                     for byte in buffer.iter().take(bytes_read) {
-                        self.rx_data_fifo.add(*byte).unwrap();
+                        self.rx_data_fifo.push_back(*byte);
                     }
                     self.rx_event.write(1).unwrap();
                 }
@@ -655,7 +631,7 @@ impl VhostUserConsoleBackend {
                     // If backend is ready pass the data to vhu_console
                     // and trigger an EventFd.
                     if self.ready_to_write {
-                        self.rx_data_fifo.add(bytes[0]).unwrap();
+                        self.rx_data_fifo.push_back(bytes[0]);
                         self.rx_event.write(1).unwrap();
                     }
                 }
@@ -782,7 +758,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
                 vring.disable_notification().unwrap();
                 match device_event {
                     QueueEvents::RX_QUEUE => {
-                        if self.rx_data_fifo.size() != 0 {
+                        if !self.rx_data_fifo.is_empty() {
                             self.process_rx_queue(vring)
                         } else {
                             break;
@@ -793,7 +769,7 @@ impl VhostUserBackendMut for VhostUserConsoleBackend {
                         self.process_tx_queue(vring)
                     }
                     QueueEvents::CTRL_RX_QUEUE => {
-                        if self.ready && (self.rx_ctrl_fifo.size() != 0) {
+                        if self.ready && !self.rx_ctrl_fifo.is_empty() {
                             self.process_ctrl_rx_queue(vring)
                         } else {
                             break;
@@ -1026,7 +1002,7 @@ mod tests {
             event: VIRTIO_CONSOLE_PORT_ADD.into(),
             value: 1.into(),
         };
-        let _ = vu_console_backend.rx_ctrl_fifo.add(ctrl_msg);
+        vu_console_backend.rx_ctrl_fifo.push_back(ctrl_msg);
 
         assert!(vu_console_backend
             .process_ctrl_rx_requests(vec![desc_chain.clone()], &vring)
@@ -1053,7 +1029,7 @@ mod tests {
             event: VIRTIO_CONSOLE_PORT_NAME.into(),
             value: 1.into(),
         };
-        let _ = vu_console_backend.rx_ctrl_fifo.add(ctrl_msg);
+        vu_console_backend.rx_ctrl_fifo.push_back(ctrl_msg);
 
         assert!(vu_console_backend
             .process_ctrl_rx_requests(vec![desc_chain], &vring)
@@ -1298,7 +1274,7 @@ mod tests {
         let input_buffer = b"Hello!";
         // Add each byte individually to the rx_data_fifo
         for &byte in input_buffer.clone().iter() {
-            let _ = vu_console_backend.rx_data_fifo.add(byte);
+            vu_console_backend.rx_data_fifo.push_back(byte);
         }
 
         // available_data are 0 so min_limit is 0 too
@@ -1314,7 +1290,7 @@ mod tests {
 
         let input_buffer = b"Hello!";
         for &byte in input_buffer.clone().iter() {
-            let _ = vu_console_backend.rx_data_fifo.add(byte);
+            vu_console_backend.rx_data_fifo.push_back(byte);
         }
         assert!(vu_console_backend
             .process_rx_requests(vec![desc_chain.clone()], &vring)
@@ -1360,7 +1336,7 @@ mod tests {
             .handle_event(QueueEvents::KEY_EFD, EventSet::IN, &[vring], 0)
             .unwrap();
 
-        let received_byte = vu_console_backend.rx_data_fifo.peek();
+        let received_byte = vu_console_backend.rx_data_fifo.pop_front();
 
         // verify that the character has been received and is the one we sent
         assert_eq!(received_byte.unwrap(), input_data[0]);
@@ -1390,7 +1366,7 @@ mod tests {
             .handle_event(QueueEvents::KEY_EFD, EventSet::IN, &[vring], 0)
             .unwrap();
 
-        let received_byte = vu_console_backend.rx_data_fifo.peek();
+        let received_byte = vu_console_backend.rx_data_fifo.pop_front();
 
         // verify that the character has been received and is the one we sent
         assert_eq!(received_byte.unwrap(), input_data[0]);
@@ -1414,11 +1390,10 @@ mod tests {
         vu_console_backend.stream = Some(Box::new(cursor));
         vu_console_backend
             .output_queue
-            .add("Test".to_string())
-            .unwrap();
+            .push_back("Test".to_string());
         vu_console_backend.write_tcp_stream();
 
         // All data has been consumed by the cursor
-        assert_eq!(vu_console_backend.output_queue.size(), 0);
+        assert_eq!(vu_console_backend.output_queue.len(), 0);
     }
 }

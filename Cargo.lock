@@ -2086,7 +2086,6 @@ dependencies = [
  "env_logger",
  "epoll",
  "log",
- "queues",
  "thiserror 2.0.18",
  "vhost",
  "vhost-user-backend",

@@ -196,12 +196,6 @@ impl VhostUserConsoleBackend {
         Ok(())
     }
 
-    fn print_console_frame(&self, control_msg: VirtioConsoleControl) {
-        trace!("id 0x{:x}", control_msg.id.to_native());
-        trace!("event 0x{:x}", control_msg.event.to_native());
-        trace!("value 0x{:x}", control_msg.value.to_native());
-    }
-
     fn process_rx_requests(
         &mut self,
         requests: Vec<ConsoleDescriptorChain>,
@@ -315,8 +309,6 @@ impl VhostUserConsoleBackend {
                 }
             };
 
-            self.print_console_frame(ctrl_msg);
-
             let mut buffer: Vec<u8> = Vec::new();
             buffer.extend_from_slice(&ctrl_msg.to_le_bytes());
 
@@ -410,9 +402,6 @@ impl VhostUserConsoleBackend {
             let request = reader
                 .read_obj::<VirtioConsoleControl>()
                 .map_err(|_| Error::DescriptorReadFailed)?;
-
-            // Print the receive console frame
-            self.print_console_frame(request);
 
             // Process the received control frame
             self.handle_control_msg(request)?;

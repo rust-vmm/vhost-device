@@ -605,7 +605,7 @@ impl VhostUserConsoleBackend {
     }
 
     fn write_tcp_stream(&mut self) {
-        if self.stream.is_some() {
+        if let Some(stream) = self.stream.as_mut() {
             while self.output_queue.size() > 0 {
                 let byte_stream = self
                     .output_queue
@@ -613,12 +613,7 @@ impl VhostUserConsoleBackend {
                     .expect("Error removing element from output queue")
                     .into_bytes();
 
-                if let Err(e) = self
-                    .stream
-                    .as_mut()
-                    .expect("Stream not found")
-                    .write_all(&byte_stream)
-                {
+                if let Err(e) = stream.write_all(&byte_stream) {
                     eprintln!("Error writing to stream: {e}");
                 }
             }

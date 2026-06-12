@@ -43,7 +43,7 @@ use crate::{
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ThisError)]
+#[derive(Debug, ThisError)]
 pub enum Error {
     #[error("Failed to handle unknown event: {0}")]
     HandleEventUnknown(u16),
@@ -67,11 +67,16 @@ pub enum Error {
     EpollRemove,
     #[error("Error creating epoll")]
     EpollFdCreate,
+    #[error("Stdio error: {0}")]
+    Stdio(#[from] std::io::Error),
 }
 
 impl From<Error> for io::Error {
     fn from(err: Error) -> Self {
-        Self::other(err)
+        match err {
+            Error::Stdio(inner) => inner,
+            other => Self::other(other),
+        }
     }
 }
 
@@ -834,6 +839,7 @@ mod tests {
 
     use super::*;
     use crate::DEFAULT_QUEUE_SIZE;
+    use assert_matches::assert_matches;
 
     #[test]
     fn test_vhost_user_console_backend_creation() {
@@ -1058,7 +1064,7 @@ mod tests {
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
 
-        assert_eq!(
+        assert_matches!(
             vu_console_backend
                 .process_ctrl_tx_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
@@ -1070,7 +1076,7 @@ mod tests {
         let mem1 = GuestMemoryAtomic::new(mem.clone());
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();
         vu_console_backend.update_memory(mem1).unwrap();
-        assert_eq!(
+        assert_matches!(
             vu_console_backend
                 .process_ctrl_tx_requests(vec![desc_chain], &vring)
                 .unwrap_err(),
@@ -1125,7 +1131,7 @@ mod tests {
 
         vu_console_backend.handle_control_msg(ctrl_msg_3).unwrap();
 
-        assert_eq!(
+        assert_matches!(
             vu_console_backend
                 .handle_control_msg(ctrl_msg_err)
                 .unwrap_err(),

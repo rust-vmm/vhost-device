@@ -570,7 +570,7 @@ impl VhostUserConsoleBackend {
                         .expect("No listener")
                         .local_addr()
                         .unwrap();
-                    println!("New connection on: {local_addr}");
+                    log::info!("New connection on: {local_addr}");
                     let stream_raw_fd = stream.as_raw_fd();
                     self.stream_fd = Some(stream_raw_fd);
                     if let Err(err) = Self::epoll_register(
@@ -586,7 +586,7 @@ impl VhostUserConsoleBackend {
                     self.write_tcp_stream();
                 }
                 Err(e) => {
-                    eprintln!("Stream error: {e}");
+                    log::error!("Stream error: {e}");
                 }
             }
         }
@@ -602,7 +602,7 @@ impl VhostUserConsoleBackend {
                     .into_bytes();
 
                 if let Err(e) = stream.write_all(&byte_stream) {
-                    eprintln!("Error writing to stream: {e}");
+                    log::error!("Error writing to stream: {e}");
                 }
             }
         }
@@ -619,7 +619,7 @@ impl VhostUserConsoleBackend {
                         .expect("No listener")
                         .local_addr()
                         .unwrap();
-                    println!("Close connection on: {local_addr}");
+                    log::info!("Close connection on: {local_addr}");
                     if let Err(err) = Self::epoll_unregister(
                         self.epoll_fd.as_raw_fd(),
                         self.stream_fd.expect("No stream fd"),
@@ -636,7 +636,7 @@ impl VhostUserConsoleBackend {
                 }
             }
             Err(e) => {
-                eprintln!("Error reading from socket: {e}");
+                log::error!("Error reading from socket: {e}");
             }
         }
     }
@@ -649,7 +649,6 @@ impl VhostUserConsoleBackend {
                     // If the user presses ^C then exit
                     if bytes[0] == 3 {
                         disable_raw_mode().expect("Raw mode error");
-                        trace!("Termination!\n");
                         std::process::exit(0);
                     }
 
@@ -663,7 +662,7 @@ impl VhostUserConsoleBackend {
                 Ok(())
             }
             Err(e) => {
-                eprintln!("Read stdin error: {e}");
+                log::error!("Read stdin error: {e}");
                 Err(e)
             }
         }

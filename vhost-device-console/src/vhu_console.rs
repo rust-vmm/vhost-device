@@ -139,7 +139,7 @@ pub struct VhostUserConsoleBackend {
     stream_fd: Option<i32>,
     pub ready: bool,
     pub ready_to_write: bool,
-    pub output_queue: VecDeque<String>,
+    pub output_queue: VecDeque<Vec<u8>>,
     pub stdin: Option<Box<dyn Read + Send + Sync>>,
     pub listener: Option<TcpListener>,
     pub stream: Option<Box<dyn ReadWrite + Send + Sync>>,
@@ -263,12 +263,12 @@ impl VhostUserConsoleBackend {
                 tx_data.push(data_byte);
             }
 
-            let my_string = String::from_utf8(tx_data).unwrap();
             if self.controller.read().unwrap().backend == BackendType::Nested {
-                print!("{my_string}");
-                io::stdout().flush().unwrap();
+                let mut stdout = io::stdout().lock();
+                stdout.write_all(&tx_data)?;
+                stdout.flush()?;
             } else {
-                self.output_queue.push_back(my_string);
+                self.output_queue.push_back(tx_data);
                 self.write_tcp_stream();
             }
 
@@ -581,8 +581,8 @@ impl VhostUserConsoleBackend {
 
     fn write_tcp_stream(&mut self) {
         if let Some(stream) = self.stream.as_mut() {
-            while let Some(string) = self.output_queue.pop_back() {
-                if let Err(e) = stream.write_all(string.as_bytes()) {
+            while let Some(bytes) = self.output_queue.pop_back() {
+                if let Err(e) = stream.write_all(&bytes) {
                     log::error!("Error writing to stream: {e}");
                 }
             }
@@ -1394,9 +1394,7 @@ mod tests {
         let cursor = Cursor::new(Vec::new());
 
         vu_console_backend.stream = Some(Box::new(cursor));
-        vu_console_backend
-            .output_queue
-            .push_back("Test".to_string());
+        vu_console_backend.output_queue.push_back(b"Test".to_vec());
         vu_console_backend.write_tcp_stream();
 
         // All data has been consumed by the cursor

@@ -13,7 +13,7 @@ use std::{
     thread::Builder,
 };
 
-use log::{error, info};
+use log::info;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};

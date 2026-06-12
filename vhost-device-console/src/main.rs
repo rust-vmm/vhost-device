@@ -40,8 +40,8 @@ struct ConsoleArgs {
     /// Initial tcp port to be used with `network` backend. If socket_count is
     /// `N` then the following tcp ports will be created: `tcp_port`,
     /// `tcp_port + 1`, ... , `tcp_port + (N - 1)`.
-    #[clap(short = 'p', long, value_name = "PORT", default_value = "12345")]
-    tcp_port: String,
+    #[clap(short = 'p', long, value_name = "PORT", default_value_t = 12345)]
+    tcp_port: u32,
 
     /// Specify the maximum size of virtqueue, the default is 128.
     #[clap(short = 'q', long, default_value_t = DEFAULT_QUEUE_SIZE)]

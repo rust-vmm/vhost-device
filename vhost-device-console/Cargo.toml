@@ -15,7 +15,6 @@ edition = "2021"
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 
 [dependencies]
-console = "0.16.3"
 crossterm = "0.29.0"
 clap = { version = "4.6",  features = ["derive"] }
 env_logger = "0.11"

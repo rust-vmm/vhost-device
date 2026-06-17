@@ -2,30 +2,30 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::File,
     io::{self, BufRead, BufReader},
     iter::FromIterator,
     num::Wrapping,
     ops::Deref,
     os::unix::{
         net::{UnixListener, UnixStream},
-        prelude::{AsRawFd, FromRawFd, RawFd},
+        prelude::{AsRawFd, RawFd},
     },
     sync::{
         mpsc::{self, Sender},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
     thread,
+    time::Duration,
 };
 
 use log::{error, warn};
-use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
+use mio::{unix::SourceFd, Events, Interest, Poll, Token};
+use vhost_user_backend::{EventSet, VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vmm_sys_util::{
-    epoll::EventSet,
-    eventfd::{EventFd, EFD_NONBLOCK},
+use vmm_sys_util::event::{
+    new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier,
 };
 #[cfg(feature = "backend_vsock")]
 use vsock::{VsockListener, VMADDR_CID_ANY};
@@ -69,8 +69,9 @@ pub(crate) struct VhostUserVsockThread {
     backend_info: BackendType,
     /// Host socket raw file descriptor and listener.
     host_listeners_map: HashMap<i32, ListenerType>,
-    /// epoll fd to which new host connections are added.
-    epoll_file: File,
+    /// poll fd to which new host connections are added.
+    //poller which host connections are added
+    poller: Arc<Mutex<Poll>>,
     /// VsockThreadBackend instance.
     pub thread_backend: VsockThreadBackend,
     /// CID of the guest.
@@ -81,10 +82,13 @@ pub(crate) struct VhostUserVsockThread {
     local_port: Wrapping<u32>,
     /// The tx buffer size
     tx_buffer_size: u32,
-    /// EventFd to notify this thread for custom events. Currently used to
+    /// EventConsumer to consume custom events. Currently used to
     /// notify this thread to process raw vsock packets sent from a sibling
     /// VM.
-    pub sibling_event_fd: EventFd,
+    pub sibling_event_consumer: EventConsumer,
+    /// EventNotifier used by sibling devices to wake this thread.
+    _sibling_event_notifier: EventNotifier,
+
     /// Keeps track of which RX queue was processed first in the last iteration.
     /// Used to alternate between the RX queues to prevent the starvation of one
     /// by the other.
@@ -123,19 +127,18 @@ impl VhostUserVsockThread {
             }
         }
 
-        let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
-        // SAFETY: Safe as the fd is guaranteed to be valid here.
-        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+        let poller = Arc::new(Mutex::new(Poll::new().map_err(Error::EpollFdCreate)?));
 
         let mut groups = groups;
         let groups_set: Arc<RwLock<HashSet<String>>> =
             Arc::new(RwLock::new(HashSet::from_iter(groups.drain(..))));
 
-        let sibling_event_fd = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+        let (sibling_event_consumer, sibling_event_notifier) =
+            new_event_consumer_and_notifier(EventFlag::NONBLOCK).map_err(Error::EventFlagCreate)?;
 
         let thread_backend = VsockThreadBackend::new(
             backend_info.clone(),
-            epoll_fd,
+            poller.clone(),
             guest_cid,
             tx_buffer_size,
             groups_set.clone(),
@@ -153,7 +156,7 @@ impl VhostUserVsockThread {
                 (
                     thread_backend.raw_pkts_queue.clone(),
                     groups_set,
-                    sibling_event_fd.try_clone().unwrap(),
+                    sibling_event_notifier.try_clone().unwrap(),
                 ),
             );
         }
@@ -172,18 +175,19 @@ impl VhostUserVsockThread {
             event_idx: false,
             backend_info: backend_info.clone(),
             host_listeners_map,
-            epoll_file,
+            poller,
             thread_backend,
             guest_cid,
             sender,
             local_port: Wrapping(0),
             tx_buffer_size,
-            sibling_event_fd,
+            sibling_event_consumer,
+            _sibling_event_notifier: sibling_event_notifier,
             last_processed: RxQueueType::Standard,
         };
 
         for host_raw_fd in thread.host_listeners_map.keys() {
-            VhostUserVsockThread::epoll_register(epoll_fd, *host_raw_fd, epoll::Events::EPOLLIN)?;
+            VhostUserVsockThread::epoll_register(&thread.poller, *host_raw_fd, Interest::READABLE)?;
         }
 
         Ok(thread)
@@ -220,59 +224,67 @@ impl VhostUserVsockThread {
             event_data.vring.signal_used_queue().unwrap();
         }
     }
-    /// Register a file with an epoll to listen for events in evset.
-    pub fn epoll_register(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            fd,
-            epoll::Event::new(evset, fd as u64),
-        )
-        .map_err(Error::EpollAdd)?;
+
+    /// Register a file with an mio::poll to listen for events in interests.
+    pub fn epoll_register(poller: &Arc<Mutex<Poll>>, fd: RawFd, interests: Interest) -> Result<()> {
+        let mut source = SourceFd(&fd);
+
+        poller
+            .lock()
+            .unwrap()
+            .registry()
+            .register(&mut source, Token(fd as usize), interests)
+            .map_err(Error::EpollAdd)?;
 
         Ok(())
     }
 
-    /// Remove a file from the epoll.
-    pub fn epoll_unregister(epoll_fd: RawFd, fd: RawFd) -> Result<()> {
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_DEL,
-            fd,
-            epoll::Event::new(epoll::Events::empty(), 0),
-        )
-        .map_err(Error::EpollRemove)?;
+    /// Remove a file from the mio::poller.
+    pub fn epoll_unregister(poller: &Arc<Mutex<Poll>>, fd: RawFd) -> Result<()> {
+        let mut source = SourceFd(&fd);
+
+        poller
+            .lock()
+            .unwrap()
+            .registry()
+            .deregister(&mut source)
+            .map_err(Error::EpollRemove)?;
 
         Ok(())
     }
 
-    /// Modify the events we listen to for the fd in the epoll.
-    pub fn epoll_modify(epoll_fd: RawFd, fd: RawFd, evset: epoll::Events) -> Result<()> {
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_MOD,
-            fd,
-            epoll::Event::new(evset, fd as u64),
-        )
-        .map_err(Error::EpollModify)?;
+    /// Modify the interests we listen to for the fd in the mio::poll.
+    pub fn epoll_modify(poller: &Arc<Mutex<Poll>>, fd: RawFd, interests: Interest) -> Result<()> {
+        let mut source = SourceFd(&fd);
+
+        poller
+            .lock()
+            .unwrap()
+            .registry()
+            .reregister(&mut source, Token(fd as usize), interests)
+            .map_err(Error::EpollModify)?;
 
         Ok(())
     }
 
     /// Return raw file descriptor of the epoll file.
     fn get_epoll_fd(&self) -> RawFd {
-        self.epoll_file.as_raw_fd()
+        self.poller.lock().unwrap().as_raw_fd()
     }
 
     /// Register our listeners in the VringEpollHandler
-    pub fn register_listeners(&mut self, epoll_handler: Arc<VringEpollHandler<ArcVhostBknd>>) {
-        epoll_handler
-            .register_listener(self.get_epoll_fd(), EventSet::IN, u64::from(BACKEND_EVENT))
-            .unwrap();
-        epoll_handler
+    pub fn register_listeners(&mut self, poll_handler: Arc<VringEpollHandler<ArcVhostBknd>>) {
+        poll_handler
             .register_listener(
-                self.sibling_event_fd.as_raw_fd(),
-                EventSet::IN,
+                self.get_epoll_fd(),
+                EventSet::READABLE,
+                u64::from(BACKEND_EVENT),
+            )
+            .unwrap();
+        poll_handler
+            .register_listener(
+                self.sibling_event_consumer.as_raw_fd(),
+                EventSet::READABLE,
                 u64::from(SIBLING_VM_EVENT),
             )
             .unwrap();
@@ -280,31 +292,41 @@ impl VhostUserVsockThread {
 
     /// Process a BACKEND_EVENT received by VhostUserVsockBackend.
     pub fn process_backend_evt(&mut self, _evset: EventSet) {
-        let mut epoll_events = vec![epoll::Event::new(epoll::Events::empty(), 0); 32];
-        'epoll: loop {
-            match epoll::wait(self.epoll_file.as_raw_fd(), 0, epoll_events.as_mut_slice()) {
-                Ok(ev_cnt) => {
-                    for evt in epoll_events.iter().take(ev_cnt) {
-                        self.handle_event(
-                            evt.data as RawFd,
-                            epoll::Events::from_bits(evt.events).unwrap(),
-                        );
+        let mut events = Events::with_capacity(32);
+        loop {
+            let polled = self
+                .poller
+                .lock()
+                .unwrap()
+                .poll(&mut events, Some(Duration::ZERO));
+            match polled {
+                Ok(()) => {
+                    let ready: Vec<(RawFd, bool)> = events
+                        .iter()
+                        .map(|event| {
+                            (
+                                event.token().0.try_into().unwrap_or(-1) as RawFd,
+                                event.is_writable(),
+                            )
+                        })
+                        .collect();
+                    for (fd, writable) in ready {
+                        self.handle_event(fd, writable);
                     }
+                    break;
                 }
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::Interrupted {
-                        continue;
-                    }
-                    warn!("failed to consume new epoll event");
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => {
+                    warn!("failed to consume new poll event");
+                    break;
                 }
             }
-            break 'epoll;
         }
     }
 
     /// Handle a BACKEND_EVENT by either accepting a new connection or
     /// forwarding a request to the appropriate connection object.
-    fn handle_event(&mut self, fd: RawFd, evset: epoll::Events) {
+    fn handle_event(&mut self, fd: RawFd, writable: bool) {
         if let Some(listener) = self.host_listeners_map.get(&fd) {
             // This is a new connection initiated by an application running on the host
             match listener {
@@ -357,11 +379,11 @@ impl VhostUserVsockThread {
                                     peer_port,
                                 );
                                 if let Err(err) = Self::epoll_register(
-                                    self.get_epoll_fd(),
+                                    &self.poller,
                                     stream_raw_fd,
-                                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                                    Interest::READABLE | Interest::WRITABLE,
                                 ) {
-                                    warn!("Failed to register with epoll: {err:?}");
+                                    warn!("Failed to register with poller: {err:?}");
                                 }
                             }
                             Err(err) => {
@@ -382,8 +404,8 @@ impl VhostUserVsockThread {
                 self.thread_backend.listener_map.entry(fd)
             {
                 // New connection from the host
-                if evset.bits() != epoll::Events::EPOLLIN.bits() {
-                    // Has to be EPOLLIN as it was not connected previously
+                if writable {
+                    // A brand-new host connection must first arrive as readable.
                     return;
                 }
                 let mut stream = match self.thread_backend.stream_map.remove(&fd) {
@@ -420,11 +442,11 @@ impl VhostUserVsockThread {
 
                         self.add_new_connection_from_host(fd, stream, local_port, peer_port);
 
-                        // Re-register the fd to listen for EPOLLIN and EPOLLOUT events
+                        // Re-register the fd to listen for readable and writable events.
                         Self::epoll_modify(
-                            self.get_epoll_fd(),
+                            &self.poller,
                             fd,
-                            epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                            Interest::READABLE | Interest::WRITABLE,
                         )
                         .unwrap();
                     }
@@ -432,12 +454,10 @@ impl VhostUserVsockThread {
             } else {
                 // Previously connected connection
 
-                // Get epoll fd before getting conn as that takes self mut ref
-                let epoll_fd = self.get_epoll_fd();
                 let key = self.thread_backend.listener_map.get(&fd).unwrap();
                 let conn = self.thread_backend.conn_map.get_mut(key).unwrap();
 
-                if evset.bits() == epoll::Events::EPOLLOUT.bits() {
+                if writable {
                     // Flush any remaining data from the tx buffer
                     match conn.tx_buf.flush_to(&mut conn.stream) {
                         Ok(cnt) => {
@@ -445,10 +465,10 @@ impl VhostUserVsockThread {
                                 conn.fwd_cnt += Wrapping(cnt as u32);
                                 conn.rx_queue.enqueue(RxOps::CreditUpdate);
                             } else {
-                                // If no remaining data to flush, try to disable EPOLLOUT
-                                if Self::epoll_modify(epoll_fd, fd, epoll::Events::EPOLLIN).is_err()
+                                // If no remaining data to flush, keep only readable interest.
+                                if Self::epoll_modify(&self.poller, fd, Interest::READABLE).is_err()
                                 {
-                                    error!("Failed to disable EPOLLOUT");
+                                    error!("Failed to disable writable interest");
                                 }
                             }
                             self.thread_backend
@@ -462,9 +482,9 @@ impl VhostUserVsockThread {
                     return;
                 }
 
-                // Unregister stream from the epoll, register when connection is
-                // established with the guest
-                Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd).unwrap();
+                // Unregister the stream from the poller and register it again when the
+                // connection is established with the guest
+                let _ = Self::epoll_unregister(&self.poller, fd);
 
                 // Enqueue a read request
                 conn.rx_queue.enqueue(RxOps::Rw);
@@ -496,7 +516,7 @@ impl VhostUserVsockThread {
             local_port,
             self.guest_cid,
             peer_port,
-            self.get_epoll_fd(),
+            self.poller.clone(),
             self.tx_buffer_size,
         );
         new_conn.rx_queue.enqueue(RxOps::Request);
@@ -564,17 +584,13 @@ impl VhostUserVsockThread {
             .map_err(|e| Error::ReadStreamPort(Box::new(e)))
     }
 
-    /// Add a stream to epoll to listen for EPOLLIN events.
+    /// Add a stream to the poller with readable interest.
     fn add_stream_listener(&mut self, stream: UnixStream) -> Result<()> {
         let stream_fd = stream.as_raw_fd();
         self.thread_backend
             .stream_map
             .insert(stream_fd, StreamType::Unix(stream));
-        VhostUserVsockThread::epoll_register(
-            self.get_epoll_fd(),
-            stream_fd,
-            epoll::Events::EPOLLIN,
-        )?;
+        VhostUserVsockThread::epoll_register(&self.poller, stream_fd, Interest::READABLE)?;
 
         Ok(())
     }
@@ -826,7 +842,7 @@ mod tests {
 
     use tempfile::tempdir;
     use vm_memory::GuestAddress;
-    use vmm_sys_util::eventfd::EventFd;
+    use vmm_sys_util::event::{new_event_consumer_and_notifier, EventFlag};
     #[cfg(feature = "backend_vsock")]
     use vsock::{VsockStream, VMADDR_CID_LOCAL};
 
@@ -835,12 +851,6 @@ mod tests {
     use crate::vhu_vsock::VsockProxyInfo;
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
-
-    impl VhostUserVsockThread {
-        fn get_epoll_file(&self) -> &File {
-            &self.epoll_file
-        }
-    }
 
     fn test_vsock_thread(backend_info: BackendType) {
         let groups: Vec<String> = vec![String::from("default")];
@@ -851,31 +861,20 @@ mod tests {
         assert!(t.is_ok());
 
         let mut t = t.unwrap();
-        let epoll_fd = t.get_epoll_file().as_raw_fd();
-
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
         );
 
         t.mem = Some(mem.clone());
 
-        let dummy_fd = EventFd::new(0).unwrap();
+        let (dummy_fd, _dummy_notifier) =
+            new_event_consumer_and_notifier(EventFlag::NONBLOCK).unwrap();
 
-        VhostUserVsockThread::epoll_register(
-            epoll_fd,
-            dummy_fd.as_raw_fd(),
-            epoll::Events::EPOLLOUT,
-        )
-        .unwrap();
-        VhostUserVsockThread::epoll_modify(epoll_fd, dummy_fd.as_raw_fd(), epoll::Events::EPOLLIN)
+        VhostUserVsockThread::epoll_register(&t.poller, dummy_fd.as_raw_fd(), Interest::WRITABLE)
             .unwrap();
-        VhostUserVsockThread::epoll_unregister(epoll_fd, dummy_fd.as_raw_fd()).unwrap();
-        VhostUserVsockThread::epoll_register(
-            epoll_fd,
-            dummy_fd.as_raw_fd(),
-            epoll::Events::EPOLLIN,
-        )
-        .unwrap();
+        VhostUserVsockThread::epoll_modify(&t.poller, dummy_fd.as_raw_fd(), Interest::READABLE)
+            .unwrap();
+        VhostUserVsockThread::epoll_unregister(&t.poller, dummy_fd.as_raw_fd()).unwrap();
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
         vring.set_queue_info(0x100, 0x200, 0x300).unwrap();
@@ -905,7 +904,7 @@ mod tests {
             used_len: 0,
         });
 
-        dummy_fd.write(1).unwrap();
+        _dummy_notifier.notify().unwrap();
 
         t.process_backend_evt(EventSet::empty());
     }
@@ -955,9 +954,14 @@ mod tests {
             cid_map.clone(),
         )
         .unwrap();
-        assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
-        assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
-        assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());
+        let invalid_poller = Arc::new(Mutex::new(Poll::new().unwrap()));
+        assert!(
+            VhostUserVsockThread::epoll_register(&invalid_poller, -1, Interest::READABLE).is_err()
+        );
+        assert!(
+            VhostUserVsockThread::epoll_modify(&invalid_poller, -1, Interest::READABLE).is_err()
+        );
+        assert!(VhostUserVsockThread::epoll_unregister(&invalid_poller, -1).is_err());
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),

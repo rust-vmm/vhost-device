@@ -2,7 +2,7 @@
   "tests": [
     {
       "test_name": "build-gnu",
-      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release",
+      "command": "BINDGEN_EXTRA_CLANG_ARGS=\"-I/usr/include/$(uname -m)-linux-gnu\" RUSTFLAGS=\"-D warnings\" cargo build --release",
       "platform": [
         "x86_64",
         "aarch64",
@@ -11,7 +11,7 @@
     },
     {
       "test_name": "build-musl",
-      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl --workspace --exclude vhost-device-gpu",
+      "command": "RUSTFLAGS=\"-D warnings\" cargo build --release --target {target_platform}-unknown-linux-musl --workspace --exclude vhost-device-gpu --exclude vhost-device-media",
       "platform": [
         "x86_64",
         "aarch64"
@@ -23,11 +23,11 @@
     },
     {
       "test_name": "doc",
-      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --all-features --no-deps"
+      "command": "BINDGEN_EXTRA_CLANG_ARGS=\"-I/usr/include/$(uname -m)-linux-gnu\" RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --all-features --no-deps"
     },
     {
       "test_name": "unittests-gnu",
-      "command": "cargo test --all-features --workspace",
+      "command": "BINDGEN_EXTRA_CLANG_ARGS=\"-I/usr/include/$(uname -m)-linux-gnu\" cargo test --all-features --workspace",
       "platform": [
         "x86_64",
         "aarch64",
@@ -39,7 +39,7 @@
     },
     {
       "test_name": "unittests-musl",
-      "command": "cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu",
+      "command": "cargo test --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu --exclude vhost-device-media",
       "platform": [
         "x86_64",
         "aarch64"
@@ -50,7 +50,7 @@
     },
     {
       "test_name": "unittests-gnu-release",
-      "command": "cargo test --release --all-features --workspace",
+      "command": "BINDGEN_EXTRA_CLANG_ARGS=\"-I/usr/include/$(uname -m)-linux-gnu\" cargo test --release --all-features --workspace",
       "platform": [
         "x86_64",
         "aarch64",
@@ -62,7 +62,7 @@
     },
     {
       "test_name": "unittests-musl-release",
-      "command": "cargo test --release --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu",
+      "command": "cargo test --release --all-features --workspace --target {target_platform}-unknown-linux-musl --exclude vhost-device-gpu --exclude vhost-device-media",
       "platform": [
         "x86_64",
         "aarch64"
@@ -73,7 +73,7 @@
     },
     {
       "test_name": "clippy",
-      "command": "cargo clippy --workspace --bins --examples --benches --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
+      "command": "BINDGEN_EXTRA_CLANG_ARGS=\"-I/usr/include/$(uname -m)-linux-gnu\" cargo clippy --workspace --bins --examples --benches --all-features --all-targets -- -D warnings -D clippy::undocumented_unsafe_blocks",
       "platform": [
         "x86_64",
         "aarch64",
@@ -82,7 +82,7 @@
     },
     {
       "test_name": "check-warnings",
-      "command": "RUSTFLAGS=\"-D warnings\" cargo check --all-targets --all-features --workspace",
+      "command": "BINDGEN_EXTRA_CLANG_ARGS=\"-I/usr/include/$(uname -m)-linux-gnu\" RUSTFLAGS=\"-D warnings\" cargo check --all-targets --all-features --workspace",
       "platform": [
         "x86_64",
         "aarch64",

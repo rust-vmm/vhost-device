@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+pub mod args;
 mod descriptor_chain;
 mod media_allocator;
 mod null_backend;
@@ -12,11 +13,12 @@ mod vhu_media_thread;
 use std::{path::PathBuf, sync::Arc};
 
 use ::virtio_media::protocol::VirtioMediaDeviceConfig;
+pub use args::BackendType;
 use log::debug;
 use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vhu_media::VuMediaBackend;
-pub use vhu_media::{BackendType, VuMediaError};
+pub use vhu_media::VuMediaError;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -77,6 +79,16 @@ pub struct VuMediaConfig {
     pub socket_path: PathBuf,
     pub v4l2_device: PathBuf,
     pub backend: BackendType,
+}
+
+impl From<args::MediaArgs> for VuMediaConfig {
+    fn from(args: args::MediaArgs) -> Self {
+        Self {
+            socket_path: args.socket_path,
+            v4l2_device: args.v4l2_device,
+            backend: args.backend,
+        }
+    }
 }
 
 #[cfg(feature = "simple-capture")]

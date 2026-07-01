@@ -9,7 +9,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use clap::ValueEnum;
 use log::{debug, warn};
 use thiserror::Error as ThisError;
 use vhost::vhost_user::{
@@ -39,17 +38,6 @@ pub(crate) type Writer =
     descriptor_chain::DescriptorChainWriter<GuestMemoryLoadGuard<GuestMemoryMmap>>;
 pub(crate) type Reader =
     descriptor_chain::DescriptorChainReader<GuestMemoryLoadGuard<GuestMemoryMmap>>;
-
-#[derive(ValueEnum, Debug, Clone, Eq, PartialEq)]
-pub enum BackendType {
-    Null,
-    #[cfg(feature = "simple-capture")]
-    SimpleCapture,
-    #[cfg(feature = "v4l2-proxy")]
-    V4l2Proxy,
-    #[cfg(feature = "ffmpeg")]
-    FfmpegDecoder,
-}
 
 const QUEUE_SIZE: usize = 1024;
 pub const NUM_QUEUES: usize = 2;

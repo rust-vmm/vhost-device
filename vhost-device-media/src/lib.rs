@@ -10,15 +10,24 @@ mod vhu_adapters;
 pub mod vhu_media;
 mod vhu_media_thread;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    os::{
+        fd::RawFd,
+        unix::{net::UnixListener, prelude::FromRawFd},
+    },
+    path::PathBuf,
+    sync::Arc,
+};
 
-use ::virtio_media::protocol::VirtioMediaDeviceConfig;
+use ::virtio_media::{protocol::VirtioMediaDeviceConfig, VirtioMediaDevice};
 pub use args::BackendType;
 use log::debug;
 use thiserror::Error as ThisError;
+use vhost::vhost_user::Listener;
 use vhost_user_backend::VhostUserDaemon;
-use vhu_media::VuMediaBackend;
+use vhu_adapters::{EventQueue, VuBackend, VuMemoryMapper};
 pub use vhu_media::VuMediaError;
+use vhu_media::{MediaResult, Reader, VuMediaBackend, Writer};
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -66,6 +75,8 @@ impl V4l2DeviceType {
 pub enum Error {
     #[error("Could not create backend: {0}")]
     CouldNotCreateBackend(vhu_media::VuMediaError),
+    #[error("Could not bind socket: {0}")]
+    CouldNotBindSocket(vhost::vhost_user::Error),
     #[error("Could not open device `{0}`: {1}")]
     CouldNotOpenDevice(PathBuf, String),
     #[error("Could not create daemon: {0}")]
@@ -76,7 +87,8 @@ pub enum Error {
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct VuMediaConfig {
-    pub socket_path: PathBuf,
+    pub socket_path: Option<PathBuf>,
+    pub socket_fd: Option<RawFd>,
     pub v4l2_device: PathBuf,
     pub backend: BackendType,
 }
@@ -85,9 +97,21 @@ impl From<args::MediaArgs> for VuMediaConfig {
     fn from(args: args::MediaArgs) -> Self {
         Self {
             socket_path: args.socket_path,
+            socket_fd: args.socket_fd,
             v4l2_device: args.v4l2_device,
             backend: args.backend,
         }
+    }
+}
+
+fn make_listener(config: &VuMediaConfig) -> Result<Listener> {
+    if let Some(fd) = config.socket_fd {
+        // SAFETY: user has assured us this is safe.
+        Ok(unsafe { UnixListener::from_raw_fd(fd) }.into())
+    } else if let Some(ref path) = config.socket_path {
+        Listener::new(path, true).map_err(Error::CouldNotBindSocket)
+    } else {
+        unreachable!()
     }
 }
 
@@ -150,11 +174,30 @@ pub fn create_ffmpeg_decoder_config() -> VirtioMediaDeviceConfig {
     }
 }
 
+fn run_daemon<D, F>(listener: &mut Listener, backend: Arc<VuMediaBackend<D, F>>) -> Result<()>
+where
+    D: VirtioMediaDevice<Reader, Writer> + Send + Sync + 'static,
+    D::Session: Send + Sync,
+    F: Fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<D> + Send + Sync + 'static,
+{
+    let mut daemon = VhostUserDaemon::new(
+        "vhost-device-media".to_owned(),
+        backend.clone(),
+        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
+    )
+    .map_err(Error::CouldNotCreateDaemon)?;
+
+    backend.set_thread_workers(&mut daemon.get_epoll_handlers());
+    daemon.start(listener).map_err(Error::ServeFailed)?;
+    daemon.wait().map_err(Error::ServeFailed)?;
+
+    Ok(())
+}
+
 #[cfg(feature = "simple-capture")]
-fn serve_simple_capture(media_config: &VuMediaConfig) -> Result<()> {
-    let vu_media_backend = Arc::new(
+fn serve_simple_capture(listener: &mut Listener) -> Result<()> {
+    let backend = Arc::new(
         VuMediaBackend::new(
-            media_config.v4l2_device.as_path(),
             create_simple_capture_device_config(),
             move |event_queue, _, host_mapper| {
                 Ok(virtio_media::devices::SimpleCaptureDevice::new(
@@ -165,28 +208,14 @@ fn serve_simple_capture(media_config: &VuMediaConfig) -> Result<()> {
         )
         .map_err(Error::CouldNotCreateBackend)?,
     );
-    let mut daemon = VhostUserDaemon::new(
-        "vhost-device-media".to_owned(),
-        vu_media_backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .map_err(Error::CouldNotCreateDaemon)?;
-
-    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
-
-    daemon
-        .serve(&media_config.socket_path)
-        .map_err(Error::ServeFailed)?;
-
-    Ok(())
+    run_daemon(listener, backend)
 }
 
 #[cfg(feature = "v4l2-proxy")]
-fn serve_v4l2_proxy_daemon(media_config: &VuMediaConfig) -> Result<()> {
+fn serve_v4l2_proxy_daemon(listener: &mut Listener, media_config: &VuMediaConfig) -> Result<()> {
     let path = media_config.v4l2_device.clone();
-    let vu_media_backend = Arc::new(
+    let backend = Arc::new(
         VuMediaBackend::new(
-            media_config.v4l2_device.as_path(),
             create_v4l2_proxy_device_config(&path)?,
             move |event_queue, guest_mapper, host_mapper| {
                 Ok(virtio_media::devices::V4l2ProxyDevice::new(
@@ -199,27 +228,14 @@ fn serve_v4l2_proxy_daemon(media_config: &VuMediaConfig) -> Result<()> {
         )
         .map_err(Error::CouldNotCreateBackend)?,
     );
-    let mut daemon = VhostUserDaemon::new(
-        "vhost-device-media".to_owned(),
-        vu_media_backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .map_err(Error::CouldNotCreateDaemon)?;
-
-    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
-    daemon
-        .serve(&media_config.socket_path)
-        .map_err(Error::ServeFailed)?;
-
-    Ok(())
+    run_daemon(listener, backend)
 }
 
-fn serve_null(media_config: &VuMediaConfig) -> Result<()> {
+fn serve_null(listener: &mut Listener) -> Result<()> {
     let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
     card[..4].copy_from_slice(b"null");
-    let vu_media_backend = Arc::new(
+    let backend = Arc::new(
         VuMediaBackend::new(
-            media_config.v4l2_device.as_path(),
             VirtioMediaDeviceConfig {
                 device_caps: 0,
                 device_type: V4l2DeviceType::Video as u32,
@@ -229,26 +245,13 @@ fn serve_null(media_config: &VuMediaConfig) -> Result<()> {
         )
         .map_err(Error::CouldNotCreateBackend)?,
     );
-    let mut daemon = VhostUserDaemon::new(
-        "vhost-device-media".to_owned(),
-        vu_media_backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .map_err(Error::CouldNotCreateDaemon)?;
-
-    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
-    daemon
-        .serve(&media_config.socket_path)
-        .map_err(Error::ServeFailed)?;
-
-    Ok(())
+    run_daemon(listener, backend)
 }
 
 #[cfg(feature = "ffmpeg")]
-fn serve_ffmpeg_decoder(media_config: &VuMediaConfig) -> Result<()> {
-    let vu_media_backend = Arc::new(
+fn serve_ffmpeg_decoder(listener: &mut Listener) -> Result<()> {
+    let backend = Arc::new(
         VuMediaBackend::new(
-            media_config.v4l2_device.as_path(),
             create_ffmpeg_decoder_config(),
             move |event_queue, _, host_mapper| {
                 Ok(virtio_media::devices::video_decoder::VideoDecoder::new(
@@ -260,20 +263,7 @@ fn serve_ffmpeg_decoder(media_config: &VuMediaConfig) -> Result<()> {
         )
         .map_err(Error::CouldNotCreateBackend)?,
     );
-
-    let mut daemon = VhostUserDaemon::new(
-        "vhost-device-media".to_owned(),
-        vu_media_backend.clone(),
-        GuestMemoryAtomic::new(GuestMemoryMmap::new()),
-    )
-    .map_err(Error::CouldNotCreateDaemon)?;
-
-    vu_media_backend.set_thread_workers(&mut daemon.get_epoll_handlers());
-    daemon
-        .serve(&media_config.socket_path)
-        .map_err(Error::ServeFailed)?;
-
-    Ok(())
+    run_daemon(listener, backend)
 }
 
 /// Starts the vhost-device-media daemon.
@@ -282,16 +272,17 @@ fn serve_ffmpeg_decoder(media_config: &VuMediaConfig) -> Result<()> {
 /// re-spawning the chosen backend after each guest disconnect. It only returns
 /// `Err` if the backend itself fails to start.
 pub fn start_backend(media_config: VuMediaConfig) -> Result<()> {
+    let mut listener = make_listener(&media_config)?;
     loop {
         debug!("Starting backend");
         match media_config.backend {
-            BackendType::Null => serve_null(&media_config),
+            BackendType::Null => serve_null(&mut listener),
             #[cfg(feature = "simple-capture")]
-            BackendType::SimpleCapture => serve_simple_capture(&media_config),
+            BackendType::SimpleCapture => serve_simple_capture(&mut listener),
             #[cfg(feature = "v4l2-proxy")]
-            BackendType::V4l2Proxy => serve_v4l2_proxy_daemon(&media_config),
+            BackendType::V4l2Proxy => serve_v4l2_proxy_daemon(&mut listener, &media_config),
             #[cfg(feature = "ffmpeg")]
-            BackendType::FfmpegDecoder => serve_ffmpeg_decoder(&media_config),
+            BackendType::FfmpegDecoder => serve_ffmpeg_decoder(&mut listener),
         }?;
         debug!("Finishing backend");
     }
@@ -437,7 +428,8 @@ mod tests {
         let socket_path_check = socket_path.clone();
 
         let config = VuMediaConfig {
-            socket_path,
+            socket_path: Some(socket_path),
+            socket_fd: None,
             v4l2_device: PathBuf::from("/dev/null"),
             backend: BackendType::Null,
         };

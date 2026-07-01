@@ -96,34 +96,26 @@ mod tests {
         ])
         .unwrap();
 
-        assert_eq!(args.socket_path, PathBuf::from(socket));
+        assert_eq!(args.socket_path, Some(PathBuf::from(socket)));
         assert_eq!(args.v4l2_device, PathBuf::from(device));
         assert_eq!(args.backend, expected_backend);
     }
 
     #[test]
     fn test_media_args_parse_defaults() {
-        let res = MediaArgs::try_parse_from([
+        let args = MediaArgs::try_parse_from([
             "vhost-device-media",
             "--socket-path",
             "/tmp/vmedia-default.sock",
-        ]);
+        ])
+        .unwrap();
 
-        #[cfg(feature = "simple-capture")]
-        {
-            let args = res.unwrap();
-            assert_eq!(args.socket_path, PathBuf::from("/tmp/vmedia-default.sock"));
-            assert_eq!(args.v4l2_device, PathBuf::from("/dev/video0"));
-            // Default CLI backend is simple-capture.
-            assert_eq!(args.backend, BackendType::SimpleCapture);
-        }
-
-        #[cfg(not(feature = "simple-capture"))]
-        {
-            // If simple-capture is compiled out, the hardcoded default backend
-            // becomes invalid and clap should reject parsing.
-            res.unwrap_err();
-        }
+        assert_eq!(
+            args.socket_path,
+            Some(PathBuf::from("/tmp/vmedia-default.sock"))
+        );
+        assert_eq!(args.v4l2_device, PathBuf::from("/dev/video0"));
+        assert_eq!(args.backend, BackendType::Null);
     }
 
     #[test]
@@ -137,6 +129,14 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(args.backend, BackendType::Null);
+    }
+
+    #[test]
+    fn test_media_args_parse_socket_fd() {
+        let args = MediaArgs::try_parse_from(["vhost-device-media", "--socket-fd", "5"]).unwrap();
+
+        assert_eq!(args.socket_path, None);
+        assert_eq!(args.socket_fd, Some(5));
     }
 
     #[test]
@@ -161,13 +161,15 @@ mod tests {
     #[cfg(feature = "simple-capture")]
     fn test_from_media_args_for_vu_media_config() {
         let args = MediaArgs {
-            socket_path: PathBuf::from("/tmp/a.sock"),
+            socket_path: Some(PathBuf::from("/tmp/a.sock")),
+            socket_fd: None,
             v4l2_device: PathBuf::from("/dev/video99"),
             backend: BackendType::SimpleCapture,
         };
 
         let config = VuMediaConfig::from(args.clone());
         assert_eq!(config.socket_path, args.socket_path);
+        assert_eq!(config.socket_fd, args.socket_fd);
         assert_eq!(config.v4l2_device, args.v4l2_device);
         assert_eq!(config.backend, args.backend);
     }

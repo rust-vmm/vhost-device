@@ -1,2 +1,9 @@
 [advisories]
-ignore = ["RUSTSEC-2021-0145"]
+ignore = [
+    "RUSTSEC-2021-0145",
+    # paste is unmaintained; v4l2r and virtio-media pull it in transitively.
+    # The git revision we use for v4l2r already replaces paste with pastey,
+    # but virtio-media still depends on an older version.
+    # Ignore until virtio-media updates to it.
+    "RUSTSEC-2024-0436",
+]

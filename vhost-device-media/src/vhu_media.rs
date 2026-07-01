@@ -5,7 +5,6 @@
 use std::{
     convert,
     io::{self, Result as IoResult},
-    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -97,12 +96,8 @@ where
     D::Session: Send + Sync,
     F: Fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<D> + Send + Sync,
 {
-    /// Create a new virtio video device for /dev/video<num>.
-    pub fn new(
-        _video_path: &Path,
-        config: VirtioMediaDeviceConfig,
-        create_device: F,
-    ) -> MediaResult<Self> {
+    /// Create a new virtio media device.
+    pub fn new(config: VirtioMediaDeviceConfig, create_device: F) -> MediaResult<Self> {
         let (exit_consumer, exit_notifier) = new_event_consumer_and_notifier(EventFlag::NONBLOCK)
             .map_err(|_| VuMediaError::EventFdError)?;
         Ok(Self {
@@ -243,9 +238,9 @@ where
         Ok(())
     }
 
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        let offset = _offset as usize;
-        let size = _size as usize;
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        let offset = offset as usize;
+        let size = size as usize;
 
         let buf = self.config.as_bytes();
 
@@ -347,7 +342,7 @@ pub(crate) mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Arc};
+    use std::sync::Arc;
 
     use rstest::*;
     use vhost_user_backend::{VhostUserDaemon, VringT};
@@ -365,7 +360,6 @@ mod tests {
     > {
         let config = create_test_config();
         VuMediaBackend::new(
-            Path::new("/dev/null"),
             config,
             make_dummy_device
                 as fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>,
@@ -421,8 +415,7 @@ mod tests {
     ) {
         let mut config = create_test_config();
         config.device_caps = device_caps;
-        let backend =
-            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device).unwrap();
+        let backend = VuMediaBackend::new(config, make_dummy_device).unwrap();
 
         let config_bytes = backend.get_config(offset, size);
         assert_eq!(config_bytes.len(), size as usize);
@@ -436,8 +429,7 @@ mod tests {
     fn test_get_config_partial_read() {
         let mut config = create_test_config();
         config.device_caps = 0xDEADBEEF;
-        let backend =
-            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device).unwrap();
+        let backend = VuMediaBackend::new(config, make_dummy_device).unwrap();
 
         // Test reading 4 bytes
         let config_bytes = backend.get_config(0, 4);
@@ -450,8 +442,7 @@ mod tests {
     fn test_get_config_out_of_bounds() {
         let mut config = create_test_config();
         config.device_caps = 0x12345678;
-        let backend =
-            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device).unwrap();
+        let backend = VuMediaBackend::new(config, make_dummy_device).unwrap();
 
         // Test reading out of bounds
         let config_bytes = backend.get_config(1024, 8);
@@ -503,9 +494,7 @@ mod tests {
     ) {
         type Fn = fn(EventQueue, VuMemoryMapper, VuBackend) -> MediaResult<DummyDevice>;
         let config = create_test_config();
-        let backend = Arc::new(
-            VuMediaBackend::new(Path::new("/dev/null"), config, make_dummy_device as Fn).unwrap(),
-        );
+        let backend = Arc::new(VuMediaBackend::new(config, make_dummy_device as Fn).unwrap());
         let daemon = VhostUserDaemon::new(
             "test".to_owned(),
             backend.clone(),

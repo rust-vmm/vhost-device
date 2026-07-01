@@ -4,17 +4,28 @@
 
 //! An arguments type for the binary interface of this library.
 
-use std::path::PathBuf;
+use std::{os::fd::RawFd, path::PathBuf};
 
-use clap::{Parser, ValueEnum};
+use clap::{ArgGroup, Parser, ValueEnum};
 
 #[derive(Clone, Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[clap(
+    author,
+    version,
+    about,
+    long_about = None,
+    group(ArgGroup::new("socket group").required(true).args(&["socket_path", "socket_fd"])),
+)]
 pub struct MediaArgs {
     /// Unix socket to which a hypervisor connects to and sets up the control
     /// path with the device.
     #[clap(short, long)]
-    pub socket_path: PathBuf,
+    pub socket_path: Option<PathBuf>,
+
+    /// Listening vhost-user Unix domain socket file descriptor (e.g. from a
+    /// service manager).
+    #[clap(long, value_name = "FD")]
+    pub socket_fd: Option<RawFd>,
 
     /// Path to the V4L2 media device file. Defaults to /dev/video0.
     #[clap(short = 'd', long, default_value = "/dev/video0")]

@@ -29,6 +29,10 @@ out-of-tree module.
      --socket-path <SOCKET>
             vhost-user Unix domain socket path
 
+     --socket-fd <FD>
+            listening vhost-user Unix domain socket file descriptor
+            (e.g. from a service manager)
+
      --v4l2-device <V4L2_DEVICE>
             Path to the V4L2 media device file (used by v4l2-proxy). Defaults to /dev/video0.
 

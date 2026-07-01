@@ -296,12 +296,7 @@ mod tests {
     ) {
         let config = create_test_config();
         let backend = Arc::new(
-            crate::vhu_media::VuMediaBackend::new(
-                std::path::Path::new("/dev/null"),
-                config,
-                make_dummy_device as DummyFn,
-            )
-            .unwrap(),
+            crate::vhu_media::VuMediaBackend::new(config, make_dummy_device as DummyFn).unwrap(),
         );
         let daemon = VhostUserDaemon::new(
             "vhost-device-media-test".to_owned(),
@@ -408,14 +403,8 @@ mod tests {
     #[test]
     fn test_process_media_events_process_events_error() {
         let config = create_test_config();
-        let backend = Arc::new(
-            VuMediaBackend::new(
-                std::path::Path::new("/dev/null"),
-                config,
-                make_failing_device as FailingFn,
-            )
-            .unwrap(),
-        );
+        let backend =
+            Arc::new(VuMediaBackend::new(config, make_failing_device as FailingFn).unwrap());
         let daemon = VhostUserDaemon::new(
             "vhost-device-media-test".to_owned(),
             backend.clone(),

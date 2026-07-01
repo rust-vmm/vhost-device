@@ -18,7 +18,8 @@ markdown = { version = "=1.0.0", optional = true }
 [build-dependencies]
 
 [features]
-default = ["vhost-device-sound", "vhost-device-scmi", "vhost-device-scsi", "vhost-device-rtc"]
+default = ["vhost-device-sound", "vhost-device-scmi", "vhost-device-scsi", "vhost-device-rtc", "vhost-device-media"]
+vhost-device-media = ["mangen"]
 vhost-device-scmi = []
 vhost-device-scsi = []
 vhost-device-rtc = []
@@ -28,4 +29,4 @@ vhost-device-sound-pipewire = ["mangen"]
 mangen = ["dep:clap_mangen", "dep:clap", "dep:toml", "dep:markdown"]
 
 [lints.rust]
-unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("alsa-backend", "pw-backend"))'] }
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("alsa-backend", "pw-backend", "simple-capture", "v4l2-proxy", "ffmpeg"))'] }

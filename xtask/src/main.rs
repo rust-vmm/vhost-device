@@ -46,6 +46,12 @@ mod vhost_device_scsi;
 #[path = "../../vhost-device-rtc/src/args.rs"]
 mod vhost_device_rtc;
 
+// Use vhost-device-media's args module as our own using the #[path] attribute
+
+#[cfg(feature = "vhost-device-media")]
+#[path = "../../vhost-device-media/src/args.rs"]
+mod vhost_device_media;
+
 fn main() {
     if let Err(err) = run_app() {
         eprintln!("{err}");
@@ -219,6 +225,14 @@ fn mangen() -> Result<(), Box<dyn Error>> {
 
         let buffer = mangen_for_crate::<RtcArgs>(workspace_dir.join("vhost-device-rtc"))?;
         let man_path = dist_dir.join("vhost-device-rtc.1");
+        buffers.push((man_path, buffer));
+    }
+    #[cfg(feature = "vhost-device-media")]
+    {
+        use vhost_device_media::MediaArgs;
+
+        let buffer = mangen_for_crate::<MediaArgs>(workspace_dir.join("vhost-device-media"))?;
+        let man_path = dist_dir.join("vhost-device-media.1");
         buffers.push((man_path, buffer));
     }
 

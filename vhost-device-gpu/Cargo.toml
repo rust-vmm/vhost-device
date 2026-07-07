@@ -40,7 +40,7 @@ uuid = { version = "1.23", features = ["v4"] }
 
 [dev-dependencies]
 assert_matches = "1.5"
-mockall = "0.14.0"
+mockall = "0.15.0"
 rusty-fork = "0.3.1"
 tempfile = "3.27"
 virtio-queue = { workspace = true, features = ["test-utils"] }

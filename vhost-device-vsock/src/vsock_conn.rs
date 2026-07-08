@@ -3,10 +3,12 @@
 use std::{
     io::{ErrorKind, Write},
     num::Wrapping,
-    os::unix::prelude::{AsRawFd, RawFd},
+    os::unix::prelude::AsRawFd,
+    sync::{Arc, Mutex},
 };
 
 use log::{error, info};
+use mio::{Interest, Poll};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{bitmap::BitmapSlice, ReadVolatile, VolatileSlice, WriteVolatile};
 
@@ -48,8 +50,8 @@ pub(crate) struct VsockConnection<S> {
     peer_fwd_cnt: Wrapping<u32>,
     /// The total number of bytes sent to the guest vsock driver.
     rx_cnt: Wrapping<u32>,
-    /// epoll fd to which this connection's stream has to be added.
-    pub epoll_fd: RawFd,
+    /// Poller used to manage this connection's stream readiness.
+    pub poller: Arc<Mutex<Poll>>,
     /// Local tx buffer.
     pub tx_buf: LocalTxBuf,
     /// Local tx buffer size
@@ -65,7 +67,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
         local_port: u32,
         guest_cid: u64,
         guest_port: u32,
-        epoll_fd: RawFd,
+        poller: Arc<Mutex<Poll>>,
         tx_buffer_size: u32,
     ) -> Self {
         Self {
@@ -81,7 +83,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             peer_buf_alloc: 0,
             peer_fwd_cnt: Wrapping(0),
             rx_cnt: Wrapping(0),
-            epoll_fd,
+            poller,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
             tx_buffer_size,
         }
@@ -96,7 +98,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
         local_port: u32,
         guest_cid: u64,
         guest_port: u32,
-        epoll_fd: RawFd,
+        poller: Arc<Mutex<Poll>>,
         peer_buf_alloc: u32,
         tx_buffer_size: u32,
     ) -> Self {
@@ -115,7 +117,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             peer_buf_alloc,
             peer_fwd_cnt: Wrapping(0),
             rx_cnt: Wrapping(0),
-            epoll_fd,
+            poller,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
             tx_buffer_size,
         }
@@ -177,20 +179,20 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
                         // Re-register the stream file descriptor for read and write events
                         if VhostUserVsockThread::epoll_modify(
-                            self.epoll_fd,
+                            &self.poller,
                             self.stream.as_raw_fd(),
-                            epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                            Interest::READABLE | Interest::WRITABLE,
                         )
                         .is_err()
                         {
                             if let Err(e) = VhostUserVsockThread::epoll_register(
-                                self.epoll_fd,
+                                &self.poller,
                                 self.stream.as_raw_fd(),
-                                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                                Interest::READABLE | Interest::WRITABLE,
                             ) {
                                 // TODO: let's move this logic out of this func, and handle it
                                 // properly
-                                error!("epoll_register failed: {e:?}, but proceed further.");
+                                error!("poll_register failed: {e:?}, but proceed further.");
                             }
                         };
                     }
@@ -263,19 +265,19 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
                 // Re-register the stream file descriptor for read and write events
                 if VhostUserVsockThread::epoll_modify(
-                    self.epoll_fd,
+                    &self.poller,
                     self.stream.as_raw_fd(),
-                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                    Interest::READABLE | Interest::WRITABLE,
                 )
                 .is_err()
                 {
                     if let Err(e) = VhostUserVsockThread::epoll_register(
-                        self.epoll_fd,
+                        &self.poller,
                         self.stream.as_raw_fd(),
-                        epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                        Interest::READABLE | Interest::WRITABLE,
                     ) {
                         // TODO: let's move this logic out of this func, and handle it properly
-                        error!("epoll_register failed: {e:?}, but proceed further.");
+                        error!("poll_register failed: {e:?}, but proceed further.");
                     }
                 };
             }
@@ -306,7 +308,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
     fn send_bytes<B: BitmapSlice>(&mut self, buf: &VolatileSlice<B>) -> Result<()> {
         if !self.tx_buf.is_empty() {
             // Data is already present in the buffer and the backend
-            // is waiting for a EPOLLOUT event to flush it
+            // is waiting for writable readiness to flush it
             return self.tx_buf.push(buf);
         }
 
@@ -346,15 +348,16 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
         }
 
         if written_count != buf.len() {
-            // Try to re-enable EPOLLOUT in case it is disabled when txbuf is empty.
+            // Try to re-enable writable interest in case it is disabled when txbuf is
+            // empty.
             if VhostUserVsockThread::epoll_modify(
-                self.epoll_fd,
+                &self.poller,
                 self.stream.as_raw_fd(),
-                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                Interest::READABLE | Interest::WRITABLE,
             )
             .is_err()
             {
-                error!("Failed to re-enable EPOLLOUT");
+                error!("Failed to re-enable writable interest");
             }
             return self.tx_buf.push(&buf.offset(written_count).unwrap());
         }
@@ -398,6 +401,7 @@ mod tests {
         collections::VecDeque,
         io::{Read, Result as IoResult},
         ops::Deref,
+        os::unix::io::RawFd,
         sync::{Arc, Mutex},
     };
 
@@ -417,6 +421,10 @@ mod tests {
     use crate::vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM};
 
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
+
+    fn test_poller() -> Arc<Mutex<Poll>> {
+        Arc::new(Mutex::new(Poll::new().unwrap()))
+    }
 
     struct HeadParams {
         head_len: usize,
@@ -632,7 +640,7 @@ mod tests {
             5000,
             3,
             5001,
-            -1,
+            test_poller(),
             CONN_TX_BUF_SIZE,
         );
 
@@ -655,7 +663,7 @@ mod tests {
             5000,
             3,
             5001,
-            -1,
+            test_poller(),
             65536,
             CONN_TX_BUF_SIZE,
         );
@@ -680,7 +688,7 @@ mod tests {
             5000,
             3,
             5001,
-            -1,
+            test_poller(),
             CONN_TX_BUF_SIZE,
         );
 
@@ -712,7 +720,7 @@ mod tests {
             5000,
             3,
             5001,
-            -1,
+            test_poller(),
             CONN_TX_BUF_SIZE,
         );
 
@@ -747,7 +755,7 @@ mod tests {
             5000,
             3,
             5001,
-            -1,
+            test_poller(),
             CONN_TX_BUF_SIZE,
         );
 
@@ -845,7 +853,7 @@ mod tests {
             5000,
             3,
             5001,
-            -1,
+            test_poller(),
             CONN_TX_BUF_SIZE,
         );
 

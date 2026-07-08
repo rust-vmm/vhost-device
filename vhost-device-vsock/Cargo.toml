@@ -18,15 +18,15 @@ xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 byteorder = "1"
 clap = { version = "4.6",  features = ["derive"] }
 env_logger = "0.11"
-epoll = "4.4.0"
+mio = { version = "1.0.4", features = ["os-poll", "os-ext"] }
 log = "0.4"
 thiserror = "2.0"
-vhost = { workspace = true }
-vhost-user-backend = { workspace = true }
+vhost = { git="https://github.com/eric-14/rust_vhost_.git", branch="experimental_mac" }
+vhost-user-backend = { git="https://github.com/eric-14/rust_vhost_.git", branch="experimental_mac" }
 virtio-bindings = { workspace = true }
-virtio-queue = { workspace = true }
-virtio-vsock = "0.11"
-vm-memory = { workspace = true }
+virtio-queue = { git = "https://github.com/uran0sh/vm-virtio.git", branch = "update-vm-memory" }
+virtio-vsock = { git = "https://github.com/uran0sh/vm-virtio.git", branch = "update-vm-memory" }
+vm-memory = { git = "https://github.com/rust-vmm/vm-memory.git", rev = "b2eaf989de2c3b9146ea7625250472501cd793fd", features = ["backend-mmap", "backend-atomic", "backend-bitmap"] }
 vmm-sys-util = { workspace = true }
 figment = { version = "0.10.19", features = ["yaml"] }
 vsock = { version = "0.5.4", optional = true }
@@ -35,7 +35,7 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 assert_matches = "1.5"
-virtio-queue = { workspace = true, features = ["test-utils"] }
+virtio-queue = { git = "https://github.com/uran0sh/vm-virtio.git", branch = "update-vm-memory", features = ["test-utils"] }
 tempfile = "3.27.0"
 
 [lints]

@@ -10,22 +10,26 @@ use std::{
 use log::warn;
 use thiserror::Error as ThisError;
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost_user_backend::{VhostUserBackend, VringRwLock};
+use vhost_user_backend::{EventSet, VhostUserBackend, VringRwLock};
 use virtio_bindings::bindings::{
     virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1},
     virtio_ring::VIRTIO_RING_F_EVENT_IDX,
 };
 use vm_memory::{ByteValued, GuestMemoryAtomic, GuestMemoryMmap, Le64};
-use vmm_sys_util::{
-    epoll::EventSet,
-    event::{new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier},
-    eventfd::EventFd,
+use vmm_sys_util::event::{
+    new_event_consumer_and_notifier, EventConsumer, EventFlag, EventNotifier,
 };
 
 use crate::{thread_backend::RawPktsQ, vhu_vsock_thread::*};
 
-pub(crate) type CidMap =
-    HashMap<u64, (Arc<RwLock<RawPktsQ>>, Arc<RwLock<HashSet<String>>>, EventFd)>;
+pub(crate) type CidMap = HashMap<
+    u64,
+    (
+        Arc<RwLock<RawPktsQ>>,
+        Arc<RwLock<HashSet<String>>>,
+        EventNotifier,
+    ),
+>;
 
 const NUM_QUEUES: usize = 3;
 
@@ -104,7 +108,7 @@ pub(crate) enum Error {
     ParseInteger(std::num::ParseIntError),
     #[error("Error reading stream port")]
     ReadStreamPort(Box<Error>),
-    #[error("Failed to de-register fd from epoll")]
+    #[error("Failed to de-register fd from mio::poll")]
     EpollRemove(std::io::Error),
     #[error("No memory configured")]
     NoMemoryConfigured,
@@ -135,8 +139,8 @@ pub(crate) enum Error {
     NoFreeLocalPort,
     #[error("Backend rx queue is empty")]
     EmptyBackendRxQ,
-    #[error("Failed to create an EventFd")]
-    EventFdCreate(std::io::Error),
+    #[error("Failed to create an EventFlag")]
+    EventFlagCreate(std::io::Error),
     #[error("Raw vsock packets queue is empty")]
     EmptyRawPktsQueue,
     #[error("CID already in use by another vsock device")]
@@ -275,7 +279,7 @@ impl VhostUserVsockBackend {
         let queues_per_thread = vec![QUEUE_MASK];
 
         let (exit_consumer, exit_notifier) =
-            new_event_consumer_and_notifier(EventFlag::NONBLOCK).map_err(Error::EventFdCreate)?;
+            new_event_consumer_and_notifier(EventFlag::NONBLOCK).map_err(Error::EventFlagCreate)?;
 
         Ok(Self {
             config: VirtioVsockConfig {
@@ -336,7 +340,7 @@ impl VhostUserBackend for VhostUserVsockBackend {
         let vring_rx = &vrings[0];
         let vring_tx = &vrings[1];
 
-        if evset != EventSet::IN {
+        if evset != EventSet::READABLE {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
@@ -363,7 +367,7 @@ impl VhostUserBackend for VhostUserVsockBackend {
                 }
             }
             SIBLING_VM_EVENT => {
-                let _ = thread.sibling_event_fd.read();
+                let _ = thread.sibling_event_consumer.consume();
                 thread.process_raw_pkts(vring_rx, evt_idx)?;
                 return Ok(());
             }
@@ -458,16 +462,16 @@ mod tests {
         let (_, notifier) = exit.unwrap();
         notifier.notify().unwrap();
 
-        let ret = backend.handle_event(RX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(RX_QUEUE_EVENT, EventSet::READABLE, &vrings, 0);
         ret.unwrap();
 
-        let ret = backend.handle_event(TX_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(TX_QUEUE_EVENT, EventSet::READABLE, &vrings, 0);
         ret.unwrap();
 
-        let ret = backend.handle_event(EVT_QUEUE_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(EVT_QUEUE_EVENT, EventSet::READABLE, &vrings, 0);
         ret.unwrap();
 
-        let ret = backend.handle_event(BACKEND_EVENT, EventSet::IN, &vrings, 0);
+        let ret = backend.handle_event(BACKEND_EVENT, EventSet::READABLE, &vrings, 0);
         ret.unwrap();
     }
 
@@ -579,14 +583,14 @@ mod tests {
 
         assert_eq!(
             backend
-                .handle_event(RX_QUEUE_EVENT, EventSet::OUT, &vrings, 0)
+                .handle_event(RX_QUEUE_EVENT, EventSet::WRITABLE, &vrings, 0)
                 .unwrap_err()
                 .to_string(),
             Error::HandleEventNotEpollIn.to_string()
         );
         assert_eq!(
             backend
-                .handle_event(SIBLING_VM_EVENT + 1, EventSet::IN, &vrings, 0)
+                .handle_event(SIBLING_VM_EVENT + 1, EventSet::READABLE, &vrings, 0)
                 .unwrap_err()
                 .to_string(),
             Error::HandleUnknownEvent.to_string()

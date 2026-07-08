@@ -10,5 +10,9 @@ vhost = { version = "0.15", features = ["vhost-user-backend"] }
 vhost-user-backend = "0.21"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.17"
-vm-memory = "0.17.1"
+vm-memory = "0.18"
 vmm-sys-util = "0.15"
+[patch.crates-io]
+virtio-queue = { git = "https://github.com/luigix25/vm-virtio.git", branch = "fix_vsock" }
+vhost = { git = "https://github.com/XanClic/vhost.git", branch = "vm-memory-0.18" }
+vhost-user-backend = { git = "https://github.com/XanClic/vhost.git", branch = "vm-memory-0.18" }

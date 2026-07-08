@@ -28,7 +28,7 @@ use virglrenderer::{
     FenceHandler, Iovec, VirglRenderer, VirglRendererFlags, VirglResource,
     VIRGL_HANDLE_TYPE_MEM_DMABUF,
 };
-use vm_memory::{GuestAddress, GuestMemory, GuestMemoryMmap, VolatileSlice};
+use vm_memory::{GuestAddress, GuestMemoryBackend, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{

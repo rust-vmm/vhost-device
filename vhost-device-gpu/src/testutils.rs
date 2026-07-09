@@ -21,7 +21,7 @@ use virtio_queue::{
     Queue, QueueT,
 };
 use vm_memory::{
-    Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
+    Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryBackend, GuestMemoryMmap,
 };
 use vmm_sys_util::eventfd::EventFd;
 

@@ -432,42 +432,52 @@ impl AudioBackend for PwBackend {
                                     let streams = streams
                                         .get_mut(stream_id as usize)
                                         .expect("Stream does not exist");
-                                    let Some(request) = streams.requests.front_mut() else {
-                                        return;
-                                    };
-
-                                    let mut start = request.pos;
-
-                                    let avail = request.len().saturating_sub(start);
-
-                                    if avail < n_bytes {
-                                        n_bytes = avail;
-                                    }
-                                    let p = &mut slice[0..n_bytes];
-                                    if avail == 0 {
-                                        // SAFETY: We have assured above that the pointer is not
-                                        // null
-                                        // safe to zero-initialize the pointer.
-                                        unsafe {
-                                            // pad with silence
-                                            ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
+                                    match streams.requests.front_mut() {
+                                        None => {
+                                            // Queue empty: fill with silence so PipeWire gets
+                                            // clean audio instead of stale data in the buffer.
+                                            // SAFETY: slice is a valid mutable byte slice of
+                                            // length n_bytes obtained from data.data() above.
+                                            unsafe {
+                                                ptr::write_bytes(slice.as_mut_ptr(), 0, n_bytes);
+                                            }
+                                            n_bytes
                                         }
-                                    } else {
-                                        // read_output() always reads (buffer.desc_len() -
-                                        // buffer.pos) bytes
-                                        request
-                                            .read_output(p)
-                                            .expect("failed to read buffer from guest");
+                                        Some(request) => {
+                                            let mut start = request.pos;
 
-                                        start += n_bytes;
+                                            let avail = request.len().saturating_sub(start);
 
-                                        request.pos = start;
+                                            if avail < n_bytes {
+                                                n_bytes = avail;
+                                            }
+                                            let p = &mut slice[0..n_bytes];
+                                            if avail == 0 {
+                                                // SAFETY: We have assured above that the pointer
+                                                // is not null
+                                                // safe to zero-initialize the pointer.
+                                                unsafe {
+                                                    // pad with silence
+                                                    ptr::write_bytes(p.as_mut_ptr(), 0, n_bytes);
+                                                }
+                                            } else {
+                                                // read_output() always reads (buffer.desc_len() -
+                                                // buffer.pos) bytes
+                                                request
+                                                    .read_output(p)
+                                                    .expect("failed to read buffer from guest");
 
-                                        if start >= request.len() {
-                                            streams.requests.pop_front();
+                                                start += n_bytes;
+
+                                                request.pos = start;
+
+                                                if start >= request.len() {
+                                                    streams.requests.pop_front();
+                                                }
+                                            }
+                                            n_bytes
                                         }
                                     }
-                                    n_bytes
                                 } else {
                                     0
                                 };

@@ -332,7 +332,7 @@ impl VsockThreadBackend {
             if dst_cid != VSOCK_HOST_CID {
                 let cid_map = self.cid_map.read().unwrap();
                 if cid_map.contains_key(&dst_cid) {
-                    let (sibling_raw_pkts_queue, sibling_groups_set, sibling_event_fd) =
+                    let (sibling_raw_pkts_queue_opt, sibling_groups_set, sibling_event_fd) =
                         cid_map.get(&dst_cid).unwrap();
 
                     if self
@@ -345,11 +345,18 @@ impl VsockThreadBackend {
                         return Ok(());
                     }
 
-                    sibling_raw_pkts_queue
-                        .write()
-                        .unwrap()
-                        .push_back(RawVsockPacket::from_vsock_packet(pkt)?);
-                    let _ = sibling_event_fd.write(1);
+                    match sibling_raw_pkts_queue_opt {
+                        Some(queue) => {
+                            queue
+                                .write()
+                                .unwrap()
+                                .push_back(RawVsockPacket::from_vsock_packet(pkt)?);
+                            let _ = sibling_event_fd.write(1);
+                        }
+                        None => {
+                            info!("vsock: dropping packet for cid: {dst_cid:?} due to inactive device");
+                        }
+                    }
                 } else {
                     warn!("vsock: dropping packet for unknown cid: {dst_cid:?}");
                 }
@@ -525,6 +532,7 @@ mod tests {
     #[cfg(feature = "backend_vsock")]
     use crate::vhu_vsock::VsockProxyInfo;
     use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
+    use vhost_user_backend::VhostUserBackend;
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
@@ -698,10 +706,27 @@ mod tests {
         // SAFETY: Safe as hdr_raw and data_raw are guaranteed to be valid.
         let mut packet = unsafe { VsockPacket::new(hdr_raw, Some(data_raw)).unwrap() };
 
+        packet.set_type(VSOCK_TYPE_STREAM);
+        packet.set_src_cid(CID);
+        packet.set_dst_cid(SIBLING_CID);
+        packet.set_dst_port(SIBLING_LISTENING_PORT);
+        packet.set_op(VSOCK_OP_RW);
+        packet.set_len(DATA_LEN as u32);
+        packet
+            .data_slice()
+            .unwrap()
+            .copy_from(&[0x01u8, 0x12u8, 0x23u8, 0x34u8]);
+
+        // The packet will be dropped silently because the thread won't activate until the config
+        // is read.
+        vtp.send_pkt(&packet).unwrap();
         assert_eq!(
             vtp.recv_raw_pkt(&mut packet).unwrap_err().to_string(),
             Error::EmptyRawPktsQueue.to_string()
         );
+
+        sibling_backend.get_config(0, 8);
+        sibling2_backend.get_config(0, 8);
 
         packet.set_type(VSOCK_TYPE_STREAM);
         packet.set_src_cid(CID);

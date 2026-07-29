@@ -768,6 +768,61 @@ mod tests {
         mem_rx.read(&mut recvd_data, data_addr).unwrap();
         assert_eq!(&recvd_data, DATA);
 
+        assert!(!sibling_backend.threads[0]
+            .lock()
+            .unwrap()
+            .thread_backend
+            .pending_raw_pkts());
+
+        // Zero-data control packet (VSOCK_OP_REQUEST, len=0): exercises the
+        // `pkt.header().is_empty()` branch in from_vsock_packet and the
+        // `raw_vsock_pkt.data.is_empty()` branch in recv_raw_pkt.
+        let (mem_tx2, descr_chain_tx2) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 0, b"");
+        let mem_tx2 = mem_tx2.memory();
+        let mut pkt_ctrl =
+            VsockPacketTx::from_tx_virtq_chain(mem_tx2.deref(), descr_chain_tx2, CONN_TX_BUF_SIZE)
+                .unwrap();
+        pkt_ctrl.header_mut().set_type(VSOCK_TYPE_STREAM);
+        pkt_ctrl.header_mut().set_src_cid(CID);
+        pkt_ctrl.header_mut().set_dst_cid(SIBLING_CID);
+        pkt_ctrl.header_mut().set_op(VSOCK_OP_REQUEST);
+
+        vtp.send_pkt(&mut pkt_ctrl).unwrap();
+        assert!(sibling_backend.threads[0]
+            .lock()
+            .unwrap()
+            .thread_backend
+            .pending_raw_pkts());
+
+        // RX chain still needs a data buffer (from_rx_virtq_chain requires it),
+        // but recv_raw_pkt will not write to it for a zero-len packet.
+        let (mem_rx2, descr_chain_rx2) =
+            prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 1]);
+        let mem_rx2 = mem_rx2.memory();
+        let mut pkt_rx2 =
+            VsockPacketRx::from_rx_virtq_chain(mem_rx2.deref(), descr_chain_rx2, CONN_TX_BUF_SIZE)
+                .unwrap();
+
+        sibling_backend.threads[0]
+            .lock()
+            .unwrap()
+            .thread_backend
+            .recv_raw_pkt(&mut pkt_rx2)
+            .unwrap();
+
+        let ctrl_header = mem_rx2.read_obj::<PacketHeader>(hdr_addr).unwrap();
+        assert_eq!(ctrl_header.type_(), VSOCK_TYPE_STREAM);
+        assert_eq!(ctrl_header.src_cid(), CID);
+        assert_eq!(ctrl_header.dst_cid(), SIBLING_CID);
+        assert_eq!(ctrl_header.op(), VSOCK_OP_REQUEST);
+        assert_eq!(ctrl_header.len(), 0);
+
+        assert!(!sibling_backend.threads[0]
+            .lock()
+            .unwrap()
+            .thread_backend
+            .pending_raw_pkts());
+
         test_dir.close().unwrap();
     }
 }

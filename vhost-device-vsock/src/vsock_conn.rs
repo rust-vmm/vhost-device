@@ -415,7 +415,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        test_utils::{prepare_desc_chain_vsock, HeadParams},
+        test_utils::prepare_desc_chain_vsock,
         vhu_vsock::{VSOCK_HOST_CID, VSOCK_OP_RW, VSOCK_TYPE_STREAM},
     };
 
@@ -606,9 +606,6 @@ mod tests {
 
     #[test]
     fn test_vsock_conn_init_pkt() {
-        // parameters for packet head construction
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 10);
-
         let dummy_file = VsockDummySocket::new();
         let conn_local = VsockConnection::new_local_init(
             dummy_file,
@@ -641,9 +638,6 @@ mod tests {
 
     #[test]
     fn test_vsock_conn_recv_pkt() {
-        // parameters for packet head construction
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
-
         let (mut host_socket, backend_socket) = VsockDummySocket::pair();
         let mut conn_local = VsockConnection::new_local_init(
             backend_socket,
@@ -738,9 +732,6 @@ mod tests {
 
     #[test]
     fn test_vsock_conn_send_pkt() {
-        // parameters for packet head construction
-        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
-
         // new locally inititated connection
         let (mut host_socket, backend_socket) = VsockDummySocket::pair();
         let mut conn_local = VsockConnection::new_local_init(
@@ -754,7 +745,7 @@ mod tests {
         );
 
         // write only descriptor chain
-        let (mem, mut descr_chain, _) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
+        let (mem, mut descr_chain, _) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacket::from_tx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)

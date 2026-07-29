@@ -524,7 +524,10 @@ mod tests {
     use super::*;
     #[cfg(feature = "backend_vsock")]
     use crate::vhu_vsock::VsockProxyInfo;
-    use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
+    use crate::{
+        test_utils::prepare_desc_chain_vsock,
+        vhu_vsock::{BackendType, VSOCK_OP_RW},
+    };
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;

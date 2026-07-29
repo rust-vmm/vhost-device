@@ -583,7 +583,9 @@ mod tests {
         packet.header_mut().set_op(VSOCK_OP_RST);
         vtp.send_pkt(&mut packet).unwrap();
 
-        //vtp.recv_pkt(&mut packet_rx).unwrap();
+        // Connection was removed by RST above, but its key is still in backend_rxq.
+        // recv_pkt must handle the "connection gone" case gracefully.
+        vtp.recv_pkt(&mut packet_rx).unwrap();
 
         // TODO: it is a nop for now
         vtp.enq_rst();
@@ -695,7 +697,7 @@ mod tests {
         assert!(!vtp.pending_raw_pkts());
 
         // Build a TX descriptor chain: header (len field = DATA.len()) + data buffer = DATA.
-        let (mem_tx, descr_chain_tx) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, DATA);
+        let (mem_tx, descr_chain_tx, _) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 1, DATA);
         let mem_tx = mem_tx.memory();
         let mut pkt_tx =
             VsockPacketTx::from_tx_virtq_chain(mem_tx.deref(), descr_chain_tx, CONN_TX_BUF_SIZE)
@@ -709,7 +711,7 @@ mod tests {
         pkt_tx.header_mut().set_op(VSOCK_OP_RW);
 
         // Verify empty-queue error before any packet is queued.
-        let (mem_rx, descr_chain_rx) =
+        let (mem_rx, descr_chain_rx, hdr_addr) =
             prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; DATA.len()]);
         let mem_rx = mem_rx.memory();
         let mut pkt_rx =
@@ -743,10 +745,6 @@ mod tests {
             .pending_raw_pkts());
 
         // Deliver the queued packet to the sibling and verify header + payload.
-        // prepare_desc_chain_vsock places the first buffer at:
-        //   desc_table_size(16 entries × 16 bytes = 256) + 0x100 = 0x200.
-        // The data buffer immediately follows the header.
-        let hdr_addr = GuestAddress(0x200);
         let data_addr = hdr_addr.unchecked_add(PKT_HEADER_SIZE as u64);
 
         sibling_backend.threads[0]
@@ -777,7 +775,8 @@ mod tests {
         // Zero-data control packet (VSOCK_OP_REQUEST, len=0): exercises the
         // `pkt.header().is_empty()` branch in from_vsock_packet and the
         // `raw_vsock_pkt.data.is_empty()` branch in recv_raw_pkt.
-        let (mem_tx2, descr_chain_tx2) = prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 0, b"");
+        let (mem_tx2, descr_chain_tx2, _) =
+            prepare_desc_chain_vsock(false, PKT_HEADER_SIZE, 0, b"");
         let mem_tx2 = mem_tx2.memory();
         let mut pkt_ctrl =
             VsockPacketTx::from_tx_virtq_chain(mem_tx2.deref(), descr_chain_tx2, CONN_TX_BUF_SIZE)
@@ -796,7 +795,7 @@ mod tests {
 
         // RX chain still needs a data buffer (from_rx_virtq_chain requires it),
         // but recv_raw_pkt will not write to it for a zero-len packet.
-        let (mem_rx2, descr_chain_rx2) =
+        let (mem_rx2, descr_chain_rx2, hdr_addr2) =
             prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 1]);
         let mem_rx2 = mem_rx2.memory();
         let mut pkt_rx2 =
@@ -810,7 +809,7 @@ mod tests {
             .recv_raw_pkt(&mut pkt_rx2)
             .unwrap();
 
-        let ctrl_header = mem_rx2.read_obj::<PacketHeader>(hdr_addr).unwrap();
+        let ctrl_header = mem_rx2.read_obj::<PacketHeader>(hdr_addr2).unwrap();
         assert_eq!(ctrl_header.type_(), VSOCK_TYPE_STREAM);
         assert_eq!(ctrl_header.src_cid(), CID);
         assert_eq!(ctrl_header.dst_cid(), SIBLING_CID);

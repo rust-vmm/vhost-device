@@ -415,7 +415,7 @@ mod tests {
 
     use virtio_queue::Writer;
     use virtio_vsock::packet::PKT_HEADER_SIZE;
-    use vm_memory::GuestAddressSpace;
+    use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace};
 
     use super::*;
     use crate::{
@@ -717,6 +717,11 @@ mod tests {
         assert_eq!(conn_local.rx_cnt, Wrapping(payload.len() as u32));
         assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
         assert_eq!(packet_header.len(), 5);
+        let mut buf = [0u8; 5];
+        mem_ref
+            .read(&mut buf, buf_addr.unchecked_add(PKT_HEADER_SIZE as u64))
+            .unwrap();
+        assert_eq!(&buf, b"hello");
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
         packet_header = PacketHeader::default();

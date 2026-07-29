@@ -644,7 +644,7 @@ mod tests {
         let mut packet_header = PacketHeader::default();
 
         // VSOCK_OP_REQUEST: new local conn request
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -656,7 +656,7 @@ mod tests {
 
         // VSOCK_OP_RST: reset if connection not established
         packet_header = PacketHeader::default();
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -668,7 +668,7 @@ mod tests {
 
         // VSOCK_OP_CREDIT_UPDATE: need credit update from peer/guest
         packet_header = PacketHeader::default();
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -683,7 +683,7 @@ mod tests {
 
         // VSOCK_OP_SHUTDOWN: zero data read from stream/file
         packet_header = PacketHeader::default();
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -725,7 +725,7 @@ mod tests {
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
         packet_header = PacketHeader::default();
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -738,7 +738,7 @@ mod tests {
 
         // VSOCK_OP_CREDIT_UPDATE: guest needs credit update
         packet_header = PacketHeader::default();
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
@@ -751,7 +751,7 @@ mod tests {
 
         // non-existent request
         packet_header = PacketHeader::default();
-        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, descr_chain, _) = prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem = mem.memory();
         let mut pkt =
             VsockPacketRx::from_rx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();

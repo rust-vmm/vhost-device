@@ -552,7 +552,8 @@ mod tests {
         let mut packet =
             VsockPacketTx::from_tx_virtq_chain(mem.deref(), descr_chain, CONN_TX_BUF_SIZE).unwrap();
 
-        let (mem_rx, descr_chain_rx, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem_rx, descr_chain_rx, _) =
+            prepare_desc_chain_vsock(true, PKT_HEADER_SIZE, 1, &[0u8; 5]);
         let mem_rx = mem_rx.memory();
 
         let mut packet_rx =

@@ -621,7 +621,7 @@ mod tests {
         );
 
         // write only descriptor chain
-        let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 2, 10);
+        let (mem, mut descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 2, 10);
         let mem = mem.memory();
         let mut pkt =
             VsockPacket::from_rx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
@@ -656,7 +656,7 @@ mod tests {
         );
 
         // write only descriptor chain
-        let (mem, mut descr_chain) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
+        let (mem, mut descr_chain, _) = prepare_desc_chain_vsock(true, &head_params, 1, 5);
         let mem = mem.memory();
         let mut pkt =
             VsockPacket::from_rx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
@@ -754,7 +754,7 @@ mod tests {
         );
 
         // write only descriptor chain
-        let (mem, mut descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
+        let (mem, mut descr_chain, _) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
         let mem = mem.memory();
         let mut pkt =
             VsockPacket::from_tx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)

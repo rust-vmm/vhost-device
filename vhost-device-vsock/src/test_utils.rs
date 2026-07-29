@@ -42,10 +42,12 @@ pub(crate) fn prepare_desc_chain_vsock(
 ) -> (
     GuestMemoryAtomic<GuestMemoryMmap>,
     DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+    GuestAddress,
 ) {
     let mem = GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x1000)]).unwrap();
     let virt_queue = MockSplitQueue::new(&mem, 16);
     let mut next_addr = virt_queue.desc_table().total_size() + 0x100;
+    let buf_addr = GuestAddress(next_addr);
     let mut flags = 0;
 
     if write_only {
@@ -110,5 +112,6 @@ pub(crate) fn prepare_desc_chain_vsock(
             .unwrap()
             .next()
             .unwrap(),
+        buf_addr,
     )
 }

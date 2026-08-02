@@ -2,7 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    io::{Read, Result as StdIOResult, Write},
+    io::{ErrorKind, Read, Result as StdIOResult, Write},
     ops::Deref,
     os::unix::{
         net::UnixStream,
@@ -282,6 +282,9 @@ impl VsockThreadBackend {
             self.local_port_set.remove(&conn.local_port);
             VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
                 .unwrap_or_else(|err| {
+                    if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound) {
+                        return;
+                    }
                     warn!(
                         "Could not remove epoll listener for fd {:?}: {:?}",
                         conn.stream.as_raw_fd(),
@@ -390,6 +393,9 @@ impl VsockThreadBackend {
             self.local_port_set.remove(&conn.local_port);
             VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
                 .unwrap_or_else(|err| {
+                    if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound) {
+                        return;
+                    }
                     warn!(
                         "Could not remove epoll listener for fd {:?}: {:?}",
                         conn.stream.as_raw_fd(),

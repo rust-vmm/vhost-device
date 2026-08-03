@@ -15,7 +15,6 @@ categories = ["multimedia::video", "virtualization"]
 [features]
 default = ["v4l2-proxy"]
 v4l2-proxy = ["v4l2r"]
-ffmpeg = ["v4l2r", "virtio-media-ffmpeg-decoder"]
 simple-capture = ["v4l2r"]
 xen = ["vm-memory/xen", "vhost/xen", "vhost-user-backend/xen"]
 
@@ -33,8 +32,7 @@ virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { workspace = true }
-virtio-media = { git = "https://github.com/chromeos/virtio-media", rev = "c6cc93a"}
-virtio-media-ffmpeg-decoder = { git = "https://github.com/chromeos/virtio-media/", package = "virtio-media-ffmpeg-decoder", rev = "c6cc93a", optional = true}
+virtio-media = "0.0.8"
 v4l2r = { version = "0.0.8", optional = true }
 zerocopy = { version = "0.8.27", features = ["derive"] }
 

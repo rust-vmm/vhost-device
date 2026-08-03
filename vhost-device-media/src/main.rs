@@ -17,13 +17,13 @@ fn main() -> std::result::Result<(), Error> {
 mod tests {
     use std::path::PathBuf;
 
-    #[cfg(any(feature = "simple-capture", feature = "v4l2-proxy", feature = "ffmpeg"))]
+    #[cfg(any(feature = "simple-capture", feature = "v4l2-proxy"))]
     use rstest::*;
     use vhost_device_media::BackendType;
 
     use super::*;
 
-    #[cfg(any(feature = "simple-capture", feature = "v4l2-proxy", feature = "ffmpeg"))]
+    #[cfg(any(feature = "simple-capture", feature = "v4l2-proxy"))]
     #[rstest]
     #[cfg_attr(
         feature = "simple-capture",
@@ -32,10 +32,6 @@ mod tests {
     #[cfg_attr(
         feature = "v4l2-proxy",
         case::v4l2_proxy("v4l2-proxy", BackendType::V4l2Proxy)
-    )]
-    #[cfg_attr(
-        feature = "ffmpeg",
-        case::ffmpeg_decoder("ffmpeg-decoder", BackendType::FfmpegDecoder)
     )]
     fn test_cli_backend_arg(#[case] backend_name: &str, #[case] backend: BackendType) {
         let args = MediaArgs::try_parse_from([
@@ -50,7 +46,7 @@ mod tests {
         assert_eq!(args.backend, backend);
     }
 
-    #[cfg(any(feature = "simple-capture", feature = "v4l2-proxy", feature = "ffmpeg"))]
+    #[cfg(any(feature = "simple-capture", feature = "v4l2-proxy"))]
     #[rstest]
     #[cfg_attr(
         feature = "simple-capture",
@@ -68,15 +64,6 @@ mod tests {
             BackendType::V4l2Proxy,
             "/tmp/other.sock",
             "/dev/video0"
-        )
-    )]
-    #[cfg_attr(
-        feature = "ffmpeg",
-        case::ffmpeg_decoder(
-            "ffmpeg-decoder",
-            BackendType::FfmpegDecoder,
-            "/tmp/ffmpeg.sock",
-            "/dev/video3"
         )
     )]
     fn test_media_args_parse_explicit_values(

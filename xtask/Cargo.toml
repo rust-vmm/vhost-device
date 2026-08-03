@@ -29,4 +29,4 @@ vhost-device-sound-pipewire = ["mangen"]
 mangen = ["dep:clap_mangen", "dep:clap", "dep:toml", "dep:markdown"]
 
 [lints.rust]
-unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("alsa-backend", "pw-backend", "simple-capture", "v4l2-proxy", "ffmpeg"))'] }
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("alsa-backend", "pw-backend", "simple-capture", "v4l2-proxy"))'] }

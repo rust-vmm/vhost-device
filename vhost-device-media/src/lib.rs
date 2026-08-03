@@ -157,23 +157,6 @@ pub fn create_v4l2_proxy_device_config(device_path: &PathBuf) -> Result<VirtioMe
     Ok(config)
 }
 
-#[cfg(feature = "ffmpeg")]
-pub fn create_ffmpeg_decoder_config() -> VirtioMediaDeviceConfig {
-    use v4l2r::ioctl::Capabilities;
-    let mut card = [0u8; VIRTIO_V4L2_CARD_NAME_LEN];
-    let card_name = "ffmpeg_decoder";
-    card[0..card_name.len()].copy_from_slice(card_name.as_bytes());
-    VirtioMediaDeviceConfig {
-        device_caps: (Capabilities::VIDEO_M2M_MPLANE
-            | Capabilities::EXT_PIX_FORMAT
-            | Capabilities::STREAMING
-            | Capabilities::DEVICE_CAPS)
-            .bits(),
-        device_type: V4l2DeviceType::Video as u32,
-        card,
-    }
-}
-
 fn run_daemon<D, F>(listener: &mut Listener, backend: Arc<VuMediaBackend<D, F>>) -> Result<()>
 where
     D: VirtioMediaDevice<Reader, Writer> + Send + Sync + 'static,
@@ -248,24 +231,6 @@ fn serve_null(listener: &mut Listener) -> Result<()> {
     run_daemon(listener, backend)
 }
 
-#[cfg(feature = "ffmpeg")]
-fn serve_ffmpeg_decoder(listener: &mut Listener) -> Result<()> {
-    let backend = Arc::new(
-        VuMediaBackend::new(
-            create_ffmpeg_decoder_config(),
-            move |event_queue, _, host_mapper| {
-                Ok(virtio_media::devices::video_decoder::VideoDecoder::new(
-                    virtio_media_ffmpeg_decoder::FfmpegDecoder::new(),
-                    event_queue,
-                    host_mapper,
-                ))
-            },
-        )
-        .map_err(Error::CouldNotCreateBackend)?,
-    );
-    run_daemon(listener, backend)
-}
-
 /// Starts the vhost-device-media daemon.
 ///
 /// This function does not return under normal operation, it loops indefinitely,
@@ -281,15 +246,13 @@ pub fn start_backend(media_config: VuMediaConfig) -> Result<()> {
             BackendType::SimpleCapture => serve_simple_capture(&mut listener),
             #[cfg(feature = "v4l2-proxy")]
             BackendType::V4l2Proxy => serve_v4l2_proxy_daemon(&mut listener, &media_config),
-            #[cfg(feature = "ffmpeg")]
-            BackendType::FfmpegDecoder => serve_ffmpeg_decoder(&mut listener),
         }?;
         debug!("Finishing backend");
     }
 }
 
 #[cfg(test)]
-#[cfg(any(feature = "simple-capture", feature = "v4l2-proxy", feature = "ffmpeg"))]
+#[cfg(any(feature = "simple-capture", feature = "v4l2-proxy"))]
 mod tests {
     #[cfg(feature = "v4l2-proxy")]
     use std::path::Path;
@@ -297,7 +260,7 @@ mod tests {
     use rstest::*;
     #[cfg(feature = "v4l2-proxy")]
     use tempfile::tempdir;
-    #[cfg(any(feature = "simple-capture", feature = "ffmpeg"))]
+    #[cfg(feature = "simple-capture")]
     use virtio_media::protocol::VirtioMediaDeviceConfig;
 
     use super::*;
@@ -377,20 +340,6 @@ mod tests {
     #[rstest]
     #[case(create_simple_capture_device_config(), 13, b"simple_device")]
     fn test_simple_capture_device_config_shape(
-        #[case] cfg: VirtioMediaDeviceConfig,
-        #[case] card_name_len: usize,
-        #[case] expected_card_prefix: &[u8],
-    ) {
-        assert_eq!(cfg.device_type, 0);
-        assert!(cfg.device_caps != 0);
-        assert_eq!(cfg.card.len(), VIRTIO_V4L2_CARD_NAME_LEN);
-        assert_eq!(&cfg.card[..card_name_len], expected_card_prefix);
-    }
-
-    #[cfg(feature = "ffmpeg")]
-    #[rstest]
-    #[case(create_ffmpeg_decoder_config(), 14, b"ffmpeg_decoder")]
-    fn test_ffmpeg_decoder_config_shape(
         #[case] cfg: VirtioMediaDeviceConfig,
         #[case] card_name_len: usize,
         #[case] expected_card_prefix: &[u8],

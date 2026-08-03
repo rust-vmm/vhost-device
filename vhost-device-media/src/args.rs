@@ -44,6 +44,4 @@ pub enum BackendType {
     SimpleCapture,
     #[cfg(feature = "v4l2-proxy")]
     V4l2Proxy,
-    #[cfg(feature = "ffmpeg")]
-    FfmpegDecoder,
 }

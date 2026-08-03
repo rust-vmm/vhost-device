@@ -18,7 +18,7 @@ vhost-device-media --socket-path <SOCKET> --v4l2-device <V4L2_DEVICE> --backend 
 one or more V4L2-compatible media devices to a virtual machine guest. The host
 side of the device is handled by this daemon, which translates virtio-media
 protocol requests into operations on the chosen backend (e.g. a host V4L2
-device, an FFmpeg-based decoder, or a software capture generator). The guest
+device, or a software capture generator). The guest
 side requires a virtio-media-capable kernel driver; see the
 [virtio-media](https://github.com/chromeos/virtio-media) repository for the
 out-of-tree module.
@@ -38,7 +38,7 @@ out-of-tree module.
 
      --backend <BACKEND>
             Media backend to use.
-            [possible values: null, simple-capture, v4l2-proxy, ffmpeg-decoder]
+            [possible values: null, simple-capture, v4l2-proxy]
             Not all values are available in every build; see the Cargo features below.
             Defaults to simple-capture when that feature is enabled, null otherwise.
 
@@ -79,7 +79,6 @@ The crate exposes the following Cargo feature flags. Build with
 |---------|---------------|-------------|
 | `simple-capture` | `simple-capture` | A purely software capture device that generates a test pattern. No hardware required. |
 | `v4l2-proxy` | `v4l2-proxy` | Proxy a host V4L2 device (`/dev/videoN`) into the guest as-is. |
-| `ffmpeg` | `ffmpeg-decoder` | Software video decoder powered by FFmpeg. |
 | *(none)* | `null` | A no-op backend that presents itself as a V4L2 device. |
 
 **System dependencies** for the `v4l2-proxy` backend: a V4L2-capable host

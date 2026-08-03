@@ -2276,7 +2276,6 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-media",
- "virtio-media-ffmpeg-decoder",
  "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
@@ -2492,33 +2491,18 @@ checksum = "091f1f09cfbf2a78563b562e7a949465cce1aef63b6065645188d995162f8868"
 
 [[package]]
 name = "virtio-media"
-version = "0.0.7"
-source = "git+https://github.com/chromeos/virtio-media?rev=c6cc93a#c6cc93af5372d6aa37e370f88cfdb9288d27d66a"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0984f4a5a7104e17e083d697e6219dfee642582c4a28e745febe66def6e3bcea"
 dependencies = [
  "anyhow",
  "enumn",
  "libc",
  "log",
- "nix 0.28.0",
+ "nix 0.31.3",
  "thiserror 1.0.69",
  "v4l2r 0.0.7",
  "zerocopy",
-]
-
-[[package]]
-name = "virtio-media-ffmpeg-decoder"
-version = "0.0.7"
-source = "git+https://github.com/chromeos/virtio-media?rev=c6cc93a#c6cc93af5372d6aa37e370f88cfdb9288d27d66a"
-dependencies = [
- "anyhow",
- "bindgen 0.70.1",
- "enumn",
- "libc",
- "log",
- "nix 0.28.0",
- "pkg-config",
- "thiserror 1.0.69",
- "virtio-media",
 ]
 
 [[package]]

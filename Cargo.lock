@@ -543,7 +543,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -694,7 +694,7 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1645,7 +1645,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1920,7 +1920,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2095,8 +2095,9 @@ dependencies = [
 
 [[package]]
 name = "v4l2r"
-version = "0.0.7"
-source = "git+https://github.com/Gnurou/v4l2r?rev=12afd03#12afd03878d2ff44768fb222b713b0b8bbefb539"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67d06043afd259b7e3f0b70bb8cc590b35c99006abc595399956392b4ebbe717"
 dependencies = [
  "anyhow",
  "bindgen 0.72.1",
@@ -2270,7 +2271,7 @@ dependencies = [
  "rstest",
  "tempfile",
  "thiserror 2.0.18",
- "v4l2r 0.0.7 (git+https://github.com/Gnurou/v4l2r?rev=12afd03)",
+ "v4l2r 0.0.8",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2500,7 +2501,7 @@ dependencies = [
  "log",
  "nix 0.28.0",
  "thiserror 1.0.69",
- "v4l2r 0.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "v4l2r 0.0.7",
  "zerocopy",
 ]
 

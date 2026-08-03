@@ -35,7 +35,7 @@ vm-memory = { workspace = true, features = ["backend-mmap", "backend-atomic"] }
 vmm-sys-util = { workspace = true }
 virtio-media = { git = "https://github.com/chromeos/virtio-media", rev = "c6cc93a"}
 virtio-media-ffmpeg-decoder = { git = "https://github.com/chromeos/virtio-media/", package = "virtio-media-ffmpeg-decoder", rev = "c6cc93a", optional = true}
-v4l2r = { git =  "https://github.com/Gnurou/v4l2r", rev = "12afd03", optional = true }
+v4l2r = { version = "0.0.8", optional = true }
 zerocopy = { version = "0.8.27", features = ["derive"] }
 
 [dev-dependencies]

@@ -40,7 +40,7 @@ out-of-tree module.
             Media backend to use.
             [possible values: null, simple-capture, v4l2-proxy]
             Not all values are available in every build; see the Cargo features below.
-            Defaults to simple-capture when that feature is enabled, null otherwise.
+            Defaults to null.
 
      -h, --help
             Print help
@@ -64,11 +64,7 @@ With QEMU, you can add a `virtio` device that uses the backend's socket with the
 -device vhost-user-media-pci,chardev=vmedia,id=media
 ```
 
-> Note: The `vhost-user-media-pci` QEMU device is not yet upstream. A patch
-> series adding support is currently under review on the
-> [QEMU mailing list](https://lore.kernel.org/all/20260630112310.552606-1-aesteve@redhat.com/).
-> Search for "vhost-user-media" on [lore.kernel.org](https://lore.kernel.org/qemu-devel/)
-> for the latest revision.
+> Note: The `vhost-user-media-pci` device requires QEMU 11.2 or later.
 
 ## Features
 

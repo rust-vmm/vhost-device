@@ -1,6 +1,6 @@
 [package]
 name = "vhost-device-media"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Albert Esteve <aesteve@redhat.com>"]
 description = "A virtio-media device using the vhost-user protocol."
 repository = "https://github.com/rust-vmm/vhost-device"

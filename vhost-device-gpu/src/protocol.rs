@@ -6,9 +6,9 @@
 #![allow(non_camel_case_types)]
 
 use std::{
+    borrow::Cow,
     cmp::min,
     convert::From,
-    ffi::CStr,
     fmt::{self, Display},
     io::{self, Read, Write},
     marker::PhantomData,
@@ -81,11 +81,16 @@ pub const VIRTIO_GPU_BIND_RENDER_TARGET: u32 = 2;
 
 pub const VIRTIO_GPU_MAX_SCANOUTS: u32 = 16;
 
+/// Limit on memory entries per resource to prevent excessive allocation
+pub const MAX_MEM_ENTRIES: u32 = 1024;
+
 /// `CHROMIUM(b/277982577)` success responses
 pub const VIRTIO_GPU_RESP_OK_RESOURCE_PLANE_INFO: u32 = 0x11FF;
 
 /// Create a OS-specific handle from guest memory (not upstreamed).
 pub const VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE: u32 = 0x0008;
+/// Host memory with guest-visible iovecs (not in virtio_bindings yet).
+pub const VIRTIO_GPU_BLOB_MEM_HOST3D_GUEST: u32 = 0x0003;
 
 pub const VIRTIO_GPU_FLAG_FENCE: u32 = 1 << 0;
 pub const VIRTIO_GPU_FLAG_INFO_RING_IDX: u32 = 1 << 1;
@@ -102,6 +107,8 @@ pub struct VirtioGpuConfig {
     pub num_scanouts: Le32,
     /// Maximum number of capability sets supported by the device
     pub num_capsets: Le32,
+    /// Minimum resource blob alignment
+    pub blob_alignment: Le32,
 }
 
 // SAFETY: The layout of the structure is fixed and can be initialized by
@@ -441,14 +448,9 @@ impl Default for virtio_gpu_ctx_create {
 }
 
 impl virtio_gpu_ctx_create {
-    pub fn get_debug_name(&self) -> String {
-        CStr::from_bytes_with_nul(
-            &self.debug_name[..min(64, <Le32 as Into<u32>>::into(self.nlen) as usize)],
-        )
-        .map_or_else(
-            |err| format!("Err({err})"),
-            |c_str| c_str.to_string_lossy().into_owned(),
-        )
+    pub fn get_debug_name(&self) -> Cow<'_, str> {
+        let len = min(64, <Le32 as Into<u32>>::into(self.nlen) as usize);
+        String::from_utf8_lossy(&self.debug_name[..len])
     }
 }
 impl fmt::Debug for virtio_gpu_ctx_create {
@@ -707,7 +709,7 @@ pub enum GpuCommand {
         cmd_data: Vec<u8>,
         fence_ids: Vec<u64>,
     },
-    ResourceCreateBlob(virtio_gpu_resource_create_blob),
+    ResourceCreateBlob(virtio_gpu_resource_create_blob, Vec<(GuestAddress, usize)>),
     ResourceMapBlob(virtio_gpu_resource_map_blob),
     ResourceUnmapBlob(virtio_gpu_resource_unmap_blob),
     UpdateCursor(virtio_gpu_update_cursor),
@@ -753,6 +755,27 @@ impl fmt::Debug for GpuCommand {
     }
 }
 
+fn read_mem_entries(
+    reader: &mut Reader,
+    num_entries: u32,
+) -> Result<Vec<(GuestAddress, usize)>, GpuCommandDecodeError> {
+    if num_entries > MAX_MEM_ENTRIES {
+        return Err(Error::DescriptorReadFailed.into());
+    }
+
+    let mut entries = Vec::with_capacity(num_entries as usize);
+
+    for _ in 0..num_entries {
+        let entry: virtio_gpu_mem_entry =
+            reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?;
+        entries.push((
+            GuestAddress(entry.addr.into()),
+            entry.length.to_native() as usize,
+        ))
+    }
+    Ok(entries)
+}
+
 impl GpuCommand {
     pub const fn command_name(&self) -> &'static str {
         use GpuCommand::*;
@@ -777,7 +800,7 @@ impl GpuCommand {
             TransferToHost3d(_info) => "TransferToHost3d",
             TransferFromHost3d(_info) => "TransferFromHost3d",
             CmdSubmit3d { .. } => "CmdSubmit3d",
-            ResourceCreateBlob(_info) => "ResourceCreateBlob",
+            ResourceCreateBlob(_info, _) => "ResourceCreateBlob",
             ResourceMapBlob(_info) => "ResourceMapBlob",
             ResourceUnmapBlob(_info) => "ResourceUnmapBlob",
             UpdateCursor(_info) => "UpdateCursor",
@@ -824,16 +847,7 @@ impl GpuCommand {
             VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING => {
                 let info: virtio_gpu_resource_attach_backing =
                     reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?;
-                let mut entries =
-                    Vec::with_capacity(<Le32 as Into<u32>>::into(info.nr_entries) as usize);
-                for _ in 0..info.nr_entries.into() {
-                    let entry: virtio_gpu_mem_entry =
-                        reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?;
-                    entries.push((
-                        GuestAddress(entry.addr.into()),
-                        <Le32 as Into<u32>>::into(entry.length) as usize,
-                    ));
-                }
+                let entries = read_mem_entries(reader, info.nr_entries.into())?;
                 ResourceAttachBacking(info, entries)
             }
             VIRTIO_GPU_CMD_RESOURCE_DETACH_BACKING => {
@@ -891,7 +905,11 @@ impl GpuCommand {
                 }
             }
             VIRTIO_GPU_CMD_RESOURCE_CREATE_BLOB => {
-                ResourceCreateBlob(reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?)
+                let info: virtio_gpu_resource_create_blob =
+                    reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?;
+
+                let entries = read_mem_entries(reader, info.nr_entries.into())?;
+                ResourceCreateBlob(info, entries)
             }
             VIRTIO_GPU_CMD_RESOURCE_MAP_BLOB => {
                 ResourceMapBlob(reader.read_obj().map_err(|_| Error::DescriptorReadFailed)?)
@@ -1189,7 +1207,7 @@ mod tests {
     #[test]
     fn test_virtio_gpu_config() {
         // Test VirtioGpuConfig size
-        assert_eq!(std::mem::size_of::<VirtioGpuConfig>(), 16);
+        assert_eq!(std::mem::size_of::<VirtioGpuConfig>(), 20);
     }
 
     #[test]
@@ -1311,7 +1329,7 @@ mod tests {
                 "CmdSubmit3d",
             ),
             (
-                ResourceCreateBlob(virtio_gpu_resource_create_blob::default()),
+                ResourceCreateBlob(virtio_gpu_resource_create_blob::default(), Vec::new()),
                 "ResourceCreateBlob",
             ),
             (
@@ -1343,8 +1361,9 @@ mod tests {
 
     #[test]
     fn test_virtio_gpu_ctx_create_debug() {
-        let bytes = b"test_debug\0";
-        let original = virtio_gpu_ctx_create {
+        // Test without null terminator (typical case)
+        let bytes = b"test_debug";
+        let ctx = virtio_gpu_ctx_create {
             debug_name: {
                 let mut debug_name = [0; 64];
                 debug_name[..bytes.len()].copy_from_slice(bytes);
@@ -1353,11 +1372,25 @@ mod tests {
             context_init: 0.into(),
             nlen: (bytes.len() as u32).into(),
         };
-
-        let debug_string = format!("{original:?}");
         assert_eq!(
-            debug_string,
+            format!("{ctx:?}"),
             "virtio_gpu_ctx_create { debug_name: \"test_debug\", context_init: Le32(0), .. }"
+        );
+
+        // Test with null terminator included in nlen (edge case - should preserve it)
+        let bytes_with_null = b"test_debug\0";
+        let ctx_with_null = virtio_gpu_ctx_create {
+            debug_name: {
+                let mut debug_name = [0; 64];
+                debug_name[..bytes_with_null.len()].copy_from_slice(bytes_with_null);
+                debug_name
+            },
+            context_init: 0.into(),
+            nlen: (bytes_with_null.len() as u32).into(),
+        };
+        assert_eq!(
+            format!("{ctx_with_null:?}"),
+            "virtio_gpu_ctx_create { debug_name: \"test_debug\\0\", context_init: Le32(0), .. }"
         );
     }
 

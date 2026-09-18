@@ -2,23 +2,88 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
-use std::sync::{Arc, Mutex};
+use std::{
+    os::fd::{AsFd, AsRawFd},
+    sync::{Arc, Mutex},
+};
 
-use log::{debug, error};
+use log::{debug, error, trace};
 use vhost::vhost_user::{
     gpu_message::{VhostUserGpuCursorPos, VhostUserGpuCursorUpdate, VhostUserGpuEdidRequest},
-    GpuBackend,
+    message::{VhostUserMMap, VhostUserMMapFlags},
+    Backend, GpuBackend, VhostUserFrontendReqHandler,
 };
 use vm_memory::VolatileSlice;
 
 use crate::{
     gpu_types::{FenceDescriptor, FenceState, Transfer3DDesc, VirtioGpuRing},
     protocol::{
-        GpuResponse::{self, ErrUnspec, OkDisplayInfo, OkEdid, OkNoData},
+        GpuResponse::{self, ErrInvalidParameter, ErrUnspec, OkDisplayInfo, OkEdid, OkNoData},
         VirtioGpuResult, EDID_BLOB_MAX_SIZE, VIRTIO_GPU_MAX_SCANOUTS,
     },
     renderer::Renderer,
 };
+
+/// Shared memory region ID for host-visible memory (blob resources)
+const VIRTIO_GPU_SHM_ID_HOST_VISIBLE: u8 = 1;
+
+/// Common helper for mapping blob resources.
+/// Maps a blob resource using the vhost-user backend's shmem_map.
+pub fn common_map_blob(
+    backend: &Backend,
+    flags: VhostUserMMapFlags,
+    handle_fd: &(impl AsFd + AsRawFd),
+    blob_size: u64,
+    offset: u64,
+    resource_id: u32,
+) -> Result<(), GpuResponse> {
+    trace!("Mapping blob resource_id={resource_id} offset={offset} size={blob_size}");
+
+    if blob_size > usize::MAX as u64 {
+        error!("Blob size {blob_size} exceeds platform limits for resource_id={resource_id}");
+        return Err(ErrInvalidParameter);
+    }
+
+    let map_request = VhostUserMMap {
+        shmid: VIRTIO_GPU_SHM_ID_HOST_VISIBLE,
+        padding: Default::default(),
+        fd_offset: 0,
+        shm_offset: offset,
+        len: blob_size,
+        flags: flags.bits(),
+    };
+
+    backend.shmem_map(&map_request, handle_fd).map_err(|e| {
+        error!("Failed to mmap by frontend: {e:?}");
+        ErrUnspec
+    })?;
+
+    Ok(())
+}
+
+/// Common helper for unmapping blob resources.
+/// Unmaps a blob resource using the vhost-user backend's shmem_unmap.
+pub fn common_unmap_blob(
+    backend: &Backend,
+    blob_size: u64,
+    offset: u64,
+) -> Result<(), GpuResponse> {
+    let unmap_request = VhostUserMMap {
+        shmid: VIRTIO_GPU_SHM_ID_HOST_VISIBLE,
+        padding: Default::default(),
+        fd_offset: 0,
+        shm_offset: offset,
+        len: blob_size,
+        flags: 0,
+    };
+
+    backend.shmem_unmap(&unmap_request).map_err(|e| {
+        error!("Failed to unmap by frontend: {e:?}");
+        ErrUnspec
+    })?;
+
+    Ok(())
+}
 
 #[derive(Debug, Clone)]
 pub struct VirtioGpuScanout {

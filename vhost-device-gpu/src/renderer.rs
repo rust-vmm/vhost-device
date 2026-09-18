@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
+use std::sync::Arc;
+
 use rutabaga_gfx::RutabagaFence;
 use vhost::vhost_user::gpu_message::{VhostUserGpuCursorPos, VhostUserGpuEdidRequest};
 use vm_memory::{GuestAddress, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
-    gpu_types::{ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+    gpu_types::{ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
     protocol::{virtio_gpu_rect, VirtioGpuResult},
 };
 
@@ -38,7 +40,7 @@ pub trait Renderer: Send + Sync {
     fn attach_backing(
         &mut self,
         resource_id: u32,
-        mem: &GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         vecs: Vec<(GuestAddress, usize)>,
     ) -> VirtioGpuResult;
     fn detach_backing(&mut self, resource_id: u32) -> VirtioGpuResult;
@@ -91,11 +93,9 @@ pub trait Renderer: Send + Sync {
     fn resource_create_blob(
         &mut self,
         ctx_id: u32,
-        resource_id: u32,
-        blob_id: u64,
-        size: u64,
-        blob_mem: u32,
-        blob_flags: u32,
+        resource_create_blob: ResourceCreateBlob,
+        vecs: Vec<(vm_memory::GuestAddress, usize)>,
+        mem: &vm_memory::GuestMemoryMmap,
     ) -> VirtioGpuResult;
     fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult;
     fn resource_unmap_blob(&mut self, resource_id: u32) -> VirtioGpuResult;

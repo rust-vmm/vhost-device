@@ -8,7 +8,10 @@ use std::{
     cell::RefCell,
     collections::BTreeMap,
     io::IoSliceMut,
-    os::{fd::FromRawFd, raw::c_void},
+    os::{
+        fd::{AsFd, FromRawFd},
+        raw::c_void,
+    },
     sync::{Arc, Mutex},
 };
 
@@ -16,33 +19,40 @@ use log::{debug, error, warn};
 use rutabaga_gfx::{
     ResourceCreate3D, Rutabaga, RutabagaBuilder, RutabagaComponentType, RutabagaFence,
     RutabagaFenceHandler, RutabagaHandle, RutabagaIntoRawDescriptor, RutabagaIovec, Transfer3D,
+    RUTABAGA_HANDLE_TYPE_MEM_OPAQUE_FD, RUTABAGA_MAP_ACCESS_MASK, RUTABAGA_MAP_ACCESS_READ,
+    RUTABAGA_MAP_ACCESS_RW, RUTABAGA_MAP_ACCESS_WRITE, RUTABAGA_MAP_CACHE_MASK,
 };
 use uuid::Uuid;
 use vhost::vhost_user::{
     gpu_message::{
         VhostUserGpuCursorPos, VhostUserGpuEdidRequest, VhostUserGpuScanout, VhostUserGpuUpdate,
     },
-    GpuBackend,
+    message::VhostUserMMapFlags,
+    Backend, GpuBackend,
 };
 use vhost_user_backend::{VringRwLock, VringT};
+use virtio_bindings::virtio_gpu::VIRTIO_GPU_BLOB_MEM_HOST3D;
 use vm_memory::{GuestAddress, GuestMemoryBackend, GuestMemoryMmap, VolatileSlice};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
     backend::{
         common,
-        common::{common_set_scanout_disable, AssociatedScanouts, CursorConfig, VirtioGpuScanout},
+        common::{
+            common_map_blob, common_set_scanout_disable, common_unmap_blob, AssociatedScanouts,
+            CursorConfig, VirtioGpuScanout,
+        },
     },
     device::Error,
-    gpu_types::{FenceState, ResourceCreate3d, Transfer3DDesc, VirtioGpuRing},
+    gpu_types::{FenceState, ResourceCreate3d, ResourceCreateBlob, Transfer3DDesc, VirtioGpuRing},
     protocol::{
         virtio_gpu_rect, GpuResponse,
         GpuResponse::{
-            ErrInvalidParameter, ErrInvalidResourceId, ErrUnspec, OkCapset, OkCapsetInfo, OkNoData,
-            OkResourcePlaneInfo,
+            ErrInvalidParameter, ErrInvalidResourceId, ErrUnspec, OkCapset, OkCapsetInfo,
+            OkMapInfo, OkNoData, OkResourcePlaneInfo,
         },
-        GpuResponsePlaneInfo, VirtioGpuResult, VIRTIO_GPU_FLAG_INFO_RING_IDX,
-        VIRTIO_GPU_MAX_SCANOUTS,
+        GpuResponsePlaneInfo, VirtioGpuResult, VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE,
+        VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_MAX_SCANOUTS,
     },
     renderer::Renderer,
     GpuConfig,
@@ -61,6 +71,8 @@ pub struct GfxstreamResource {
     pub info_3d: Option<rutabaga_gfx::Resource3DInfo>,
     pub handle: Option<Arc<RutabagaHandle>>,
     pub uuid: Uuid,
+    pub blob_size: u64,
+    pub blob_shmem_offset: Option<u64>,
 }
 
 impl GfxstreamResource {
@@ -88,6 +100,8 @@ impl GfxstreamResource {
             info_3d: None,
             handle: None,
             uuid: Uuid::new_v4(),
+            blob_size: 0,
+            blob_shmem_offset: None,
         }
     }
 }
@@ -99,6 +113,7 @@ thread_local! {
 }
 
 pub struct GfxstreamAdapter {
+    backend: Backend,
     gpu_backend: Option<GpuBackend>,
     resources: BTreeMap<u32, GfxstreamResource>,
     fence_state: Arc<Mutex<FenceState>>,
@@ -108,6 +123,7 @@ pub struct GfxstreamAdapter {
 impl GfxstreamAdapter {
     pub fn new(
         queue_ctl: &VringRwLock,
+        backend: Backend,
         gpu_config: &GpuConfig,
         gpu_backend: Option<GpuBackend>,
     ) -> Self {
@@ -124,6 +140,7 @@ impl GfxstreamAdapter {
         });
 
         Self {
+            backend,
             gpu_backend,
             fence_state,
             resources: BTreeMap::new(),
@@ -289,6 +306,8 @@ impl Renderer for GfxstreamAdapter {
             info_3d: None,
             handle: None,
             uuid: Uuid::new_v4(),
+            blob_size: 0,
+            blob_shmem_offset: None,
         };
         debug_assert!(
             !self.resources.contains_key(&resource_id),
@@ -368,11 +387,11 @@ impl Renderer for GfxstreamAdapter {
     fn attach_backing(
         &mut self,
         resource_id: u32,
-        mem: &GuestMemoryMmap,
+        mem: Arc<GuestMemoryMmap>,
         vecs: Vec<(GuestAddress, usize)>,
     ) -> VirtioGpuResult {
-        let rutabaga_iovecs =
-            Self::sglist_to_rutabaga_iovecs(&vecs[..], mem).map_err(|()| GpuResponse::ErrUnspec)?;
+        let rutabaga_iovecs = Self::sglist_to_rutabaga_iovecs(&vecs[..], &mem)
+            .map_err(|()| GpuResponse::ErrUnspec)?;
         Self::with_rutabaga(|rutabaga| rutabaga.attach_backing(resource_id, rutabaga_iovecs))?;
         Ok(OkNoData)
     }
@@ -700,25 +719,123 @@ impl Renderer for GfxstreamAdapter {
 
     fn resource_create_blob(
         &mut self,
-        _ctx_id: u32,
-        _resource_id: u32,
-        _blob_id: u64,
-        _size: u64,
-        _blob_mem: u32,
-        _blob_flags: u32,
+        ctx_id: u32,
+        resource_create_blob: ResourceCreateBlob,
+        vecs: Vec<(vm_memory::GuestAddress, usize)>,
+        mem: &vm_memory::GuestMemoryMmap,
     ) -> VirtioGpuResult {
-        error!("Not implemented: resource_create_blob");
-        Err(ErrUnspec)
+        let mut rutabaga_iovecs = None;
+
+        if resource_create_blob.blob_flags & VIRTIO_GPU_BLOB_FLAG_CREATE_GUEST_HANDLE != 0 {
+            error!("GUEST_HANDLE unimplemented for gfxstream backend");
+            return Err(ErrUnspec);
+        } else if resource_create_blob.blob_mem != VIRTIO_GPU_BLOB_MEM_HOST3D {
+            rutabaga_iovecs =
+                Some(Self::sglist_to_rutabaga_iovecs(&vecs[..], mem).map_err(|_| ErrUnspec)?);
+        }
+
+        Self::with_rutabaga(|rutabaga| {
+            rutabaga.resource_create_blob(
+                ctx_id,
+                resource_create_blob.resource_id,
+                resource_create_blob.into(),
+                rutabaga_iovecs,
+                None,
+            )
+        })?;
+
+        let resource = GfxstreamResource {
+            id: resource_create_blob.resource_id,
+            width: 0,
+            height: 0,
+            scanouts: AssociatedScanouts::default(),
+            info_3d: None,
+            handle: None,
+            uuid: Uuid::new_v4(),
+            blob_size: resource_create_blob.size,
+            blob_shmem_offset: None,
+        };
+
+        debug_assert!(
+            !self
+                .resources
+                .contains_key(&resource_create_blob.resource_id),
+            "Resource ID {} already exists in the resources map.",
+            resource_create_blob.resource_id
+        );
+
+        // Rely on rutabaga to check for duplicate resource ids.
+        self.resources
+            .insert(resource_create_blob.resource_id, resource);
+        Ok(Self::result_from_query(resource_create_blob.resource_id))
     }
 
-    fn resource_map_blob(&mut self, _resource_id: u32, _offset: u64) -> VirtioGpuResult {
-        error!("Not implemented: resource_map_blob");
-        Err(ErrUnspec)
+    fn resource_map_blob(&mut self, resource_id: u32, offset: u64) -> VirtioGpuResult {
+        let resource = self
+            .resources
+            .get_mut(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        let map_info = Self::with_rutabaga(|rutabaga| rutabaga.map_info(resource_id))
+            .map_err(|_| ErrUnspec)?;
+
+        let export = Self::with_rutabaga(|rutabaga| rutabaga.export_blob(resource_id))
+            .map_err(|_| ErrUnspec)?;
+
+        let handle = export.as_mesa_handle().ok_or(ErrUnspec)?;
+
+        // Check handle type - we don't support OPAQUE_FD mapping
+        if handle.handle_type == RUTABAGA_HANDLE_TYPE_MEM_OPAQUE_FD {
+            return Err(ErrUnspec);
+        }
+
+        // Convert map_info access flags to VhostUserMMapFlags
+        let flags = match map_info & RUTABAGA_MAP_ACCESS_MASK {
+            RUTABAGA_MAP_ACCESS_READ => VhostUserMMapFlags::default(),
+            RUTABAGA_MAP_ACCESS_WRITE => VhostUserMMapFlags::WRITABLE,
+            RUTABAGA_MAP_ACCESS_RW => VhostUserMMapFlags::WRITABLE,
+            _ => {
+                error!("Invalid access mask for blob resource, map_info: {map_info}");
+                return Err(ErrUnspec);
+            }
+        };
+
+        common_map_blob(
+            &self.backend,
+            flags,
+            &handle.os_handle.as_fd(),
+            resource.blob_size,
+            offset,
+            resource_id,
+        )?;
+
+        resource.blob_shmem_offset = Some(offset);
+
+        // Return cache flags only (access flags not part of virtio-gpu spec)
+        Ok(OkMapInfo {
+            map_info: map_info & RUTABAGA_MAP_CACHE_MASK,
+        })
     }
 
-    fn resource_unmap_blob(&mut self, _resource_id: u32) -> VirtioGpuResult {
-        error!("Not implemented: resource_unmap_blob");
-        Err(ErrUnspec)
+    fn resource_unmap_blob(&mut self, resource_id: u32) -> VirtioGpuResult {
+        let resource = self
+            .resources
+            .get_mut(&resource_id)
+            .ok_or(ErrInvalidResourceId)?;
+
+        let Some(offset) = resource.blob_shmem_offset else {
+            log::warn!(
+                "Guest tried to unmap blob resource with resource_id={resource_id}, but it is not \
+                 mapped!"
+            );
+            return Err(ErrInvalidParameter);
+        };
+
+        common_unmap_blob(&self.backend, resource.blob_size, offset)?;
+
+        resource.blob_shmem_offset = None;
+
+        Ok(OkNoData)
     }
 }
 
@@ -779,6 +896,11 @@ mod gfx_fence_tests {
         GpuBackend::from_stream(backend)
     }
 
+    fn dummy_backend() -> Backend {
+        let (_, backend) = UnixStream::pair().unwrap();
+        Backend::from_stream(backend)
+    }
+
     /// Attempts to create a GPU adapter for testing.
     /// Returns None if gfxstream initialization fails (e.g., in CI without GPU
     /// drivers).
@@ -823,6 +945,7 @@ mod gfx_fence_tests {
         });
 
         Some(GfxstreamAdapter {
+            backend: dummy_backend(),
             gpu_backend: Some(dummy_gpu_backend()),
             resources: BTreeMap::default(),
             fence_state,
@@ -873,7 +996,7 @@ mod gfx_fence_tests {
 
             // Attach backing for cursor resource to ensure transfer_read works
             let cursor_backing = GuestMemoryMmap::from_ranges(&[(GuestAddress(0xC0000), 0x10000)]).unwrap();
-            gfxstream_gpu.attach_backing(cursor_resource_id, &cursor_backing, vec![(GuestAddress(0xC0000), 16384usize)]).unwrap();
+            gfxstream_gpu.attach_backing(cursor_resource_id, Arc::new(cursor_backing), vec![(GuestAddress(0xC0000), 16384usize)]).unwrap();
 
             // The resource exists, the dimensions are correct, and backing is attached
             // This exercises common_read_cursor_resource and then fails at cursor_update (no frontend)
@@ -916,6 +1039,20 @@ mod gfx_fence_tests {
             gfxstream_gpu.create_context(1, 0, None).unwrap();
             gfxstream_gpu.context_attach_resource(1, 1).unwrap_err();
             gfxstream_gpu.context_detach_resource(1, 1).unwrap_err();
+
+            // Test blob resource creation (skip map/unmap becuase it require full vhost-user backend)
+            let gm_back = GuestMemoryMmap::from_ranges(&[(GuestAddress(0x1000), 0x1000)]).unwrap();
+            let vecs = vec![(GuestAddress(0x1000), 4096usize)];
+            let blob_create = ResourceCreateBlob {
+                resource_id: 2,
+                blob_id: 0,
+                blob_mem: 1,
+                blob_flags: 1,
+                size: 4096,
+            };
+            gfxstream_gpu.resource_create_blob(1, blob_create, vecs, &gm_back).unwrap();
+            gfxstream_gpu.unref_resource(2).unwrap();
+
             gfxstream_gpu.destroy_context(1).unwrap();
         }
 
@@ -964,7 +1101,7 @@ mod gfx_fence_tests {
 
             // Attach that single iovec (addr,len) to the resource.
             let sg = vec![(GuestAddress(0xA0000), 4usize)];
-            gfxstream_gpu.attach_backing(1, &gm_back, sg).expect("attach_backing");
+            gfxstream_gpu.attach_backing(1, Arc::new(gm_back), sg).expect("attach_backing");
             // Detach the backing memory from the resource
             gfxstream_gpu.detach_backing(1).expect("detach_backing");
             gfxstream_gpu.set_scanout(1, 1, rect).unwrap_err();
@@ -1138,6 +1275,8 @@ mod gfx_fence_tests {
             info_3d: None,
             handle: None,
             uuid: Uuid::new_v4(),
+            blob_size: 0,
+            blob_shmem_offset: None,
         };
         // 64 * 64 * 4 BPP = 16384
         assert_eq!(
@@ -1157,6 +1296,8 @@ mod gfx_fence_tests {
             info_3d: None,
             handle: None,
             uuid: Uuid::new_v4(),
+            blob_size: 0,
+            blob_shmem_offset: None,
         };
         r.calculate_size().unwrap_err();
     }
@@ -1173,6 +1314,8 @@ mod gfx_fence_tests {
             info_3d: None,
             handle: None,
             uuid: Uuid::new_v4(),
+            blob_size: 0,
+            blob_shmem_offset: None,
         };
         // On 64-bit this should error; if it happens to fit on 32-bit, the guard still
         // holds elsewhere.

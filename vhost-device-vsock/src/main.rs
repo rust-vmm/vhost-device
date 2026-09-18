@@ -53,6 +53,9 @@ mod vhu_vsock;
 mod vhu_vsock_thread;
 mod vsock_conn;
 
+#[cfg(test)]
+mod test_utils;
+
 use std::{
     any::Any,
     collections::HashMap,

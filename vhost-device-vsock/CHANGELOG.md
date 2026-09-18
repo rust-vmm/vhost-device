@@ -6,6 +6,7 @@
 ### Changed
 
 ### Fixed
+- [#992](https://github.com/rust-vmm/vhost-device/pull/992) vsock : forward-listen stream polling after guest accepts
 
 ### Deprecated
 

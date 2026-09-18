@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{self, BufRead, BufReader},
+    io::{self, BufRead, BufReader, Write},
     iter::FromIterator,
     num::Wrapping,
     ops::Deref,
@@ -20,7 +20,7 @@ use std::{
 
 use log::{error, warn};
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
-use virtio_queue::QueueOwnedT;
+use virtio_queue::{QueueOwnedT, QueueT};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
@@ -35,7 +35,7 @@ use crate::{
     thread_backend::*,
     vhu_vsock::{
         BackendType, CidMap, ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT,
-        SIBLING_VM_EVENT, VSOCK_HOST_CID,
+        SIBLING_VM_EVENT, VSOCK_EVENT_TRANSPORT_RESET, VSOCK_HOST_CID,
     },
     vsock_conn::*,
 };
@@ -89,6 +89,9 @@ pub(crate) struct VhostUserVsockThread {
     /// Used to alternate between the RX queues to prevent the starvation of one
     /// by the other.
     last_processed: RxQueueType,
+    /// Backend and sibling vm connections will be dropped until this is set to true, typically
+    /// when communication with the driver has been established.
+    active: bool,
 }
 
 impl VhostUserVsockThread {
@@ -150,11 +153,7 @@ impl VhostUserVsockThread {
 
             cid_map.insert(
                 guest_cid,
-                (
-                    thread_backend.raw_pkts_queue.clone(),
-                    groups_set,
-                    sibling_event_fd.try_clone().unwrap(),
-                ),
+                (None, groups_set, sibling_event_fd.try_clone().unwrap()),
             );
         }
         let (sender, receiver) = mpsc::channel::<EventData>();
@@ -180,6 +179,7 @@ impl VhostUserVsockThread {
             tx_buffer_size,
             sibling_event_fd,
             last_processed: RxQueueType::Standard,
+            active: false,
         };
 
         for host_raw_fd in thread.host_listeners_map.keys() {
@@ -259,6 +259,19 @@ impl VhostUserVsockThread {
         Ok(())
     }
 
+    /// Start processing requests from the host and sibling VMs
+    pub fn activate(&mut self) {
+        if self.active {
+            return;
+        }
+        self.active = true;
+
+        // Add the raw_pkts queue to the map to begin accepting packets from sibling VMs
+        let mut cid_map = self.thread_backend.cid_map.write().unwrap();
+        cid_map.get_mut(&self.guest_cid).unwrap().0 =
+            Some(self.thread_backend.raw_pkts_queue.clone());
+    }
+
     /// Return raw file descriptor of the epoll file.
     fn get_epoll_fd(&self) -> RawFd {
         self.epoll_file.as_raw_fd()
@@ -310,7 +323,7 @@ impl VhostUserVsockThread {
             match listener {
                 ListenerType::Unix(unix_listener) => {
                     let conn = unix_listener.accept().map_err(Error::UnixAccept);
-                    if self.mem.is_some() {
+                    if self.active && self.mem.is_some() {
                         conn.and_then(|(stream, _)| {
                             stream
                                 .set_nonblocking(true)
@@ -332,7 +345,7 @@ impl VhostUserVsockThread {
                 #[cfg(feature = "backend_vsock")]
                 ListenerType::Vsock(vsock_listener) => {
                     let conn = vsock_listener.accept().map_err(Error::VsockAccept);
-                    if self.mem.is_some() {
+                    if self.active && self.mem.is_some() {
                         match conn {
                             Ok((stream, addr)) => {
                                 if let Err(err) = stream.set_nonblocking(true) {
@@ -587,7 +600,6 @@ impl VhostUserVsockThread {
         };
 
         let mut vring_mut = vring.get_mut();
-
         let queue = vring_mut.get_queue_mut();
 
         while let Some(mut avail_desc) = queue
@@ -696,6 +708,11 @@ impl VhostUserVsockThread {
     }
 
     pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
+        if !vring.get_ref().get_queue().ready() {
+            // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+            return Ok(());
+        }
+
         match self.last_processed {
             RxQueueType::Standard => {
                 if self.thread_backend.pending_raw_pkts() {
@@ -748,14 +765,20 @@ impl VhostUserVsockThread {
                 }
             };
 
-            if self.thread_backend.send_pkt(&pkt).is_err() {
-                vring
-                    .get_mut()
-                    .get_queue_mut()
-                    .iter(mem)
-                    .unwrap()
-                    .go_to_previous_position();
-                break;
+            if self.active {
+                if self.thread_backend.send_pkt(&pkt).is_err() {
+                    vring
+                        .get_mut()
+                        .get_queue_mut()
+                        .iter(mem)
+                        .unwrap()
+                        .go_to_previous_position();
+                    break;
+                }
+            } else {
+                // A tx packet can only arrive before we're active if it was sent before a
+                // transport reset completed.
+                warn!("vsock: Dropping packet received before reset completes");
             }
 
             // TODO: Check if the protocol requires read length to be correct
@@ -779,6 +802,11 @@ impl VhostUserVsockThread {
     /// Wrapper to process tx queue based on whether event idx is enabled or
     /// not.
     pub fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<()> {
+        if !vring_lock.get_ref().get_queue().ready() {
+            // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+            return Ok(());
+        }
+
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -794,6 +822,44 @@ impl VhostUserVsockThread {
         } else {
             self.process_tx_queue(vring_lock)?;
         }
+        Ok(())
+    }
+
+    /// Sends a TRANSPORT_RESET event to the guest driver. Returns true if it was able to send it,
+    /// false if there were no buffers available in the vring.
+    pub fn reset_transport(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
+        let mut vring_mut = vring.get_mut();
+        let queue = vring_mut.get_queue_mut();
+
+        let atomic_mem = match &self.mem {
+            Some(m) => m,
+            None => return Err(Error::NoMemoryConfigured),
+        };
+
+        let avail_desc = match queue.pop_descriptor_chain(atomic_mem.memory()) {
+            Some(d) => d,
+            None => {
+                return Ok(());
+            }
+        };
+
+        let mem = atomic_mem.clone().memory();
+        let head_idx = avail_desc.head_index();
+        let mut writer = avail_desc
+            .writer(&mem)
+            .map_err(|_| Error::EventQueueWrite)?;
+        writer
+            .write_all(&VSOCK_EVENT_TRANSPORT_RESET.to_le_bytes())
+            .map_err(|_| Error::EventQueueWrite)?;
+        self.sender
+            .send(EventData {
+                vring: vring.clone(),
+                event_idx,
+                head_idx,
+                used_len: std::mem::size_of::<u32>(),
+            })
+            .unwrap();
+
         Ok(())
     }
 }
@@ -955,6 +1021,7 @@ mod tests {
             cid_map.clone(),
         )
         .unwrap();
+        t.activate();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());
@@ -964,6 +1031,7 @@ mod tests {
         );
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.get_mut().get_queue_mut().set_ready(true);
 
         // memory is not configured, so processing TX should fail
         assert!(t.process_tx(&vring, false).is_err());
@@ -1007,6 +1075,7 @@ mod tests {
         );
 
         let mut t = t.unwrap();
+        t.activate();
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
@@ -1061,6 +1130,7 @@ mod tests {
         );
 
         t.mem = Some(mem.clone());
+        t.activate();
 
         let mut vs1 = VsockStream::connect_with_cid_port(VMADDR_CID_LOCAL, 9003).unwrap();
         let mut vs2 = VsockStream::connect_with_cid_port(VMADDR_CID_LOCAL, 9004).unwrap();

@@ -300,13 +300,15 @@ impl VhostUserCanBackend {
         Ok(can_rx)
     }
 
+    // return true if at least one descriptor was processed thus requiring a notification
+    // return false if no descriptors were processed
     fn process_ctrl_requests(
         &self,
         requests: Vec<CanDescriptorChain>,
         vring: &VringRwLock,
     ) -> Result<bool> {
         if requests.is_empty() {
-            return Ok(true);
+            return Ok(false);
         }
 
         for desc_chain in requests {
@@ -371,13 +373,15 @@ impl VhostUserCanBackend {
         Ok(true)
     }
 
+    // return true if at least one descriptor was processed thus requiring a notification
+    // return false if no descriptors were processed
     fn process_tx_requests(
         &self,
         requests: Vec<CanDescriptorChain>,
         vring: &VringRwLock,
     ) -> Result<bool> {
         if requests.is_empty() {
-            return Ok(true);
+            return Ok(false);
         }
 
         for desc_chain in requests {
@@ -475,17 +479,16 @@ impl VhostUserCanBackend {
         Ok(true)
     }
 
+    // return true if at least one descriptor was processed thus requiring a notification
+    // return false if no descriptors were processed
     pub fn process_rx_requests(
         &mut self,
         requests: Vec<CanDescriptorChain>,
         vring: &VringRwLock,
     ) -> Result<bool> {
         if requests.is_empty() {
-            return Ok(true);
+            return Ok(false);
         }
-
-        // This flag, if true, requests a new tx buffer from the front-end
-        let mut req_rx_buf = false;
 
         for desc_chain in requests {
             let atomic_mem = self.mem.as_ref().unwrap().memory();
@@ -495,14 +498,9 @@ impl VhostUserCanBackend {
                 .map_err(|_| Error::DescriptorWriteFailed)?;
 
             let response = match self.controller.write().unwrap().pop() {
-                Ok(item) => {
-                    // If one or more frames have been received then request
-                    // a new rx buffer.
-                    req_rx_buf = true;
-                    item
-                }
+                Ok(item) => item,
                 Err(QueueEmpty) => {
-                    return Ok(req_rx_buf);
+                    return Ok(false);
                 }
                 Err(_) => {
                     return Err(Error::HandleEventUnknown);
@@ -571,15 +569,19 @@ impl VhostUserCanBackend {
 
     /// Process the messages in the vring and dispatch replies
     fn process_rx_queue(&mut self, vring: &VringRwLock) -> Result<()> {
+        let queue_size = self.controller.read().unwrap().rx_fifo_size();
+
+        // take only the number of descriptor chains needed to process
+        // the frames in the fifo queue
         let requests: Vec<CanDescriptorChain> = vring
             .get_mut()
             .get_queue_mut()
             .iter(self.mem.as_ref().unwrap().memory())
             .map_err(|_| Error::DescriptorNotFound)?
+            .take(queue_size)
             .collect();
 
         if self.process_rx_requests(requests, vring)? {
-            // Send notification once all the requests are processed
             vring
                 .signal_used_queue()
                 .map_err(|_| Error::NotificationFailed)?;
@@ -699,6 +701,17 @@ impl VhostUserBackendMut for VhostUserCanBackend {
             // calling process_request_queue() until it stops finding
             // new requests on the queue.
             loop {
+                // For BACKEND_EFD, exit the loop when the RX FIFO is empty.
+                // Unlike RX_QUEUE (which processes guest-provided descriptors),
+                // BACKEND_EFD is triggered when the backend puts frames in the FIFO.
+                // Continuing the loop with an empty FIFO causes infinite looping
+                // since enable_notification() will keep returning true if there
+                // are available descriptors, but there's nothing to process.
+                if device_event == BACKEND_EFD
+                    && self.controller.read().unwrap().rx_fifo_size() == 0
+                {
+                    break;
+                }
                 vring.disable_notification().unwrap();
                 match device_event {
                     CTRL_QUEUE => self.process_ctrl_queue(vring),
@@ -787,14 +800,14 @@ mod tests {
         );
         let vring = VringRwLock::new(mem.clone(), 0x1000).unwrap();
 
-        // Empty descriptor chain should be ignored
-        assert!(vu_can_backend
+        // Empty descriptor chain should not trigger a notification
+        assert!(!vu_can_backend
             .process_rx_requests(Vec::<CanDescriptorChain>::new(), &vring)
             .expect("Fail to examine empty rx vring"));
-        assert!(vu_can_backend
+        assert!(!vu_can_backend
             .process_tx_requests(Vec::<CanDescriptorChain>::new(), &vring)
             .expect("Fail to examine empty tx vring"));
-        assert!(vu_can_backend
+        assert!(!vu_can_backend
             .process_ctrl_requests(Vec::<CanDescriptorChain>::new(), &vring)
             .expect("Fail to examine empty ctrl vring"));
     }
@@ -2058,8 +2071,9 @@ mod tests {
 
         // Note: The following test are focusing only to simple CAN messages.
 
-        // Test 1: This should succeed because there is no element inserted in the
-        //         CAN/FD frames' queue
+        // Test 1: This should return false because there is no element inserted in the
+        //         CAN/FD frames' queue so none of the descriptors will be processed and thus
+        //         no notification will be sent.
         let desc_chain = build_desc_chain_mem(&mem, 1, vec![VRING_DESC_F_WRITE as u16], 0x200);
         let mem1 = GuestMemoryAtomic::new(mem.clone());
         let vring = VringRwLock::new(mem1.clone(), 0x1000).unwrap();

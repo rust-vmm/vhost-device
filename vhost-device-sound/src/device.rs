@@ -98,6 +98,13 @@ impl VhostUserSoundThread {
             .get(device_event as usize)
             .ok_or(Error::HandleUnknownEvent(device_event))?;
         if self.event_idx {
+            // No processing is currently done on descriptors received via
+            // the event queue, so those requests must be handled outside
+            // of the loop.
+            if *queue_idx == QueueIdx::Event {
+                return self.process_event(vring);
+            }
+
             // vm-virtio's Queue implementation only checks avail_index
             // once, so to properly support EVENT_IDX we need to keep
             // calling process_request_queue() until it stops finding
@@ -106,7 +113,7 @@ impl VhostUserSoundThread {
                 vring.disable_notification().unwrap();
                 match queue_idx {
                     QueueIdx::Control => self.process_control(vring, audio_backend),
-                    QueueIdx::Event => self.process_event(vring),
+                    QueueIdx::Event => unreachable!(),
                     QueueIdx::Tx => self.process_io(vring, audio_backend, Direction::Output),
                     QueueIdx::Rx => self.process_io(vring, audio_backend, Direction::Input),
                 }?;

@@ -20,7 +20,7 @@ env_logger = "0.11"
 log = "0.4"
 thiserror = "2.0"
 queues = "1.0.2"
-socketcan = "3.5.0"
+socketcan = "4.0.0"
 vhost = { workspace = true }
 vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }

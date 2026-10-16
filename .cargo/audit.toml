@@ -6,4 +6,8 @@ ignore = [
     # but virtio-media still depends on an older version.
     # Ignore until virtio-media updates to it.
     "RUSTSEC-2024-0436",
+    # unsafe-libyaml is unmaintained; it is used by a deprecated version of
+    # serde_yaml used by figment in vhost-device-vsock.
+    # Ignore until figment updates it.
+    "RUSTSEC-2024-0449",
 ]

@@ -20,7 +20,7 @@ use std::{
 
 use log::{error, warn};
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
-use virtio_queue::QueueOwnedT;
+use virtio_queue::{QueueOwnedT, QueueT};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
@@ -580,7 +580,6 @@ impl VhostUserVsockThread {
         };
 
         let mut vring_mut = vring.get_mut();
-
         let queue = vring_mut.get_queue_mut();
 
         while let Some(mut avail_desc) = queue
@@ -670,6 +669,10 @@ impl VhostUserVsockThread {
     /// Wrapper to process raw vsock packets queue based on whether event idx is
     /// enabled or not.
     pub fn process_raw_pkts(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
+        if !vring.get_ref().get_queue().ready() {
+            // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+            return Ok(());
+        }
         if event_idx {
             loop {
                 if !self.thread_backend.pending_raw_pkts() {
@@ -689,6 +692,11 @@ impl VhostUserVsockThread {
     }
 
     pub fn process_rx(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<()> {
+        if !vring.get_ref().get_queue().ready() {
+            // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+            return Ok(());
+        }
+
         match self.last_processed {
             RxQueueType::Standard => {
                 if self.thread_backend.pending_raw_pkts() {
@@ -772,6 +780,11 @@ impl VhostUserVsockThread {
     /// Wrapper to process tx queue based on whether event idx is enabled or
     /// not.
     pub fn process_tx(&mut self, vring_lock: &VringRwLock, event_idx: bool) -> Result<()> {
+        if !vring_lock.get_ref().get_queue().ready() {
+            // A VHOST_USER_GET_VRING_BASE request can cause the vring to not be ready.
+            return Ok(());
+        }
+
         if event_idx {
             // To properly handle EVENT_IDX we need to keep calling
             // process_rx_queue until it stops finding new requests
@@ -957,6 +970,7 @@ mod tests {
         );
 
         let vring = VringRwLock::new(mem, 0x1000).unwrap();
+        vring.get_mut().get_queue_mut().set_ready(true);
 
         // memory is not configured, so processing TX should fail
         assert!(t.process_tx(&vring, false).is_err());

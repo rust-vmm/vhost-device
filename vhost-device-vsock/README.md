@@ -129,6 +129,18 @@ In this configuration:
 - The host must have vsock support (e.g., `vsock_loopback` kernel module loaded)
 - For testing, you can load the module with: `modprobe vsock_loopback`
 
+## Live migration
+
+This device implementation advertises support for live migrations by offering the `VHOST_USER_PROTOCOL_F_DEVICE_STATE` protocol feature, however this doesn't work with QEMU yet as it marks its vsock frontend as "unmigratable" (and caches the device configuration space instead of forwarding guest reads to the backend). This feature does work with CrosVm and potentially other virtual machine managers.
+
+The backend relies on the frontend to save and restore the vring states and negotiated features, and does not migrate active connections. The only device-internal state saved during `VHOST_USER_SET_DEVICE_STATE_FD` (with `SAVE` direction) is a single byte (`0` or `1`) indicating whether the guest driver has read the virtio-vsock configuration space. Recording this flag allows saving VM snapshots even when the guest has no virtio-vsock driver or has not initialized the device yet.
+
+During a restore, the backend starts inactive just like on a regular boot. When the frontend initiates a `LOAD` transfer via `VHOST_USER_SET_DEVICE_STATE_FD` and finalizes it with `VHOST_USER_CHECK_DEVICE_STATE`, the backend reads that single byte from the transfer pipe:
+- If `0` (the driver had not read the configuration before the snapshot), no connections could have been established, so no reset event is scheduled and the backend stays inactive until a driver initializes the device.
+- If `1` (the driver had already read the configuration), the virtio-vsock specification requires sending a `VIRTIO_VSOCK_EVENT_TRANSPORT_RESET` event to the driver. The backend marks a transport reset event as pending, waits for the event queue to be enabled and have available buffers before sending the event, and clears the pending flag once the event is queued.
+
+In response to the `VIRTIO_VSOCK_EVENT_TRANSPORT_RESET` event, the driver drops any existing connections and reads the configuration space again. To prevent the driver from dropping new connections established after a restore (and because the backend does not know at start time whether this is a restore or a clean boot), the backend always starts inactive and only begins forwarding packets between the outside world (host or sibling VMs) and the driver once the configuration space is read while no transport reset event is pending. Any configuration reads that occur while a transport reset event is still pending still mark the configuration as having been read, but do not activate packet forwarding.
+
 ## Usage
 
 Run the vhost-device-vsock device with unix domain socket backend:

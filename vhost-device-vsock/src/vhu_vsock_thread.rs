@@ -89,6 +89,9 @@ pub(crate) struct VhostUserVsockThread {
     /// Used to alternate between the RX queues to prevent the starvation of one
     /// by the other.
     last_processed: RxQueueType,
+    /// Backend and sibling vm connections will be dropped until this is set to true, typically
+    /// when communication with the driver has been established.
+    active: bool,
 }
 
 impl VhostUserVsockThread {
@@ -150,11 +153,7 @@ impl VhostUserVsockThread {
 
             cid_map.insert(
                 guest_cid,
-                (
-                    thread_backend.raw_pkts_queue.clone(),
-                    groups_set,
-                    sibling_event_fd.try_clone().unwrap(),
-                ),
+                (None, groups_set, sibling_event_fd.try_clone().unwrap()),
             );
         }
         let (sender, receiver) = mpsc::channel::<EventData>();
@@ -180,6 +179,7 @@ impl VhostUserVsockThread {
             tx_buffer_size,
             sibling_event_fd,
             last_processed: RxQueueType::Standard,
+            active: false,
         };
 
         for host_raw_fd in thread.host_listeners_map.keys() {
@@ -259,6 +259,19 @@ impl VhostUserVsockThread {
         Ok(())
     }
 
+    /// Start processing requests from the host and sibling VMs
+    pub fn activate(&mut self) {
+        if self.active {
+            return;
+        }
+        self.active = true;
+
+        // Add the raw_pkts queue to the map to begin accepting packets from sibling VMs
+        let mut cid_map = self.thread_backend.cid_map.write().unwrap();
+        cid_map.get_mut(&self.guest_cid).unwrap().0 =
+            Some(self.thread_backend.raw_pkts_queue.clone());
+    }
+
     /// Return raw file descriptor of the epoll file.
     fn get_epoll_fd(&self) -> RawFd {
         self.epoll_file.as_raw_fd()
@@ -310,7 +323,7 @@ impl VhostUserVsockThread {
             match listener {
                 ListenerType::Unix(unix_listener) => {
                     let conn = unix_listener.accept().map_err(Error::UnixAccept);
-                    if self.mem.is_some() {
+                    if self.active && self.mem.is_some() {
                         conn.and_then(|(stream, _)| {
                             stream
                                 .set_nonblocking(true)
@@ -332,7 +345,7 @@ impl VhostUserVsockThread {
                 #[cfg(feature = "backend_vsock")]
                 ListenerType::Vsock(vsock_listener) => {
                     let conn = vsock_listener.accept().map_err(Error::VsockAccept);
-                    if self.mem.is_some() {
+                    if self.active && self.mem.is_some() {
                         match conn {
                             Ok((stream, addr)) => {
                                 if let Err(err) = stream.set_nonblocking(true) {
@@ -749,14 +762,20 @@ impl VhostUserVsockThread {
                 }
             };
 
-            if self.thread_backend.send_pkt(&pkt).is_err() {
-                vring
-                    .get_mut()
-                    .get_queue_mut()
-                    .iter(mem)
-                    .unwrap()
-                    .go_to_previous_position();
-                break;
+            if self.active {
+                if self.thread_backend.send_pkt(&pkt).is_err() {
+                    vring
+                        .get_mut()
+                        .get_queue_mut()
+                        .iter(mem)
+                        .unwrap()
+                        .go_to_previous_position();
+                    break;
+                }
+            } else {
+                // A tx packet can only arrive before we're active if it was sent before a
+                // transport reset completed.
+                warn!("vsock: Dropping tx packet received before reset completes");
             }
 
             // TODO: Check if the protocol requires read length to be correct
@@ -1003,6 +1022,7 @@ mod tests {
             cid_map.clone(),
         )
         .unwrap();
+        t.activate();
         assert!(VhostUserVsockThread::epoll_register(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_modify(-1, -1, epoll::Events::EPOLLIN).is_err());
         assert!(VhostUserVsockThread::epoll_unregister(-1, -1).is_err());
@@ -1056,6 +1076,7 @@ mod tests {
         );
 
         let mut t = t.unwrap();
+        t.activate();
 
         let mem = GuestMemoryAtomic::new(
             GuestMemoryMmap::<()>::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap(),
@@ -1110,6 +1131,7 @@ mod tests {
         );
 
         t.mem = Some(mem.clone());
+        t.activate();
 
         let mut vs1 = VsockStream::connect_with_cid_port(VMADDR_CID_LOCAL, 9003).unwrap();
         let mut vs2 = VsockStream::connect_with_cid_port(VMADDR_CID_LOCAL, 9004).unwrap();

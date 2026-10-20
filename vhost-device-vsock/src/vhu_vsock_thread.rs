@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{self, BufRead, BufReader},
+    io::{self, BufRead, BufReader, Write},
     iter::FromIterator,
     num::Wrapping,
     ops::Deref,
@@ -35,7 +35,7 @@ use crate::{
     thread_backend::*,
     vhu_vsock::{
         BackendType, CidMap, ConnMapKey, Error, Result, VhostUserVsockBackend, BACKEND_EVENT,
-        SIBLING_VM_EVENT, VSOCK_HOST_CID,
+        SIBLING_VM_EVENT, VSOCK_EVENT_TRANSPORT_RESET, VSOCK_HOST_CID,
     },
     vsock_conn::*,
 };
@@ -801,6 +801,48 @@ impl VhostUserVsockThread {
             self.process_tx_queue(vring_lock)?;
         }
         Ok(())
+    }
+
+    /// Sends a TRANSPORT_RESET event to the guest driver. Returns true if it was able to send it,
+    /// false if there were no buffers available in the vring.
+    pub fn reset_transport(&mut self, vring: &VringRwLock, event_idx: bool) -> Result<bool> {
+        let mut vring_mut = vring.get_mut();
+        let queue = vring_mut.get_queue_mut();
+
+        if !queue.ready() {
+            return Ok(false);
+        }
+
+        let atomic_mem = match &self.mem {
+            Some(m) => m,
+            None => return Err(Error::NoMemoryConfigured),
+        };
+
+        let avail_desc = match queue.pop_descriptor_chain(atomic_mem.memory()) {
+            Some(d) => d,
+            None => {
+                return Ok(false);
+            }
+        };
+
+        let mem = atomic_mem.clone().memory();
+        let head_idx = avail_desc.head_index();
+        let mut writer = avail_desc
+            .writer(&mem)
+            .map_err(|_| Error::EventQueueWrite)?;
+        writer
+            .write_all(&VSOCK_EVENT_TRANSPORT_RESET.to_le_bytes())
+            .map_err(|_| Error::EventQueueWrite)?;
+        self.sender
+            .send(EventData {
+                vring: vring.clone(),
+                event_idx,
+                head_idx,
+                used_len: std::mem::size_of::<u32>(),
+            })
+            .unwrap();
+
+        Ok(true)
     }
 }
 

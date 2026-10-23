@@ -375,10 +375,6 @@ impl VhostUserVsockThread {
                 self.thread_backend.listener_map.entry(fd)
             {
                 // New connection from the host
-                if evset.bits() != epoll::Events::EPOLLIN.bits() {
-                    // Has to be EPOLLIN as it was not connected previously
-                    return;
-                }
                 let mut stream = match self.thread_backend.stream_map.remove(&fd) {
                     Some(s) => s,
                     None => {
@@ -386,6 +382,11 @@ impl VhostUserVsockThread {
                         return;
                     }
                 };
+                if !evset.contains(epoll::Events::EPOLLIN) {
+                    // Has to include EPOLLIN as it was not connected previously
+                    let _ = Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd);
+                    return;
+                }
 
                 match stream {
                     #[cfg(feature = "backend_vsock")]
@@ -398,6 +399,7 @@ impl VhostUserVsockThread {
                             Ok(port) => port,
                             Err(err) => {
                                 warn!("Error while parsing \"connect PORT\n\" command: {err:?}");
+                                let _ = Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd);
                                 return;
                             }
                         };
@@ -407,6 +409,7 @@ impl VhostUserVsockThread {
                             Ok(lp) => lp,
                             Err(err) => {
                                 warn!("Error while allocating local port: {err:?}");
+                                let _ = Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd);
                                 return;
                             }
                         };
@@ -437,6 +440,9 @@ impl VhostUserVsockThread {
                             if cnt > 0 {
                                 conn.fwd_cnt += Wrapping(cnt as u32);
                                 conn.rx_queue.enqueue(RxOps::CreditUpdate);
+                                self.thread_backend
+                                    .backend_rxq
+                                    .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
                             } else {
                                 // If no remaining data to flush, try to disable EPOLLOUT
                                 if Self::epoll_modify(epoll_fd, fd, epoll::Events::EPOLLIN).is_err()
@@ -444,12 +450,21 @@ impl VhostUserVsockThread {
                                     error!("Failed to disable EPOLLOUT");
                                 }
                             }
-                            self.thread_backend
-                                .backend_rxq
-                                .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
                         }
                         Err(e) => {
                             log::debug!("Error: {e:?}");
+                            if !matches!(
+                                &e,
+                                Error::LocalTxBufFlush(io_err)
+                                    if io_err.kind() == std::io::ErrorKind::WouldBlock
+                                        || io_err.kind() == std::io::ErrorKind::Interrupted
+                            ) {
+                                let _ = Self::epoll_unregister(epoll_fd, fd);
+                                conn.rx_queue.enqueue(RxOps::Reset);
+                                self.thread_backend
+                                    .backend_rxq
+                                    .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
+                            }
                         }
                     }
                     return;
@@ -459,8 +474,13 @@ impl VhostUserVsockThread {
                 // established with the guest
                 Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd).unwrap();
 
-                // Enqueue a read request
-                conn.rx_queue.enqueue(RxOps::Rw);
+                if conn.connect {
+                    // Enqueue a read request
+                    conn.rx_queue.enqueue(RxOps::Rw);
+                } else {
+                    // Host peer closed or wrote data before guest accepted connection
+                    conn.rx_queue.enqueue(RxOps::Reset);
+                }
                 self.thread_backend
                     .backend_rxq
                     .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
@@ -1006,6 +1026,15 @@ mod tests {
         );
 
         t.mem = Some(mem.clone());
+
+        // A host client that disconnects before sending "connect PORT\n" must
+        // be removed from stream_map rather than leaking its fd.
+        let uds_aborted = UnixStream::connect(&vsock_path).unwrap();
+        t.process_backend_evt(EventSet::empty());
+        assert_eq!(t.thread_backend.stream_map.len(), 1);
+        drop(uds_aborted);
+        t.process_backend_evt(EventSet::empty());
+        assert!(t.thread_backend.stream_map.is_empty());
 
         let mut uds = UnixStream::connect(vsock_path).unwrap();
         t.process_backend_evt(EventSet::empty());

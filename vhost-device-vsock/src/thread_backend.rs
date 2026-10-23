@@ -265,16 +265,17 @@ impl VsockThreadBackend {
     /// - `Err(Error::EmptyBackendRxQ) if there was no available data
     pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
         // Pop an event from the backend_rxq
-        let key = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
-        let conn = match self.conn_map.get_mut(&key) {
-            Some(conn) => conn,
-            None => {
-                // assume that the connection does not exist
-                return Ok(());
+        let key = loop {
+            let k = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
+            if let Some(conn) = self.conn_map.get(&k) {
+                if conn.rx_queue.pending_rx() {
+                    break k;
+                }
             }
         };
+        let conn = self.conn_map.get_mut(&key).unwrap();
 
-        if conn.rx_queue.peek() == Some(RxOps::Reset) {
+        if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
             // Handle RST events here
             let conn = self.conn_map.remove(&key).unwrap();
             self.listener_map.remove(&conn.stream.as_raw_fd());
@@ -309,6 +310,16 @@ impl VsockThreadBackend {
 
         // Handle other packet types per connection
         conn.recv_pkt(pkt)?;
+
+        if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
+            let conn = self.conn_map.remove(&key).unwrap();
+            self.listener_map.remove(&conn.stream.as_raw_fd());
+            self.stream_map.remove(&conn.stream.as_raw_fd());
+            self.local_port_set.remove(&conn.local_port);
+            let _ = VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd());
+        } else if conn.rx_queue.pending_rx() {
+            self.backend_rxq.push_back(key);
+        }
 
         Ok(())
     }
@@ -530,7 +541,9 @@ mod tests {
     use super::*;
     #[cfg(feature = "backend_vsock")]
     use crate::vhu_vsock::VsockProxyInfo;
-    use crate::vhu_vsock::{BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RW};
+    use crate::vhu_vsock::{
+        BackendType, VhostUserVsockBackend, VsockConfig, VSOCK_OP_RESPONSE, VSOCK_OP_RW,
+    };
 
     const DATA_LEN: usize = 16;
     const CONN_TX_BUF_SIZE: u32 = 64 * 1024;
@@ -582,13 +595,38 @@ mod tests {
         packet.set_op(VSOCK_OP_REQUEST);
         vtp.send_pkt(&packet).unwrap();
 
+        // Push a stale key ahead of the active connection and queue a second
+        // RxOp on the active connection while keeping a single entry for it in
+        // backend_rxq. recv_pkt must skip the stale key, deliver the first op
+        // (VSOCK_OP_RESPONSE), and re-queue the active key for the remaining op.
+        let key = ConnMapKey::new(VSOCK_PEER_PORT, 0);
+        vtp.conn_map
+            .get_mut(&key)
+            .unwrap()
+            .rx_queue
+            .enqueue(RxOps::CreditUpdate);
+        vtp.backend_rxq.push_front(ConnMapKey::new(9999, 9999));
+
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert_eq!(packet.op(), VSOCK_OP_RESPONSE);
+        assert!(vtp.pending_rx());
+
+        // Restore packet fields overwritten by recv_pkt for subsequent send_pkt calls.
+        packet.set_src_cid(CID);
+        packet.set_dst_cid(VSOCK_HOST_CID);
+        packet.set_src_port(0);
+        packet.set_dst_port(VSOCK_PEER_PORT);
+
         packet.set_op(VSOCK_OP_RW);
         vtp.send_pkt(&packet).unwrap();
 
         packet.set_op(VSOCK_OP_RST);
         vtp.send_pkt(&packet).unwrap();
 
-        vtp.recv_pkt(&mut packet).unwrap();
+        assert_eq!(
+            vtp.recv_pkt(&mut packet).unwrap_err().to_string(),
+            Error::EmptyBackendRxQ.to_string()
+        );
 
         // TODO: it is a nop for now
         vtp.enq_rst();

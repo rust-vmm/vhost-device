@@ -3,10 +3,14 @@
 
 ### Added
 
+- [#936](https://github.com/rust-vmm/vhost-device/pull/936) vsock: Enable live migrations (snapshot-restore)
+
 ### Changed
 
 ### Fixed
 - [#992](https://github.com/rust-vmm/vhost-device/pull/992) vsock: forward-listen stream polling after guest accepts
+
+- [#936](https://github.com/rust-vmm/vhost-device/pull/936) vsock: Access virtqueues only if they are ready
 
 ### Deprecated
 

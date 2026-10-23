@@ -275,7 +275,7 @@ impl VsockThreadBackend {
         };
         let conn = self.conn_map.get_mut(&key).unwrap();
 
-        if conn.rx_queue.peek() == Some(RxOps::Reset) {
+        if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
             // Handle RST events here
             let conn = self.conn_map.remove(&key).unwrap();
             self.listener_map.remove(&conn.stream.as_raw_fd());
@@ -311,7 +311,13 @@ impl VsockThreadBackend {
         // Handle other packet types per connection
         conn.recv_pkt(pkt)?;
 
-        if conn.rx_queue.pending_rx() {
+        if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
+            let conn = self.conn_map.remove(&key).unwrap();
+            self.listener_map.remove(&conn.stream.as_raw_fd());
+            self.stream_map.remove(&conn.stream.as_raw_fd());
+            self.local_port_set.remove(&conn.local_port);
+            let _ = VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd());
+        } else if conn.rx_queue.pending_rx() {
             self.backend_rxq.push_back(key);
         }
 

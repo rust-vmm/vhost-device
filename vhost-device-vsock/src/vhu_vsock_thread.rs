@@ -453,6 +453,18 @@ impl VhostUserVsockThread {
                         }
                         Err(e) => {
                             log::debug!("Error: {e:?}");
+                            if !matches!(
+                                &e,
+                                Error::LocalTxBufFlush(io_err)
+                                    if io_err.kind() == std::io::ErrorKind::WouldBlock
+                                        || io_err.kind() == std::io::ErrorKind::Interrupted
+                            ) {
+                                let _ = Self::epoll_unregister(epoll_fd, fd);
+                                conn.rx_queue.enqueue(RxOps::Reset);
+                                self.thread_backend
+                                    .backend_rxq
+                                    .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
+                            }
                         }
                     }
                     return;

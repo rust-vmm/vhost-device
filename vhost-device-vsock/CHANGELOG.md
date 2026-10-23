@@ -7,6 +7,7 @@
 
 ### Fixed
 - [#992](https://github.com/rust-vmm/vhost-device/pull/992) vsock: forward-listen stream polling after guest accepts
+- [#1007](https://github.com/rust-vmm/vhost-device/pull/1007) vsock: clean up connections and fds on handshake and stream I/O errors
 
 ### Deprecated
 

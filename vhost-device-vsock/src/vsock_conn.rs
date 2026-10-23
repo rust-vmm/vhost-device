@@ -233,9 +233,12 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             VSOCK_OP_RESPONSE => {
                 if self.stream.is_hybrid_vsock() {
                     // Confirmation for a host initiated connection
-                    // TODO: Handle stream write error in a better manner
                     let response = format!("OK {}\n", self.peer_port);
-                    self.stream.write_all(response.as_bytes()).unwrap();
+                    if let Err(err) = self.stream.write_all(response.as_bytes()) {
+                        log::debug!("Error writing confirmation to stream: {err:?}");
+                        self.rx_queue.enqueue(RxOps::Reset);
+                        return Ok(());
+                    }
                 }
                 self.connect = true;
                 if VhostUserVsockThread::epoll_register(
@@ -412,6 +415,7 @@ mod tests {
         collections::VecDeque,
         io::{Read, Result as IoResult},
         ops::Deref,
+        os::unix::net::UnixStream,
         sync::{Arc, Mutex},
     };
 
@@ -911,5 +915,23 @@ mod tests {
         let shutdown_response = conn_local.send_pkt(&pkt);
         shutdown_response.unwrap();
         assert!(conn_local.rx_queue.contains(RxOps::Reset.bitmask()));
+
+        // VSOCK_OP_RESPONSE when host peer closed before guest accepted:
+        // must enqueue RxOps::Reset instead of panicking on BrokenPipe.
+        let (host_unix, backend_unix) = UnixStream::pair().unwrap();
+        drop(host_unix);
+        let mut conn_aborted = VsockConnection::new_local_init(
+            crate::thread_backend::StreamType::Unix(backend_unix),
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
+        pkt.set_op(VSOCK_OP_RESPONSE);
+        conn_aborted.send_pkt(&pkt).unwrap();
+        assert!(!conn_aborted.connect);
+        assert!(conn_aborted.rx_queue.contains(RxOps::Reset.bitmask()));
     }
 }

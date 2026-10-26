@@ -21,7 +21,8 @@ use std::{
 use log::{error, warn};
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
 use virtio_queue::QueueOwnedT;
-use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
+use virtio_vsock::packet_rw::{VsockPacketRx, VsockPacketTx};
+use virtio_vsock::PKT_HEADER_SIZE;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
 use vmm_sys_util::{
     epoll::EventSet,
@@ -536,7 +537,7 @@ impl VhostUserVsockThread {
 
         let n = reader
             .read_until(b'\n', &mut buf)
-            .map_err(Error::UnixRead)?;
+            .map_err(Error::StreamRead)?;
 
         let mut word_iter = std::str::from_utf8(&buf[..n])
             .map_err(Error::ConvertFromUtf8)?
@@ -583,7 +584,7 @@ impl VhostUserVsockThread {
 
         let queue = vring_mut.get_queue_mut();
 
-        while let Some(mut avail_desc) = queue
+        while let Some(avail_desc) = queue
             .iter(atomic_mem.memory())
             .map_err(|_| Error::IterateQueue)?
             .next()
@@ -591,9 +592,9 @@ impl VhostUserVsockThread {
             let mem = atomic_mem.clone().memory();
 
             let head_idx = avail_desc.head_index();
-            let used_len = match VsockPacket::from_rx_virtq_chain(
+            let used_len = match VsockPacketRx::from_rx_virtq_chain(
                 mem.deref(),
-                &mut avail_desc,
+                avail_desc,
                 self.tx_buffer_size,
             ) {
                 Ok(mut pkt) => {
@@ -603,7 +604,7 @@ impl VhostUserVsockThread {
                     };
 
                     if recv_result.is_ok() {
-                        PKT_HEADER_SIZE + pkt.len() as usize
+                        PKT_HEADER_SIZE + pkt.data_slice().bytes_written()
                     } else {
                         queue.iter(mem).unwrap().go_to_previous_position();
                         break;
@@ -719,7 +720,7 @@ impl VhostUserVsockThread {
             None => return Err(Error::NoMemoryConfigured),
         };
 
-        while let Some(mut avail_desc) = vring
+        while let Some(avail_desc) = vring
             .get_mut()
             .get_queue_mut()
             .iter(atomic_mem.memory())
@@ -729,9 +730,9 @@ impl VhostUserVsockThread {
             let mem = atomic_mem.clone().memory();
 
             let head_idx = avail_desc.head_index();
-            let pkt = match VsockPacket::from_tx_virtq_chain(
+            let mut pkt = match VsockPacketTx::from_tx_virtq_chain(
                 mem.deref(),
-                &mut avail_desc,
+                avail_desc,
                 self.tx_buffer_size,
             ) {
                 Ok(pkt) => pkt,
@@ -741,7 +742,7 @@ impl VhostUserVsockThread {
                 }
             };
 
-            if self.thread_backend.send_pkt(&pkt).is_err() {
+            if self.thread_backend.send_pkt(&mut pkt).is_err() {
                 vring
                     .get_mut()
                     .get_queue_mut()

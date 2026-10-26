@@ -2,8 +2,6 @@
 
 use std::{io::Write, num::Wrapping};
 
-use vm_memory::{bitmap::BitmapSlice, Bytes, VolatileSlice};
-
 use crate::vhu_vsock::{Error, Result};
 
 #[derive(Debug)]
@@ -36,10 +34,10 @@ impl LocalTxBuf {
         self.len() == 0
     }
 
-    /// Add new data to the tx buffer, push all or none.
+    /// Add new data from a byte slice to the tx buffer, push all or none.
     /// Returns LocalTxBufFull error if space not sufficient.
-    pub fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {
-        if self.get_buf_size() as usize - self.len() < data_buf.len() {
+    pub fn push_bytes(&mut self, data: &[u8]) -> Result<()> {
+        if self.get_buf_size() as usize - self.len() < data.len() {
             // Tx buffer is full
             return Err(Error::LocalTxBufFull);
         }
@@ -48,21 +46,16 @@ impl LocalTxBuf {
         let tail_idx = self.tail.0 as usize % self.get_buf_size() as usize;
 
         // Check if we can fit the data buffer between head and end of buffer
-        let len = std::cmp::min(self.get_buf_size() as usize - tail_idx, data_buf.len());
-        let txbuf = &mut self.buf[tail_idx..tail_idx + len];
-        data_buf.copy_to(txbuf);
+        let len = std::cmp::min(self.get_buf_size() as usize - tail_idx, data.len());
+        self.buf[tail_idx..tail_idx + len].copy_from_slice(&data[..len]);
 
         // Check if there is more data to be wrapped around
-        if len < data_buf.len() {
-            let remain_txbuf = &mut self.buf[..(data_buf.len() - len)];
-            data_buf
-                .read_slice(remain_txbuf, len)
-                .expect("shouldn't fail because remain_txbuf's len is data_buf.len() - len");
+        if len < data.len() {
+            self.buf[..(data.len() - len)].copy_from_slice(&data[len..]);
         }
 
         // Increment tail by the amount of data that has been added to the buffer
-        self.tail += Wrapping(data_buf.len() as u32);
-
+        self.tail += Wrapping(data.len() as u32);
         Ok(())
     }
 
@@ -141,33 +134,29 @@ mod tests {
     #[test]
     fn test_txbuf_push() {
         let mut loc_tx_buf = LocalTxBuf::new(CONN_TX_BUF_SIZE);
-        let mut buf = [0; CONN_TX_BUF_SIZE as usize];
-        // SAFETY: Safe as the buffer is guaranteed to be valid here.
-        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
+        let buf = [0; CONN_TX_BUF_SIZE as usize];
 
         // push data into empty tx buffer
-        let res_push = loc_tx_buf.push(&data);
+        let res_push = loc_tx_buf.push_bytes(&buf);
         res_push.unwrap();
         assert_eq!(loc_tx_buf.head, Wrapping(0));
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE));
 
         // push data into full tx buffer
-        let res_push = loc_tx_buf.push(&data);
+        let res_push = loc_tx_buf.push_bytes(&buf);
         assert!(res_push.is_err());
 
         // head and tail wrap at full
         loc_tx_buf.head = Wrapping(CONN_TX_BUF_SIZE);
-        let res_push = loc_tx_buf.push(&data);
+        let res_push = loc_tx_buf.push_bytes(&buf);
         res_push.unwrap();
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE * 2));
 
         // only tail wraps at full
-        let mut buf = vec![1, 1, 3, 3];
-        // SAFETY: Safe as the buffer is guaranteed to be valid here.
-        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
+        let buf = vec![1, 1, 3, 3];
         loc_tx_buf.head = Wrapping(2);
         loc_tx_buf.tail = Wrapping(CONN_TX_BUF_SIZE - 2);
-        let res_push = loc_tx_buf.push(&data);
+        let res_push = loc_tx_buf.push_bytes(&buf);
         res_push.unwrap();
         assert_eq!(loc_tx_buf.head, Wrapping(2));
         assert_eq!(loc_tx_buf.tail, Wrapping(CONN_TX_BUF_SIZE + 2));
@@ -183,12 +172,10 @@ mod tests {
         let mut loc_tx_buf = LocalTxBuf::new(CONN_TX_BUF_SIZE);
 
         // data to be flushed
-        let mut buf = vec![1; CONN_TX_BUF_SIZE as usize];
-        // SAFETY: Safe as the buffer is guaranteed to be valid here.
-        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
+        let buf = vec![1; CONN_TX_BUF_SIZE as usize];
 
         // target to which data is flushed
-        let mut cmp_vec = Vec::with_capacity(data.len());
+        let mut cmp_vec = Vec::with_capacity(buf.len());
 
         // flush no data
         let res_flush = loc_tx_buf.flush_to(&mut cmp_vec);
@@ -196,7 +183,7 @@ mod tests {
         assert_eq!(res_flush.unwrap(), 0);
 
         // flush data of CONN_TX_BUF_SIZE amount
-        let res_push = loc_tx_buf.push(&data);
+        let res_push = loc_tx_buf.push_bytes(&buf);
         res_push.unwrap();
         let res_flush = loc_tx_buf.flush_to(&mut cmp_vec);
         if let Ok(n) = res_flush {
@@ -209,12 +196,10 @@ mod tests {
         // wrapping head flush
         let mut buf = vec![0; (CONN_TX_BUF_SIZE / 2) as usize];
         buf.append(&mut vec![1; (CONN_TX_BUF_SIZE / 2) as usize]);
-        // SAFETY: Safe as the buffer is guaranteed to be valid here.
-        let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
         loc_tx_buf.head = Wrapping(0);
         loc_tx_buf.tail = Wrapping(0);
-        let res_push = loc_tx_buf.push(&data);
+        let res_push = loc_tx_buf.push_bytes(&buf);
         res_push.unwrap();
         cmp_vec.clear();
         loc_tx_buf.head = Wrapping(CONN_TX_BUF_SIZE / 2);

@@ -21,8 +21,8 @@ members = [
 ]
 
 [workspace.dependencies]
-vhost = { version = "0.17", features = ["vhost-user-backend"] }
-vhost-user-backend = "0.23"
+vhost = { version = "0.18", features = ["vhost-user-backend"] }
+vhost-user-backend = "0.24"
 virtio-bindings = "0.2.5"
 virtio-queue = "0.18"
 vm-memory = "0.18.0"

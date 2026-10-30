@@ -28,6 +28,9 @@
 
 - [[#984]](https://github.com/rust-vmm/vhost-device/pull/984) pipewire: fix choppy audio when the guest queue is empty. The process callback returned early without updating `chunk.size`, causing PipeWire to replay stale buffer data. Fill with silence instead.
 
+- pipewire: fix a deadlock when the guest opens or closes a stream
+  while another stream is running.
+
 ### Deprecated
 
 ## v0.3.0

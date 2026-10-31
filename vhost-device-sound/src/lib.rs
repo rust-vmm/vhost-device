@@ -249,6 +249,8 @@ pub struct SoundConfig {
     multi_thread: bool,
     /// audio backend variant
     audio_backend: BackendType,
+    /// offer an input (capture) stream to the guest
+    capture: bool,
 }
 
 impl SoundConfig {
@@ -258,11 +260,22 @@ impl SoundConfig {
         Self {
             multi_thread,
             audio_backend,
+            capture: true,
         }
+    }
+
+    /// Set whether the guest gets an input (capture) stream.
+    pub const fn with_capture(mut self, capture: bool) -> Self {
+        self.capture = capture;
+        self
     }
 
     pub const fn get_audio_backend(&self) -> BackendType {
         self.audio_backend
+    }
+
+    pub const fn get_capture(&self) -> bool {
+        self.capture
     }
 }
 

@@ -12,7 +12,7 @@ fn main() {
     env_logger::init();
 
     let args = SoundArgs::parse();
-    let config = SoundConfig::new(false, args.backend);
+    let config = SoundConfig::new(false, args.backend).with_capture(!args.no_capture);
 
     let mut listener = if let Some(fd) = args.socket_fd {
         // SAFETY: user has assured us this is safe.
@@ -48,6 +48,22 @@ mod tests {
             "null",
         ]);
         assert_eq!(args.socket, Some(PathBuf::from("/tmp/vhost-sound.socket")));
+    }
+
+    #[test]
+    fn test_cli_no_capture_arg() {
+        let args: SoundArgs = Parser::parse_from(["", "--socket-fd", "3", "--backend", "null"]);
+        assert!(!args.no_capture);
+        assert!(SoundConfig::new(false, args.backend)
+            .with_capture(!args.no_capture)
+            .get_capture());
+
+        let args: SoundArgs =
+            Parser::parse_from(["", "--socket-fd", "3", "--backend", "null", "--no-capture"]);
+        assert!(args.no_capture);
+        assert!(!SoundConfig::new(false, args.backend)
+            .with_capture(!args.no_capture)
+            .get_capture());
     }
 
     #[test]

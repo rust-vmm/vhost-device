@@ -500,18 +500,18 @@ pub struct VhostUserSoundBackend {
 
 impl VhostUserSoundBackend {
     pub fn new(config: SoundConfig) -> Result<Self> {
-        let streams = vec![
-            Stream {
-                id: 0,
-                direction: Direction::Output,
-                ..Stream::default()
-            },
-            Stream {
+        let mut streams = vec![Stream {
+            id: 0,
+            direction: Direction::Output,
+            ..Stream::default()
+        }];
+        if config.capture {
+            streams.push(Stream {
                 id: 1,
                 direction: Direction::Input,
                 ..Stream::default()
-            },
-        ];
+            });
+        }
         let streams_no = streams.len();
         let streams = Arc::new(RwLock::new(streams));
         let jacks: Arc<RwLock<Vec<VirtioSoundJackInfo>>> = Arc::new(RwLock::new(Vec::new()));
@@ -934,6 +934,22 @@ mod tests {
                 .expect("writing to succeed");
             t.mem = Some(mem.clone());
             t.process_control(&vring, &audio_backend).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_sound_backend_no_capture() {
+        crate::init_logger();
+        for (capture, streams) in [(true, 2), (false, 1)] {
+            let config = SoundConfig::new(false, BackendType::Null).with_capture(capture);
+            let backend = VhostUserSoundBackend::new(config).expect("Could not create backend.");
+            assert_eq!(u32::from(backend.virtio_cfg.streams), streams);
+            let threads = backend.threads[0].read().unwrap();
+            let thread_streams = threads.streams.read().unwrap();
+            assert_eq!(thread_streams.len(), streams as usize);
+            assert!(thread_streams
+                .iter()
+                .all(|s| capture || s.direction == Direction::Output));
         }
     }
 

@@ -6,6 +6,10 @@
 - [[#909]](https://github.com/rust-vmm/vhost-device/pull/909)
   `vhost-device-sound` now supports a `--socket-fd` argument.
 
+- [[#1016]](https://github.com/rust-vmm/vhost-device/pull/1016)
+  `vhost-device-sound` now supports a `--no-capture` argument, which
+  offers the guest only an output stream.
+
 ### Changed
 
 - [[#907]](https://github.com/rust-vmm/vhost-device/pull/907)

@@ -22,6 +22,9 @@ generated with help2man target/debug/vhost-device-sound |mandoc
      --backend <BACKEND>
             audio backend to be used [possible values: null, pipewire, alsa, gstreamer]
 
+     --no-capture
+            Don't offer an input (capture) stream to the guest
+
      -h, --help
             Print help
 

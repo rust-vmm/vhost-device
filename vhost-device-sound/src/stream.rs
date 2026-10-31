@@ -227,7 +227,7 @@ impl Stream {
 }
 
 /// Stream params
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PcmParams {
     /// size of hardware buffer in bytes
     pub buffer_bytes: Le32,

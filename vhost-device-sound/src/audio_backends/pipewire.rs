@@ -217,9 +217,17 @@ impl AudioBackend for PwBackend {
             let mut stream_hash = self.stream_hash.write().unwrap();
             let mut stream_listener = self.stream_listener.write().unwrap();
             let lock_guard = self.thread_loop.lock();
-            let stream_params = self.stream_params.read().unwrap();
-
-            let params = &stream_params[stream_id as usize].params;
+            // Copy what we need instead of holding `stream_params`:
+            // disconnecting, dropping or connecting a stream waits for
+            // PipeWire's data thread, and the process callbacks of the other
+            // streams running there take `stream_params` too. Holding it here
+            // deadlocks the thread that serves every virtqueue.
+            let (params, direction) = {
+                let stream_params = self.stream_params.read().unwrap();
+                let st = &stream_params[stream_id as usize];
+                (st.params.clone(), st.direction)
+            };
+            let params = &params;
 
             if let Some(stream) = stream_hash.remove(&stream_id) {
                 stream_listener.remove(&stream_id);
@@ -339,8 +347,6 @@ impl AudioBackend for PwBackend {
             let value_clone = values.clone();
 
             let mut param = [Pod::from_bytes(&values).unwrap()];
-
-            let direction = stream_params[stream_id as usize].direction;
 
             let media_category = match direction {
                 Direction::Input => "Capture",
@@ -496,7 +502,7 @@ impl AudioBackend for PwBackend {
 
             stream
                 .connect(
-                    stream_params[stream_id as usize].direction.into(),
+                    direction.into(),
                     Some(pw::constants::ID_ANY),
                     pw::stream::StreamFlags::RT_PROCESS
                         | pw::stream::StreamFlags::AUTOCONNECT
@@ -532,15 +538,22 @@ impl AudioBackend for PwBackend {
         let lock_guard = self.thread_loop.lock();
         let mut stream_hash = self.stream_hash.write().unwrap();
         let mut stream_listener = self.stream_listener.write().unwrap();
-        let st_buffer = &mut self.stream_params.write().unwrap();
-        let stream = stream_hash
-            .get(&stream_id)
-            .expect("Could not find stream with this id in `stream_hash`.");
-        stream.disconnect().expect("could not disconnect stream");
-        std::mem::take(&mut st_buffer[stream_id as usize].requests);
-        stream_hash.remove(&stream_id);
+        // Not holding `stream_params` here: disconnecting and dropping the
+        // stream wait for PipeWire's data thread, where the other streams'
+        // process callbacks take `stream_params` (see prepare()).
+        if let Some(stream) = stream_hash.remove(&stream_id) {
+            if let Err(err) = stream.disconnect() {
+                log::error!("Stream {stream_id} disconnect {err}");
+            }
+        }
         stream_listener.remove(&stream_id);
+        drop(stream_listener);
+        drop(stream_hash);
         lock_guard.unlock();
+        let requests =
+            std::mem::take(&mut self.stream_params.write().unwrap()[stream_id as usize].requests);
+        // Hands the buffers back to the guest.
+        drop(requests);
         Ok(())
     }
 

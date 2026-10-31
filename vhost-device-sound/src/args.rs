@@ -23,6 +23,9 @@ pub struct SoundArgs {
     #[clap(long)]
     #[clap(value_enum)]
     pub backend: BackendType,
+    /// Don't offer an input (capture) stream to the guest.
+    #[clap(long)]
+    pub no_capture: bool,
 }
 
 #[derive(ValueEnum, Clone, Copy, Default, Debug, Eq, PartialEq)]

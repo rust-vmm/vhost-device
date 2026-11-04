@@ -38,6 +38,8 @@
 - [[#1015]](https://github.com/rust-vmm/vhost-device/pull/1015) pipewire: set `node.latency` to the guest's period size, so capture
   with small periods no longer overruns.
 
+- [[#1019]](https://github.com/rust-vmm/vhost-device/pull/1019) vhost-device-sound: increase max queue size to 32768
+
 ### Deprecated
 
 ## v0.3.0

@@ -32,6 +32,9 @@ use crate::{
     ControlMessageKind, Direction, Error, IOMessage, QueueIdx, Result, SoundConfig,
 };
 
+/// Maximum virtqueue size as defined by the VirtIO specification.
+const VIRTIO_QUEUE_SIZE_MAX: usize = 32768;
+
 pub struct VhostUserSoundThread {
     mem: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     event_idx: bool,
@@ -609,8 +612,17 @@ impl VhostUserBackend for VhostUserSoundBackend {
         // The linux kernel driver does no checks for queue length and fails silently if
         // a queue is filled up. In this case, adding an element to the queue
         // returns ENOSPC and the element is not queued for a later attempt and
-        // is lost. `64` is a "good enough" value from our observations.
-        64
+        // is lost.
+        //
+        // Different VMMs request different queue sizes:
+        // - QEMU: 64
+        // - libkrun: 256 (default)
+        // - crosvm: 32768 (uses virtio spec maximum by default)
+        //
+        // The virtio spec maximum is 32768. This value is an upper limit - VMMs can
+        // request any size from 1 to max_queue_size. Using 32768 accommodates all VMMs
+        // while remaining backwards compatible.
+        VIRTIO_QUEUE_SIZE_MAX
     }
 
     fn features(&self) -> u64 {
@@ -961,7 +973,7 @@ mod tests {
         let backend = VhostUserSoundBackend::new(config).expect("Could not create backend.");
 
         assert_eq!(backend.num_queues(), NUM_QUEUES as usize);
-        assert_eq!(backend.max_queue_size(), 64);
+        assert_eq!(backend.max_queue_size(), VIRTIO_QUEUE_SIZE_MAX);
         assert_ne!(backend.features(), 0);
         assert!(!backend.protocol_features().is_empty());
         for event_idx in [true, false] {

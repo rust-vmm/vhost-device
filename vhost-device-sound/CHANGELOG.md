@@ -34,6 +34,10 @@
 - [[#1015]](https://github.com/rust-vmm/vhost-device/pull/1015) pipewire: set `node.latency` to the guest's period size, so capture
   with small periods no longer overruns.
 
+- [[#1018]](https://github.com/rust-vmm/vhost-device/pull/1018) Don't panic on an I/O request for a stream that isn't running or
+  doesn't exist, which happens when the guest queues a buffer while
+  stopping a stream.
+
 ### Deprecated
 
 ## v0.3.0

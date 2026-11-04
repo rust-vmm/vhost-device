@@ -27,7 +27,7 @@ use vmm_sys_util::{
 
 use crate::{
     audio_backends::{alloc_audio_backend, AudioBackend},
-    stream::{Error as StreamError, Request, Stream},
+    stream::{Error as StreamError, PCMState, Request, Stream},
     virtio_sound::*,
     ControlMessageKind, Direction, Error, IOMessage, QueueIdx, Result, SoundConfig,
 };
@@ -452,6 +452,15 @@ impl VhostUserSoundThread {
 
             let stream_id: u32 = in_header.stream_id.into();
 
+            if stream_id as usize >= self.streams.read().unwrap().len() {
+                log::error!("I/O message for unknown stream {stream_id}");
+                // Dropping the message hands the buffer back with this status.
+                message
+                    .status
+                    .store(VIRTIO_SND_S_BAD_MSG, std::sync::atomic::Ordering::SeqCst);
+                continue;
+            }
+
             stream_ids.insert(stream_id);
 
             let payload_len = match direction {
@@ -472,16 +481,29 @@ impl VhostUserSoundThread {
 
         if !stream_ids.is_empty() {
             let b = audio_backend.read().unwrap();
-            match direction {
-                Direction::Output => {
-                    for id in stream_ids {
-                        b.write(id).unwrap();
-                    }
-                }
-                Direction::Input => {
-                    for id in stream_ids {
-                        b.read(id).unwrap();
-                    }
+            for id in stream_ids {
+                let result = match direction {
+                    Direction::Output => b.write(id),
+                    Direction::Input => b.read(id),
+                };
+                // The guest can send a buffer just as it stops the stream:
+                // the buffer was on its way when STOP arrived. That must not
+                // take down this thread, which serves every queue.
+                if let Err(err) = result {
+                    log::debug!("Stream {id}: {err}");
+                    // A stopped stream keeps its buffers for START or RELEASE.
+                    // Any other stream isn't running and won't get one of
+                    // those before the guest prepares it again, which it
+                    // can't do while buffers are outstanding: give them back.
+                    let requests = {
+                        let mut streams = self.streams.write().unwrap();
+                        let st = &mut streams[id as usize];
+                        if matches!(st.state, PCMState::Stop) {
+                            continue;
+                        }
+                        std::mem::take(&mut st.requests)
+                    };
+                    drop(requests);
                 }
             }
         }
@@ -847,6 +869,72 @@ mod tests {
             .unwrap();
         t.process_io(&vring, &audio_backend, Direction::Input)
             .unwrap();
+    }
+
+    /// Rejects every buffer, like the PipeWire backend does for a stream
+    /// that isn't running.
+    struct RejectingBackend;
+
+    impl AudioBackend for RejectingBackend {
+        fn write(&self, stream_id: u32) -> Result<()> {
+            Err(Error::StreamWithIdNotFound(stream_id))
+        }
+
+        fn read(&self, stream_id: u32) -> Result<()> {
+            Err(Error::StreamWithIdNotFound(stream_id))
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    // A buffer the guest sends as it stops or releases a stream must not
+    // panic the worker. A stopped stream keeps it for START or RELEASE; any
+    // other stream hands it back, or the guest can't prepare again.
+    #[test]
+    fn test_io_for_stream_not_running() {
+        crate::init_logger();
+        for (state, kept) in [(PCMState::Stop, 1), (PCMState::Release, 0)] {
+            let streams = Arc::new(RwLock::new(vec![Stream {
+                state,
+                ..Stream::default()
+            }]));
+            let mut t = VhostUserSoundThread::new(
+                Arc::new(RwLock::new(vec![])),
+                Arc::new(RwLock::new(vec![])),
+                vec![QueueIdx::Event, QueueIdx::Tx, QueueIdx::Rx],
+                streams.clone(),
+                1,
+            )
+            .unwrap();
+            let audio_backend: RwLock<Box<dyn AudioBackend + Send + Sync>> =
+                RwLock::new(Box::new(RejectingBackend));
+
+            let addr_req = 0x10_0000;
+            let descs = [
+                RawDescriptor::from(SplitDescriptor::new(addr_req, 0x100, 0, 0)), // header + data
+                RawDescriptor::from(SplitDescriptor::new(
+                    0x20_0000,
+                    size_of::<VirtioSoundPcmStatus>() as u32,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )), // status
+            ];
+            let (vring, mem) = setup_descs(&descs);
+            let xfer = VirtioSoundPcmXfer {
+                stream_id: 0.into(),
+            };
+            mem.memory()
+                .write_obj(xfer, GuestAddress(addr_req))
+                .unwrap();
+            t.mem = Some(mem);
+
+            t.process_io(&vring, &audio_backend, Direction::Output)
+                .unwrap();
+            assert_eq!(streams.read().unwrap()[0].requests.len(), kept);
+            assert_eq!(vring.queue_used_idx().unwrap(), 1 - kept as u16);
+        }
     }
 
     #[test]

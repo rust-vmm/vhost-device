@@ -18,6 +18,7 @@ use alsa::{
 
 use super::AudioBackend;
 use crate::{
+    sample_bytes,
     stream::{PCMState, Stream},
     virtio_sound::{self, VirtioSndPcmSetParams},
     Direction, Error, Result as CrateResult,
@@ -118,37 +119,7 @@ fn update_pcm(
 
             hwp.set_access(Access::RWInterleaved)?;
 
-            let frame_size = u32::from(s.params.channels)
-                * match s.params.format {
-                    virtio_sound::VIRTIO_SND_PCM_FMT_A_LAW
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_S8
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U8
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U8
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_MU_LAW => 1,
-                    virtio_sound::VIRTIO_SND_PCM_FMT_S16
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U16
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U16
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_IMA_ADPCM => 2,
-                    virtio_sound::VIRTIO_SND_PCM_FMT_S18_3
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U18_3
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_S20_3
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U20_3
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_S24_3
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U24_3
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_S24
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U24 => 3,
-                    virtio_sound::VIRTIO_SND_PCM_FMT_S20
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U20
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_S32
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_U32
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_FLOAT
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_DSD_U32
-                    | virtio_sound::VIRTIO_SND_PCM_FMT_IEC958_SUBFRAME => 4,
-                    virtio_sound::VIRTIO_SND_PCM_FMT_FLOAT64 => 8,
-                    // We check if a format value is supported in PCM_SET_PARAMS so it should never
-                    // have an unknown value.
-                    _ => unreachable!(),
-                };
+            let frame_size = u32::from(s.params.channels) * sample_bytes(s.params.format);
 
             // Calculate desirable bytes/sec rate to achieve the stream's desired
             // parameters:

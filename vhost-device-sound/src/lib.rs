@@ -31,6 +31,39 @@ pub const SUPPORTED_FORMATS: u64 = (1 << VIRTIO_SND_PCM_FMT_U8)
     | (1 << VIRTIO_SND_PCM_FMT_S24)
     | (1 << VIRTIO_SND_PCM_FMT_S32);
 
+/// Bytes per sample of a virtio-snd PCM format.
+///
+/// `IMA_ADPCM` is compressed and has no fixed sample size, so it isn't handled.
+pub const fn sample_bytes(format: u8) -> u32 {
+    match format {
+        VIRTIO_SND_PCM_FMT_MU_LAW
+        | VIRTIO_SND_PCM_FMT_A_LAW
+        | VIRTIO_SND_PCM_FMT_S8
+        | VIRTIO_SND_PCM_FMT_U8
+        | VIRTIO_SND_PCM_FMT_DSD_U8 => 1,
+        VIRTIO_SND_PCM_FMT_S16 | VIRTIO_SND_PCM_FMT_U16 | VIRTIO_SND_PCM_FMT_DSD_U16 => 2,
+        VIRTIO_SND_PCM_FMT_S18_3
+        | VIRTIO_SND_PCM_FMT_U18_3
+        | VIRTIO_SND_PCM_FMT_S20_3
+        | VIRTIO_SND_PCM_FMT_U20_3
+        | VIRTIO_SND_PCM_FMT_S24_3
+        | VIRTIO_SND_PCM_FMT_U24_3 => 3,
+        VIRTIO_SND_PCM_FMT_S20
+        | VIRTIO_SND_PCM_FMT_U20
+        | VIRTIO_SND_PCM_FMT_S24
+        | VIRTIO_SND_PCM_FMT_U24
+        | VIRTIO_SND_PCM_FMT_S32
+        | VIRTIO_SND_PCM_FMT_U32
+        | VIRTIO_SND_PCM_FMT_FLOAT
+        | VIRTIO_SND_PCM_FMT_DSD_U32
+        | VIRTIO_SND_PCM_FMT_IEC958_SUBFRAME => 4,
+        VIRTIO_SND_PCM_FMT_FLOAT64 => 8,
+        // We check if a format value is supported in PCM_SET_PARAMS so it should never
+        // have an unknown value.
+        _ => unreachable!(),
+    }
+}
+
 pub const SUPPORTED_RATES: u64 = (1 << VIRTIO_SND_PCM_RATE_8000)
     | (1 << VIRTIO_SND_PCM_RATE_11025)
     | (1 << VIRTIO_SND_PCM_RATE_16000)
@@ -327,6 +360,32 @@ mod tests {
 
     use super::*;
     use crate::ControlMessageKind;
+
+    #[test]
+    fn test_sample_bytes() {
+        // Formats the device advertises.
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_U8), 1);
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_S16), 2);
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_S24), 4);
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_S32), 4);
+
+        // 24 bits packed in 3 bytes vs. stored in a 32-bit container.
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_S24_3), 3);
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_U24_3), 3);
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_U24), 4);
+
+        // 20 bits packed in 3 bytes vs. stored in a 32-bit container.
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_S20_3), 3);
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_S20), 4);
+
+        assert_eq!(sample_bytes(VIRTIO_SND_PCM_FMT_FLOAT64), 8);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_sample_bytes_unsupported() {
+        sample_bytes(VIRTIO_SND_PCM_FMT_IMA_ADPCM);
+    }
 
     #[test]
     fn test_sound_server() {

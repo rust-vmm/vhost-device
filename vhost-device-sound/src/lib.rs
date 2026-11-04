@@ -177,6 +177,10 @@ pub enum Error {
     StreamWithIdNotFound(u32),
     #[error("Channel number not supported: {0}")]
     ChannelNotSupported(u8),
+    #[error("Could not create daemon: {0}")]
+    CouldNotCreateDaemon(String),
+    #[error("Fatal error: {0}")]
+    ServeFailed(String),
 }
 
 impl From<Error> for IoError {
@@ -337,7 +341,7 @@ impl Drop for IOMessage {
 
 /// This is the public API through which an external program starts the
 /// vhost-device-sound backend server.
-pub fn start_backend_server(listener: &mut Listener, config: SoundConfig) {
+pub fn start_backend_server(listener: &mut Listener, config: SoundConfig) -> Result<()> {
     log::trace!("Using config {:?}.", &config);
     let backend = Arc::new(VhostUserSoundBackend::new(config).unwrap());
 
@@ -346,11 +350,14 @@ pub fn start_backend_server(listener: &mut Listener, config: SoundConfig) {
         Arc::clone(&backend),
         GuestMemoryAtomic::new(GuestMemoryMmap::new()),
     )
-    .unwrap();
+    .map_err(|e| Error::CouldNotCreateDaemon(e.to_string()))?;
 
     log::trace!("Starting daemon.");
 
-    daemon.start(listener).unwrap();
+    daemon
+        .start(listener)
+        .map_err(|e| Error::ServeFailed(e.to_string()))?;
+
     let result = daemon.wait();
 
     backend.send_exit_event();
@@ -361,8 +368,10 @@ pub fn start_backend_server(listener: &mut Listener, config: SoundConfig) {
             vhost::vhost_user::Error::Disconnected | vhost::vhost_user::Error::PartialMessage
         ))
     ) {
-        result.unwrap();
+        return result.map_err(|e| Error::ServeFailed(e.to_string()));
     }
+    log::warn!("vhost-user connection closed, waiting for new connection");
+    Ok(())
 }
 
 #[cfg(test)]

@@ -24,7 +24,9 @@ fn main() {
     };
 
     loop {
-        start_backend_server(&mut listener, config.clone());
+        if let Err(e) = start_backend_server(&mut listener, config.clone()) {
+            log::error!("Error running vhost-device-sound backend: {}", e);
+        }
     }
 }
 

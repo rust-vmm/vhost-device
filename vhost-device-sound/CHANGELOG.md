@@ -31,6 +31,9 @@
 - [[#1011]](https://github.com/rust-vmm/vhost-device/pull/1011) pipewire: fix a deadlock when the guest opens or closes a stream
   while another stream is running.
 
+- [[#1015]](https://github.com/rust-vmm/vhost-device/pull/1015) pipewire: set `node.latency` to the guest's period size, so capture
+  with small periods no longer overruns.
+
 ### Deprecated
 
 ## v0.3.0

@@ -37,6 +37,7 @@ use thiserror::Error as ThisError;
 
 use super::AudioBackend;
 use crate::{
+    sample_bytes,
     stream::{Error as StreamError, PCMState},
     virtio_sound::{
         VirtioSndPcmSetParams, VIRTIO_SND_PCM_FMT_A_LAW, VIRTIO_SND_PCM_FMT_FLOAT,
@@ -357,10 +358,23 @@ impl AudioBackend for PwBackend {
                 Direction::Output => "audio-output",
             };
 
-            let props = properties! {
+            let mut props = properties! {
                 *pw::keys::MEDIA_TYPE => "Audio",
                 *pw::keys::MEDIA_CATEGORY => media_category,
             };
+            // Ask PipeWire for one guest period per cycle. Without this the
+            // stream runs at the graph's quantum (often 1024 frames). That can
+            // be the guest's whole buffer: a capture cycle then fills every
+            // queued request at once, the guest overruns and the rest of the
+            // cycle is dropped.
+            let frame_bytes = u32::from(params.channels) * sample_bytes(params.format);
+            let period_frames = params.period_bytes.to_native() / frame_bytes.max(1);
+            if period_frames > 0 {
+                props.insert(
+                    *pw::keys::NODE_LATENCY,
+                    format!("{period_frames}/{}", info.rate),
+                );
+            }
 
             let stream = pw::stream::StreamRc::new(self.core.clone(), stream_name, props)
                 .expect("could not create new stream");

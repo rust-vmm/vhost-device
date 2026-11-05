@@ -82,7 +82,7 @@ pub const VIRTIO_GPU_BIND_RENDER_TARGET: u32 = 2;
 pub const VIRTIO_GPU_MAX_SCANOUTS: u32 = 16;
 
 /// Limit on memory entries per resource to prevent excessive allocation
-pub const MAX_MEM_ENTRIES: u32 = 1024;
+pub const MAX_MEM_ENTRIES: u32 = 16384;
 
 /// `CHROMIUM(b/277982577)` success responses
 pub const VIRTIO_GPU_RESP_OK_RESOURCE_PLANE_INFO: u32 = 0x11FF;

@@ -451,6 +451,9 @@ impl VhostUserVsockThread {
                             if cnt > 0 {
                                 conn.fwd_cnt += Wrapping(cnt as u32);
                                 conn.rx_queue.enqueue(RxOps::CreditUpdate);
+                                self.thread_backend
+                                    .backend_rxq
+                                    .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
                             } else {
                                 // If no remaining data to flush, try to disable EPOLLOUT
                                 if Self::epoll_modify(epoll_fd, fd, epoll::Events::EPOLLIN).is_err()
@@ -458,9 +461,6 @@ impl VhostUserVsockThread {
                                     error!("Failed to disable EPOLLOUT");
                                 }
                             }
-                            self.thread_backend
-                                .backend_rxq
-                                .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
                         }
                         Err(e) => {
                             log::debug!("Error: {e:?}");

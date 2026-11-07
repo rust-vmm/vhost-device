@@ -144,6 +144,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                     // There is no host-side application listening for this
                     // packet, hence send back an RST.
                     pkt.set_op(VSOCK_OP_RST);
+                    self.rx_queue.enqueue(RxOps::Reset);
                     return Ok(());
                 }
 
@@ -163,19 +164,55 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                     .subslice(0, max_read_len)
                     .expect("subslicing should work since length was checked");
                 // Read data from the stream directly into the buffer
-                if let Ok(read_cnt) = self.stream.read_volatile(&mut buf) {
-                    if read_cnt == 0 {
-                        // If no data was read then the stream was closed down unexpectedly.
-                        // Send a shutdown packet to the guest-side application.
-                        pkt.set_op(VSOCK_OP_SHUTDOWN)
-                            .set_flag(VSOCK_FLAGS_SHUTDOWN_RCV)
-                            .set_flag(VSOCK_FLAGS_SHUTDOWN_SEND);
-                    } else {
-                        // If data was read, then set the length field in the packet header
-                        // to the amount of data that was read.
-                        pkt.set_op(VSOCK_OP_RW).set_len(read_cnt as u32);
+                match loop {
+                    match self.stream.read_volatile(&mut buf) {
+                        Err(vm_memory::VolatileMemoryError::IOError(err))
+                            if err.kind() == ErrorKind::Interrupted =>
+                        {
+                            continue;
+                        }
+                        res => break res,
+                    }
+                } {
+                    Ok(read_cnt) => {
+                        if read_cnt == 0 {
+                            // If no data was read then the stream was closed down unexpectedly.
+                            // Send a shutdown packet to the guest-side application.
+                            pkt.set_op(VSOCK_OP_SHUTDOWN)
+                                .set_flag(VSOCK_FLAGS_SHUTDOWN_RCV)
+                                .set_flag(VSOCK_FLAGS_SHUTDOWN_SEND);
+                        } else {
+                            // If data was read, then set the length field in the packet header
+                            // to the amount of data that was read.
+                            pkt.set_op(VSOCK_OP_RW).set_len(read_cnt as u32);
 
-                        // Re-register the stream file descriptor for read and write events
+                            // Re-register the stream file descriptor for read and write events
+                            if VhostUserVsockThread::epoll_modify(
+                                self.epoll_fd,
+                                self.stream.as_raw_fd(),
+                                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                            )
+                            .is_err()
+                            {
+                                if let Err(e) = VhostUserVsockThread::epoll_register(
+                                    self.epoll_fd,
+                                    self.stream.as_raw_fd(),
+                                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
+                                ) {
+                                    // TODO: let's move this logic out of this func, and handle it
+                                    // properly
+                                    error!("epoll_register failed: {e:?}, but proceed further.");
+                                }
+                            };
+                        }
+
+                        // Update the rx_cnt with the amount of data in the vsock packet.
+                        self.rx_cnt += Wrapping(pkt.len());
+                        self.last_fwd_cnt = self.fwd_cnt;
+                    }
+                    Err(vm_memory::VolatileMemoryError::IOError(err))
+                        if err.kind() == ErrorKind::WouldBlock =>
+                    {
                         if VhostUserVsockThread::epoll_modify(
                             self.epoll_fd,
                             self.stream.as_raw_fd(),
@@ -183,21 +220,19 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                         )
                         .is_err()
                         {
-                            if let Err(e) = VhostUserVsockThread::epoll_register(
+                            let _ = VhostUserVsockThread::epoll_register(
                                 self.epoll_fd,
                                 self.stream.as_raw_fd(),
                                 epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                            ) {
-                                // TODO: let's move this logic out of this func, and handle it
-                                // properly
-                                error!("epoll_register failed: {e:?}, but proceed further.");
-                            }
-                        };
+                            );
+                        }
+                        return Err(Error::NoRequestRx);
                     }
-
-                    // Update the rx_cnt with the amount of data in the vsock packet.
-                    self.rx_cnt += Wrapping(pkt.len());
-                    self.last_fwd_cnt = self.fwd_cnt;
+                    Err(err) => {
+                        log::debug!("Error reading data from stream: {err:?}");
+                        pkt.set_op(VSOCK_OP_RST);
+                        self.rx_queue.enqueue(RxOps::Reset);
+                    }
                 }
                 Ok(())
             }
@@ -233,9 +268,12 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             VSOCK_OP_RESPONSE => {
                 if self.stream.is_hybrid_vsock() {
                     // Confirmation for a host initiated connection
-                    // TODO: Handle stream write error in a better manner
                     let response = format!("OK {}\n", self.peer_port);
-                    self.stream.write_all(response.as_bytes()).unwrap();
+                    if let Err(err) = self.stream.write_all(response.as_bytes()) {
+                        log::debug!("Error writing confirmation to stream: {err:?}");
+                        self.rx_queue.enqueue(RxOps::Reset);
+                        return Ok(());
+                    }
                 }
                 self.connect = true;
                 if VhostUserVsockThread::epoll_register(
@@ -266,8 +304,8 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                     }
                     Some(buf) => {
                         if let Err(err) = self.send_bytes(buf) {
-                            // TODO: Terminate this connection
                             log::debug!("err:{err:?}");
+                            self.rx_queue.enqueue(RxOps::Reset);
                             return Ok(());
                         }
                     }
@@ -326,19 +364,21 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
         // Write data to the stream
 
-        let written_count = match self.stream.write_volatile(buf) {
-            Ok(cnt) => cnt,
-            Err(vm_memory::VolatileMemoryError::IOError(e)) => {
-                if e.kind() == ErrorKind::WouldBlock {
-                    0
-                } else {
+        let written_count = loop {
+            match self.stream.write_volatile(buf) {
+                Ok(cnt) => break cnt,
+                Err(vm_memory::VolatileMemoryError::IOError(e)) => match e.kind() {
+                    ErrorKind::Interrupted => continue,
+                    ErrorKind::WouldBlock => break 0,
+                    _ => {
+                        log::debug!("send_bytes error: {e:?}");
+                        return Err(Error::StreamWrite);
+                    }
+                },
+                Err(e) => {
                     log::debug!("send_bytes error: {e:?}");
                     return Err(Error::StreamWrite);
                 }
-            }
-            Err(e) => {
-                log::debug!("send_bytes error: {e:?}");
-                return Err(Error::StreamWrite);
             }
         };
 
@@ -783,6 +823,7 @@ mod tests {
         conn_local.rx_queue.enqueue(RxOps::Rw);
         let op_rst = conn_local.recv_pkt(&mut pkt);
         op_rst.unwrap();
+        assert_eq!(conn_local.rx_queue.dequeue(), Some(RxOps::Reset));
         assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(pkt.op(), VSOCK_OP_RST);
 

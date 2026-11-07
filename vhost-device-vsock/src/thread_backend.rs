@@ -258,6 +258,22 @@ impl VsockThreadBackend {
         !self.raw_pkts_queue.read().unwrap().is_empty()
     }
 
+    /// Remove a connection from all tracking maps and unregister its fd from epoll.
+    fn remove_conn(&mut self, key: &ConnMapKey) -> Option<VsockConnection<StreamType>> {
+        let conn = self.conn_map.remove(key)?;
+        let fd = conn.stream.as_raw_fd();
+        self.listener_map.remove(&fd);
+        self.stream_map.remove(&fd);
+        self.local_port_set.remove(&conn.local_port);
+        VhostUserVsockThread::epoll_unregister(conn.epoll_fd, fd).unwrap_or_else(|err| {
+            if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound) {
+                return;
+            }
+            warn!("Could not remove epoll listener for fd {fd:?}: {err:?}")
+        });
+        Some(conn)
+    }
+
     /// Deliver a vsock packet to the guest vsock driver.
     ///
     /// Returns:
@@ -274,24 +290,9 @@ impl VsockThreadBackend {
                 continue;
             }
 
-            if conn.rx_queue.peek() == Some(RxOps::Reset) {
+            if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
                 // Handle RST events here
-                let conn = self.conn_map.remove(&key).unwrap();
-                self.listener_map.remove(&conn.stream.as_raw_fd());
-                self.stream_map.remove(&conn.stream.as_raw_fd());
-                self.local_port_set.remove(&conn.local_port);
-                VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
-                    .unwrap_or_else(|err| {
-                        if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound)
-                        {
-                            return;
-                        }
-                        warn!(
-                            "Could not remove epoll listener for fd {:?}: {:?}",
-                            conn.stream.as_raw_fd(),
-                            err
-                        )
-                    });
+                let conn = self.remove_conn(&key).unwrap();
 
                 // Initialize the packet header to contain a VSOCK_OP_RST operation
                 pkt.set_op(VSOCK_OP_RST)
@@ -313,9 +314,13 @@ impl VsockThreadBackend {
 
             // A single backend_rxq entry may correspond to multiple coalesced
             // RxOps in conn.rx_queue (or recv_pkt may have enqueued a follow-up
-            // op), while recv_pkt only dequeues one operation per call. Re-queue
-            // the key if more operations remain pending.
-            if conn.rx_queue.pending_rx() {
+            // op), while recv_pkt only dequeues one operation per call. If
+            // recv_pkt enqueued Reset after writing a RST packet, remove the
+            // connection immediately; otherwise re-queue the key if more
+            // operations remain pending.
+            if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
+                self.remove_conn(&key);
+            } else if conn.rx_queue.pending_rx() {
                 self.backend_rxq.push_back(key);
             }
 
@@ -410,21 +415,7 @@ impl VsockThreadBackend {
             if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
                 return Ok(());
             }
-            let conn = self.conn_map.remove(&key).unwrap();
-            self.listener_map.remove(&conn.stream.as_raw_fd());
-            self.stream_map.remove(&conn.stream.as_raw_fd());
-            self.local_port_set.remove(&conn.local_port);
-            VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
-                .unwrap_or_else(|err| {
-                    if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound) {
-                        return;
-                    }
-                    warn!(
-                        "Could not remove epoll listener for fd {:?}: {:?}",
-                        conn.stream.as_raw_fd(),
-                        err
-                    )
-                });
+            self.remove_conn(&key);
             return Ok(());
         }
 

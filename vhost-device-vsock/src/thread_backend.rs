@@ -596,7 +596,37 @@ mod tests {
         vtp.send_pkt(&packet).unwrap();
 
         packet.set_op(VSOCK_OP_REQUEST);
+        packet.set_buf_alloc(CONN_TX_BUF_SIZE);
         vtp.send_pkt(&packet).unwrap();
+
+        // Push a stale key ahead of the active connection and queue both a
+        // WouldBlock RxOps::Rw and a valid RxOps::CreditUpdate alongside the
+        // pending RxOps::Response while keeping a single entry for the active
+        // connection in backend_rxq. recv_pkt must skip the stale key, re-queue
+        // the active key when RxOps::Rw returns NoRequestRx (WouldBlock), and
+        // then deliver VSOCK_OP_RESPONSE and VSOCK_OP_CREDIT_UPDATE.
+        let key = ConnMapKey::new(VSOCK_PEER_PORT, 0);
+        {
+            let conn = vtp.conn_map.get_mut(&key).unwrap();
+            conn.connect = true;
+            conn.rx_queue.enqueue(RxOps::Rw);
+            conn.rx_queue.enqueue(RxOps::CreditUpdate);
+        }
+        vtp.backend_rxq.push_front(ConnMapKey::new(9999, 9999));
+
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert_eq!(packet.op(), crate::vhu_vsock::VSOCK_OP_RESPONSE);
+        assert!(vtp.pending_rx());
+
+        vtp.recv_pkt(&mut packet).unwrap();
+        assert_eq!(packet.op(), crate::vhu_vsock::VSOCK_OP_CREDIT_UPDATE);
+        assert!(!vtp.pending_rx());
+
+        // Restore packet fields overwritten by recv_pkt for subsequent send_pkt calls.
+        packet.set_src_cid(CID);
+        packet.set_dst_cid(VSOCK_HOST_CID);
+        packet.set_src_port(0);
+        packet.set_dst_port(VSOCK_PEER_PORT);
 
         packet.set_op(VSOCK_OP_RW);
         vtp.send_pkt(&packet).unwrap();

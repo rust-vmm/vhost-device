@@ -452,9 +452,11 @@ mod tests {
         collections::VecDeque,
         io::{Read, Result as IoResult},
         ops::Deref,
+        os::unix::net::UnixStream,
         sync::{Arc, Mutex},
     };
 
+    use assert_matches::assert_matches;
     use byteorder::{ByteOrder, LittleEndian};
     use virtio_bindings::bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use virtio_queue::{
@@ -885,6 +887,24 @@ mod tests {
         // non-existent request
         let op_error = conn_local.recv_pkt(&mut pkt);
         assert!(op_error.is_err());
+
+        // WouldBlock on nonblocking stream must return Err(Error::NoRequestRx)
+        // rather than returning Ok(()) with a zeroed packet header (op = 0).
+        let (_host_unix, backend_unix) = UnixStream::pair().unwrap();
+        backend_unix.set_nonblocking(true).unwrap();
+        let mut conn_nonblocking = VsockConnection::new_local_init(
+            crate::thread_backend::StreamType::Unix(backend_unix),
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
+        conn_nonblocking.connect = true;
+        conn_nonblocking.peer_buf_alloc = 65536;
+        conn_nonblocking.rx_queue.enqueue(RxOps::Rw);
+        assert_matches!(conn_nonblocking.recv_pkt(&mut pkt), Err(Error::NoRequestRx));
     }
 
     #[test]
@@ -952,5 +972,30 @@ mod tests {
         let shutdown_response = conn_local.send_pkt(&pkt);
         shutdown_response.unwrap();
         assert!(conn_local.rx_queue.contains(RxOps::Reset.bitmask()));
+
+        // VSOCK_OP_RESPONSE when host peer closed before guest accepted:
+        // must enqueue RxOps::Reset instead of panicking on BrokenPipe.
+        let (host_unix, backend_unix) = UnixStream::pair().unwrap();
+        drop(host_unix);
+        let mut conn_aborted = VsockConnection::new_local_init(
+            crate::thread_backend::StreamType::Unix(backend_unix),
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
+        pkt.set_op(VSOCK_OP_RESPONSE);
+        conn_aborted.send_pkt(&pkt).unwrap();
+        assert!(!conn_aborted.connect);
+        assert!(conn_aborted.rx_queue.contains(RxOps::Reset.bitmask()));
+
+        // VSOCK_OP_RW when host peer closed: send_bytes failure must enqueue
+        // RxOps::Reset so the connection is terminated and cleaned up.
+        let _ = conn_aborted.rx_queue.dequeue();
+        pkt.set_op(VSOCK_OP_RW);
+        conn_aborted.send_pkt(&pkt).unwrap();
+        assert!(conn_aborted.rx_queue.contains(RxOps::Reset.bitmask()));
     }
 }

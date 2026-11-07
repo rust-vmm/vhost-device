@@ -1103,6 +1103,15 @@ mod tests {
 
         t.mem = Some(mem.clone());
 
+        // A host client that disconnects before sending "connect PORT\n" must
+        // be removed from stream_map rather than leaking its fd.
+        let uds_aborted = UnixStream::connect(&vsock_path).unwrap();
+        t.process_backend_evt(EventSet::empty());
+        assert_eq!(t.thread_backend.stream_map.len(), 1);
+        drop(uds_aborted);
+        t.process_backend_evt(EventSet::empty());
+        assert!(t.thread_backend.stream_map.is_empty());
+
         let mut uds = UnixStream::connect(vsock_path).unwrap();
         t.process_backend_evt(EventSet::empty());
 

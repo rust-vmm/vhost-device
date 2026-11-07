@@ -388,11 +388,10 @@ impl VhostUserVsockThread {
             if let std::collections::hash_map::Entry::Vacant(_) =
                 self.thread_backend.listener_map.entry(fd)
             {
-                // New connection from the host
-                if evset.bits() != epoll::Events::EPOLLIN.bits() {
-                    // Has to be EPOLLIN as it was not connected previously
-                    return;
-                }
+                // New connection from the host. Remove the stream from
+                // stream_map first so its fd is closed on any early return
+                // (e.g. if the peer disconnected with EPOLLHUP before sending
+                // "connect PORT\n").
                 let mut stream = match self.thread_backend.stream_map.remove(&fd) {
                     Some(s) => s,
                     None => {
@@ -400,6 +399,11 @@ impl VhostUserVsockThread {
                         return;
                     }
                 };
+                if !evset.contains(epoll::Events::EPOLLIN) {
+                    // Has to include EPOLLIN as it was not connected previously
+                    let _ = Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd);
+                    return;
+                }
 
                 match stream {
                     #[cfg(feature = "backend_vsock")]
@@ -412,6 +416,7 @@ impl VhostUserVsockThread {
                             Ok(port) => port,
                             Err(err) => {
                                 warn!("Error while parsing \"connect PORT\n\" command: {err:?}");
+                                let _ = Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd);
                                 return;
                             }
                         };
@@ -421,6 +426,7 @@ impl VhostUserVsockThread {
                             Ok(lp) => lp,
                             Err(err) => {
                                 warn!("Error while allocating local port: {err:?}");
+                                let _ = Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd);
                                 return;
                             }
                         };

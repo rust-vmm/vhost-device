@@ -6,8 +6,10 @@
 // SPDX-License-Identifier: Apache-2.0 or BSD-3-Clause
 
 use std::{
+    os::fd::{AsRawFd, RawFd},
     sync::{Arc, RwLock},
-    thread::{spawn, JoinHandle},
+    thread::{sleep, spawn, JoinHandle},
+    time::Duration,
 };
 
 use log::{info, trace, warn};
@@ -27,6 +29,10 @@ use crate::virtio_can::{
 };
 
 type Result<T> = std::result::Result<T, Error>;
+
+// How long the reader thread waits for a frame before it re-checks whether it
+// has to exit. It bounds the time the thread needs to stop.
+const READ_POLL_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[derive(Copy, Clone, Debug, PartialEq, ThisError)]
 /// Errors related to low level can helpers
@@ -72,6 +78,15 @@ impl CanSocketKind {
             // emulate what recv() returns when empty,
             // which is always the case for the Mock interface
             CanSocketKind::Mock => Err(std::io::ErrorKind::WouldBlock.into()),
+        }
+    }
+
+    // The mock has no file descriptor to wait on.
+    fn raw_fd(&self) -> Option<RawFd> {
+        match self {
+            CanSocketKind::Fd(socket) => Some(socket.as_raw_fd()),
+            #[cfg(test)]
+            CanSocketKind::Mock => None,
         }
     }
 }
@@ -207,7 +222,32 @@ impl CanController {
         }
     }
 
+    // Wait until `fd` is readable or `READ_POLL_TIMEOUT` has passed, without
+    // holding the controller lock so that the TX path and the exit request are
+    // not blocked meanwhile.
+    fn wait_readable(fd: Option<RawFd>) {
+        let Some(fd) = fd else {
+            sleep(READ_POLL_TIMEOUT);
+            return;
+        };
+
+        let mut pollfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `pollfd` is a valid pointer to exactly one `libc::pollfd`.
+        let ret = unsafe { libc::poll(&mut pollfd, 1, READ_POLL_TIMEOUT.as_millis() as i32) };
+        // Do not spin if poll() fails for a reason other than a signal.
+        if ret < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            sleep(READ_POLL_TIMEOUT);
+        }
+    }
+
     pub fn read_can_socket(controller: Arc<RwLock<CanController>>) -> Result<()> {
+        // The socket is never replaced while the controller is alive.
+        let fd = controller.read().unwrap().can_socket.raw_fd();
+
         // Receive CAN messages
         loop {
             // If the status variable is false then break and exit.
@@ -215,6 +255,10 @@ impl CanController {
                 log::debug!("exit read can thread");
                 return Ok(());
             }
+
+            // The socket is non-blocking: wait for a frame, but only for a
+            // while, so that the status is checked again.
+            Self::wait_readable(fd);
 
             let frame_result = {
                 let ctrl = controller.read().unwrap();

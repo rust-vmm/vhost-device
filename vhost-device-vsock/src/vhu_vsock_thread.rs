@@ -458,6 +458,7 @@ impl VhostUserVsockThread {
                                     error!("Failed to disable EPOLLOUT");
                                 }
                             }
+                            conn.shutdown_write_once_drained();
                             self.thread_backend
                                 .backend_rxq
                                 .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));

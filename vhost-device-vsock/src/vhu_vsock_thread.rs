@@ -14,7 +14,9 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use log::{error, warn};
+#[cfg(feature = "backend_vsock")]
+use log::error;
+use log::warn;
 use vhost_user_backend::{VringEpollHandler, VringRwLock, VringState, VringT};
 use virtio_queue::{QueueOwnedT, QueueT};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
@@ -400,46 +402,46 @@ impl VhostUserVsockThread {
                 }
             } else {
                 // Previously connected connection
+                let key = self.thread_backend.listener_map.get(&fd).unwrap().clone();
+                let conn = self.thread_backend.conn_map.get_mut(&key).unwrap();
 
-                // Get epoll fd before getting conn as that takes self mut ref
-                let epoll_fd = self.get_epoll_fd();
-                let key = self.thread_backend.listener_map.get(&fd).unwrap();
-                let conn = self.thread_backend.conn_map.get_mut(key).unwrap();
-
-                if evset.bits() == epoll::Events::EPOLLOUT.bits() {
+                if evset.contains(epoll::Events::EPOLLOUT)
+                    || (conn.tx_epoll_enabled
+                        && evset.intersects(epoll::Events::EPOLLHUP | epoll::Events::EPOLLERR))
+                {
                     // Flush any remaining data from the tx buffer
                     match conn.tx_buf.flush_to(&mut conn.stream) {
                         Ok(cnt) => {
                             if cnt > 0 {
                                 conn.fwd_cnt += Wrapping(cnt as u32);
                                 conn.rx_queue.enqueue(RxOps::CreditUpdate);
-                            } else {
-                                // If no remaining data to flush, try to disable EPOLLOUT
-                                if Self::epoll_modify(epoll_fd, fd, epoll::Events::EPOLLIN).is_err()
-                                {
-                                    error!("Failed to disable EPOLLOUT");
-                                }
                             }
-                            self.thread_backend
-                                .backend_rxq
-                                .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
+                            if conn.tx_buf.is_empty() {
+                                conn.update_epoll(conn.rx_epoll_enabled, false);
+                            }
                         }
+                        Err(Error::LocalTxBufFlush(ref e))
+                            if e.kind() == std::io::ErrorKind::WouldBlock
+                                || e.kind() == std::io::ErrorKind::Interrupted => {}
                         Err(e) => {
                             log::debug!("Error: {e:?}");
+                            conn.update_epoll(false, false);
+                            conn.rx_queue.enqueue(RxOps::Reset);
                         }
                     }
-                    return;
                 }
 
-                // Unregister stream from the epoll, register when connection is
-                // established with the guest
-                Self::epoll_unregister(self.epoll_file.as_raw_fd(), fd).unwrap();
+                if conn.rx_epoll_enabled
+                    && evset.intersects(
+                        epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP | epoll::Events::EPOLLERR,
+                    )
+                {
+                    conn.rx_queue.enqueue(RxOps::Rw);
+                }
 
-                // Enqueue a read request
-                conn.rx_queue.enqueue(RxOps::Rw);
-                self.thread_backend
-                    .backend_rxq
-                    .push_back(ConnMapKey::new(conn.local_port, conn.peer_port));
+                if conn.rx_queue.pending_rx() {
+                    self.thread_backend.push_backend_rxq(key);
+                }
             }
         }
     }
@@ -472,11 +474,11 @@ impl VhostUserVsockThread {
         new_conn.set_peer_port(peer_port);
 
         // Add connection object into the backend's maps
-        self.thread_backend.conn_map.insert(conn_map_key, new_conn);
-
         self.thread_backend
-            .backend_rxq
-            .push_back(ConnMapKey::new(local_port, peer_port));
+            .conn_map
+            .insert(conn_map_key.clone(), new_conn);
+
+        self.thread_backend.push_backend_rxq(conn_map_key);
     }
 
     /// Allocate a new local port number.
@@ -639,6 +641,9 @@ impl VhostUserVsockThread {
             }
         } else {
             self.process_rx_queue(vring, RxQueueType::Standard)?;
+        }
+        if self.thread_backend.pending_rx() {
+            self.thread_backend.mute_pending_rx_epoll();
         }
         Ok(())
     }

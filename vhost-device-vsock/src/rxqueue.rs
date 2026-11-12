@@ -19,6 +19,11 @@ impl RxQueue {
         self.queue |= op.bitmask();
     }
 
+    /// Remove a specific rx operation from the queue.
+    pub fn remove(&mut self, op: RxOps) {
+        self.queue &= !op.bitmask();
+    }
+
     /// Dequeue an rx operation from the queue.
     pub fn dequeue(&mut self) -> Option<RxOps> {
         match self.peek() {
@@ -103,6 +108,9 @@ mod tests {
 
         rxqueue.enqueue(RxOps::Reset);
         assert!(rxqueue.contains(RxOps::Reset.bitmask()));
+
+        rxqueue.remove(RxOps::CreditUpdate);
+        assert!(!rxqueue.contains(RxOps::CreditUpdate.bitmask()));
     }
 
     #[test]

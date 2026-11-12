@@ -11,15 +11,11 @@ use std::{
         net::{UnixListener, UnixStream},
         prelude::{AsRawFd, FromRawFd, RawFd},
     },
-    sync::{
-        mpsc::{self, Sender},
-        Arc, RwLock,
-    },
-    thread,
+    sync::{Arc, RwLock},
 };
 
 use log::{error, warn};
-use vhost_user_backend::{VringEpollHandler, VringRwLock, VringT};
+use vhost_user_backend::{VringEpollHandler, VringRwLock, VringState, VringT};
 use virtio_queue::{QueueOwnedT, QueueT};
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
@@ -47,14 +43,6 @@ enum RxQueueType {
     RawPkts,
 }
 
-// Data which is required by a worker handling event idx.
-struct EventData {
-    vring: VringRwLock,
-    event_idx: bool,
-    head_idx: u16,
-    used_len: usize,
-}
-
 enum ListenerType {
     Unix(UnixListener),
     #[cfg(feature = "backend_vsock")]
@@ -75,8 +63,6 @@ pub(crate) struct VhostUserVsockThread {
     pub thread_backend: VsockThreadBackend,
     /// CID of the guest.
     guest_cid: u64,
-    /// Channel to a worker which handles event idx.
-    sender: Sender<EventData>,
     /// host side port on which application listens.
     local_port: Wrapping<u32>,
     /// The tx buffer size
@@ -156,15 +142,6 @@ impl VhostUserVsockThread {
                 (None, groups_set, sibling_event_fd.try_clone().unwrap()),
             );
         }
-        let (sender, receiver) = mpsc::channel::<EventData>();
-        thread::spawn(move || loop {
-            // TODO: Understand why doing the following in the background thread works.
-            // maybe we'd better have thread pool for the entire application if necessary.
-            let Ok(event_data) = receiver.recv() else {
-                break;
-            };
-            Self::vring_handle_event(event_data);
-        });
 
         let thread = VhostUserVsockThread {
             mem: None,
@@ -174,7 +151,6 @@ impl VhostUserVsockThread {
             epoll_file,
             thread_backend,
             guest_cid,
-            sender,
             local_port: Wrapping(0),
             tx_buffer_size,
             sibling_event_fd,
@@ -189,35 +165,21 @@ impl VhostUserVsockThread {
         Ok(thread)
     }
 
-    fn vring_handle_event(event_data: EventData) {
-        if event_data.event_idx {
-            if event_data
-                .vring
-                .add_used(event_data.head_idx, event_data.used_len as u32)
-                .is_err()
-            {
-                warn!("Could not return used descriptors to ring");
-            }
-            match event_data.vring.needs_notification() {
+    fn signal_used_vring(vring_mut: &mut VringState, event_idx: bool) {
+        if event_idx {
+            match vring_mut.needs_notification() {
                 Err(_) => {
                     warn!("Could not check if queue needs to be notified");
-                    event_data.vring.signal_used_queue().unwrap();
+                    vring_mut.signal_used_queue().unwrap();
                 }
                 Ok(needs_notification) => {
                     if needs_notification {
-                        event_data.vring.signal_used_queue().unwrap();
+                        vring_mut.signal_used_queue().unwrap();
                     }
                 }
             }
         } else {
-            if event_data
-                .vring
-                .add_used(event_data.head_idx, event_data.used_len as u32)
-                .is_err()
-            {
-                warn!("Could not return used descriptors to ring");
-            }
-            event_data.vring.signal_used_queue().unwrap();
+            vring_mut.signal_used_queue().unwrap();
         }
     }
     /// Register a file with an epoll to listen for events in evset.
@@ -595,6 +557,7 @@ impl VhostUserVsockThread {
 
         let mut vring_mut = vring.get_mut();
         let queue = vring_mut.get_queue_mut();
+        let mut used_any = false;
 
         while let Some(mut avail_desc) = queue
             .iter(atomic_mem.memory())
@@ -628,16 +591,13 @@ impl VhostUserVsockThread {
                 }
             };
 
-            let vring = vring.clone();
-            let event_idx = self.event_idx;
-            self.sender
-                .send(EventData {
-                    vring,
-                    event_idx,
-                    head_idx,
-                    used_len,
-                })
-                .unwrap();
+            if queue
+                .add_used(mem.deref(), head_idx, used_len as u32)
+                .is_err()
+            {
+                warn!("Could not return used descriptors to ring");
+            }
+            used_any = true;
 
             match rx_queue_type {
                 RxQueueType::Standard => {
@@ -651,6 +611,9 @@ impl VhostUserVsockThread {
                     }
                 }
             }
+        }
+        if used_any {
+            Self::signal_used_vring(&mut vring_mut, self.event_idx);
         }
         Ok(())
     }
@@ -741,9 +704,11 @@ impl VhostUserVsockThread {
             None => return Err(Error::NoMemoryConfigured),
         };
 
-        while let Some(mut avail_desc) = vring
-            .get_mut()
-            .get_queue_mut()
+        let mut vring_mut = vring.get_mut();
+        let queue = vring_mut.get_queue_mut();
+        let mut used_any = false;
+
+        while let Some(mut avail_desc) = queue
             .iter(atomic_mem.memory())
             .map_err(|_| Error::IterateQueue)?
             .next()
@@ -765,12 +730,7 @@ impl VhostUserVsockThread {
 
             if self.active {
                 if self.thread_backend.send_pkt(&pkt).is_err() {
-                    vring
-                        .get_mut()
-                        .get_queue_mut()
-                        .iter(mem)
-                        .unwrap()
-                        .go_to_previous_position();
+                    queue.iter(mem).unwrap().go_to_previous_position();
                     break;
                 }
             } else {
@@ -782,16 +742,16 @@ impl VhostUserVsockThread {
             // TODO: Check if the protocol requires read length to be correct
             let used_len = 0;
 
-            let vring = vring.clone();
-            let event_idx = self.event_idx;
-            self.sender
-                .send(EventData {
-                    vring,
-                    event_idx,
-                    head_idx,
-                    used_len,
-                })
-                .unwrap();
+            if queue
+                .add_used(mem.deref(), head_idx, used_len as u32)
+                .is_err()
+            {
+                warn!("Could not return used descriptors to ring");
+            }
+            used_any = true;
+        }
+        if used_any {
+            Self::signal_used_vring(&mut vring_mut, self.event_idx);
         }
 
         Ok(())
@@ -853,14 +813,13 @@ impl VhostUserVsockThread {
         writer
             .write_all(&VSOCK_EVENT_TRANSPORT_RESET.to_le_bytes())
             .map_err(|_| Error::EventQueueWrite)?;
-        self.sender
-            .send(EventData {
-                vring: vring.clone(),
-                event_idx,
-                head_idx,
-                used_len: std::mem::size_of::<u32>(),
-            })
-            .unwrap();
+        if queue
+            .add_used(mem.deref(), head_idx, std::mem::size_of::<u32>() as u32)
+            .is_err()
+        {
+            warn!("Could not return used descriptors to ring");
+        }
+        Self::signal_used_vring(&mut vring_mut, event_idx);
 
         Ok(true)
     }
@@ -960,18 +919,13 @@ mod tests {
         t.process_raw_pkts(&vring, false).unwrap();
         t.process_raw_pkts(&vring, true).unwrap();
 
-        VhostUserVsockThread::vring_handle_event(EventData {
-            vring: vring.clone(),
-            event_idx: false,
-            head_idx: 0,
-            used_len: 0,
-        });
-        VhostUserVsockThread::vring_handle_event(EventData {
-            vring,
-            event_idx: true,
-            head_idx: 0,
-            used_len: 0,
-        });
+        {
+            let mut vring_mut = vring.get_mut();
+            let _ = vring_mut.add_used(0, 0);
+            VhostUserVsockThread::signal_used_vring(&mut vring_mut, false);
+            let _ = vring_mut.add_used(0, 0);
+            VhostUserVsockThread::signal_used_vring(&mut vring_mut, true);
+        }
 
         dummy_fd.write(1).unwrap();
 

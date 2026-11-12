@@ -6,6 +6,7 @@
 - [#936](https://github.com/rust-vmm/vhost-device/pull/936) vsock: Enable live migrations (snapshot-restore)
 
 ### Changed
+- vsock: Increase default TX buffer size to 256 KiB
 
 ### Fixed
 - [#992](https://github.com/rust-vmm/vhost-device/pull/992) vsock: forward-listen stream polling after guest accepts

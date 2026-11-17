@@ -449,6 +449,12 @@ impl VhostUserBackendMut for VuScmiBackend {
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 
+    fn acked_features(&mut self, features: u64) {
+        debug!("Acked features: {features:#x}");
+        let p2a_negotiated = features & (1 << VIRTIO_SCMI_F_P2A_CHANNELS) != 0;
+        self.scmi_handler.set_p2a_negotiated(p2a_negotiated);
+    }
+
     fn protocol_features(&self) -> VhostUserProtocolFeatures {
         debug!("Protocol features called");
         VhostUserProtocolFeatures::MQ

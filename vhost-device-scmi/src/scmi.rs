@@ -298,6 +298,7 @@ struct HandlerInfo {
     name: String,
     parameters: ParameterSpecification,
     function: HandlerFunction,
+    requires_p2a: bool,
 }
 
 /// Mapping of SCMI protocols and messages to handlers.
@@ -320,6 +321,11 @@ impl HandlerMap {
 
     fn get(&self, protocol_id: ProtocolId, message_id: MessageId) -> Option<&HandlerInfo> {
         self.0.get(&(protocol_id, message_id))
+    }
+
+    fn requires_p2a(&self, protocol_id: ProtocolId, message_id: MessageId) -> bool {
+        self.get(protocol_id, message_id)
+            .is_some_and(|info| info.requires_p2a)
     }
 
     /// Add a handler for a SCMI protocol message.
@@ -347,8 +353,27 @@ impl HandlerMap {
                 name: name.to_string(),
                 parameters,
                 function,
+                requires_p2a: false,
             },
         );
+    }
+
+    /// Like [HandlerMap::bind], but for a message that is a notification
+    /// request (or a delayed response request), which must be denied unless
+    /// `VIRTIO_SCMI_F_P2A_CHANNELS` was negotiated.
+    fn bind_requiring_p2a(
+        &mut self,
+        protocol_id: ProtocolId,
+        message_id: MessageId,
+        name: &str,
+        parameters: ParameterSpecification,
+        function: HandlerFunction,
+    ) {
+        self.bind(protocol_id, message_id, name, parameters, function);
+        self.0
+            .get_mut(&(protocol_id, message_id))
+            .unwrap()
+            .requires_p2a = true;
     }
 
     /// Adds SCMI base protocol handlers.
@@ -537,7 +562,7 @@ impl HandlerMap {
         );
 
         // Linux VIRTIO SCMI seems to insist on presence of this:
-        self.bind(
+        self.bind_requiring_p2a(
             SENSOR_PROTOCOL_ID,
             SENSOR_CONTINUOUS_UPDATE_NOTIFY,
             "sensor/continuous_update_notify",
@@ -701,6 +726,7 @@ pub struct ScmiHandler {
     handlers: HandlerMap,
     devices: DeviceMap,
     event_fds: EventfdMap,
+    p2a_negotiated: bool,
 }
 
 impl ScmiHandler {
@@ -716,7 +742,18 @@ impl ScmiHandler {
             handlers: HandlerMap::new(),
             devices: DeviceMap::new(),
             event_fds: EventfdMap::new(),
+            p2a_negotiated: false,
         }
+    }
+
+    /// Called whenever the driver (re-)acknowledges virtio features, so that
+    /// command handling can be gated on whether the P2A (platform-to-agent)
+    /// channels were actually negotiated.
+    pub fn set_p2a_negotiated(&mut self, negotiated: bool) {
+        if self.p2a_negotiated != negotiated {
+            debug!("P2A channels negotiated: {negotiated}");
+        }
+        self.p2a_negotiated = negotiated;
     }
 
     fn request_handler(&self, request: &ScmiRequest) -> Option<&HandlerInfo> {
@@ -727,6 +764,20 @@ impl ScmiHandler {
         let response = match request.message_type {
             MessageType::Command => match self.request_handler(&request) {
                 Some(info) => {
+                    if self
+                        .handlers
+                        .requires_p2a(request.protocol_id, request.message_id)
+                        && !self.p2a_negotiated
+                    {
+                        warn!(
+                            "Rejecting {} because VIRTIO_SCMI_F_P2A_CHANNELS was not negotiated",
+                            info.name
+                        );
+                        return ScmiResponse::from(
+                            request.header,
+                            Response::from(ReturnStatus::NotSupported),
+                        );
+                    }
                     debug!(
                         "Calling handler for {}({:?})",
                         info.name,
@@ -950,8 +1001,19 @@ impl ScmiHandler {
         if message_id.is_err() {
             return Response::from(ReturnStatus::InvalidParameters);
         }
-        match self.handlers.get(request.protocol_id, message_id.unwrap()) {
-            Some(_) => Response::from(MessageValue::Unsigned(0)),
+        let queried_message_id = message_id.unwrap();
+        match self.handlers.get(request.protocol_id, queried_message_id) {
+            Some(_) => {
+                if self
+                    .handlers
+                    .requires_p2a(request.protocol_id, queried_message_id)
+                    && !self.p2a_negotiated
+                {
+                    Response::from(ReturnStatus::NotFound)
+                } else {
+                    Response::from(MessageValue::Unsigned(0))
+                }
+            }
             None => Response::from(ReturnStatus::NotFound),
         }
     }
@@ -1323,6 +1385,40 @@ mod tests {
     }
 
     #[test]
+    fn test_sensor_message_attributes_notify_without_p2a() {
+        let mut handler = make_handler();
+        let parameters = vec![MessageValue::Unsigned(u32::from(
+            SENSOR_CONTINUOUS_UPDATE_NOTIFY,
+        ))];
+        test_message_with_handler(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::NotFound,
+            vec![],
+            &mut handler,
+        );
+    }
+
+    #[test]
+    fn test_sensor_message_attributes_notify_with_p2a() {
+        let mut handler = make_handler();
+        handler.set_p2a_negotiated(true);
+        let parameters = vec![MessageValue::Unsigned(u32::from(
+            SENSOR_CONTINUOUS_UPDATE_NOTIFY,
+        ))];
+        let result = vec![MessageValue::Unsigned(0)];
+        test_message_with_handler(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_MESSAGE_ATTRIBUTES,
+            parameters,
+            ReturnStatus::Success,
+            result,
+            &mut handler,
+        );
+    }
+
+    #[test]
     fn test_sensor_protocol_message_attributes_invalid() {
         let parameters = vec![MessageValue::Unsigned(0x100)];
         test_message(
@@ -1497,6 +1593,7 @@ mod tests {
             MessageValue::Unsigned(notify_enabled_flag),
         ];
         let result = vec![MessageValue::Unsigned(notify_enabled_flag)];
+        handler.set_p2a_negotiated(true);
         test_message_with_handler(
             SENSOR_PROTOCOL_ID,
             SENSOR_CONTINUOUS_UPDATE_NOTIFY,
@@ -1512,6 +1609,20 @@ mod tests {
         let mut handler = make_handler();
         check_notify_enabled(0, true, &mut handler);
         check_notify_enabled(0, false, &mut handler)
+    }
+
+    #[test]
+    fn test_sensor_continuous_update_notify_without_p2a() {
+        let mut handler = make_handler();
+        let parameters = vec![MessageValue::Unsigned(0), MessageValue::Unsigned(1)];
+        test_message_with_handler(
+            SENSOR_PROTOCOL_ID,
+            SENSOR_CONTINUOUS_UPDATE_NOTIFY,
+            parameters,
+            ReturnStatus::NotSupported,
+            vec![],
+            &mut handler,
+        );
     }
 
     #[test]

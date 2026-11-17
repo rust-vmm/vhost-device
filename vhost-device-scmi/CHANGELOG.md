@@ -7,6 +7,8 @@
 
 ### Fixed
 
+- [[#1024]](https://github.com/rust-vmm/vhost-device/pull/1024) scmi: deny notification requests without P2A channels
+
 ### Deprecated
 
 ## v0.4.0

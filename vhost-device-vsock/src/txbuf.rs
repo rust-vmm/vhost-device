@@ -10,6 +10,8 @@ use crate::vhu_vsock::{Error, Result};
 pub(crate) struct LocalTxBuf {
     /// Buffer holding data to be forwarded to a host-side application
     buf: Vec<u8>,
+    /// Configured capacity of the buffer
+    buf_size: u32,
     /// Index into buffer from which data can be consumed from the buffer
     head: Wrapping<u32>,
     /// Index into buffer from which data can be added to the buffer
@@ -20,7 +22,8 @@ impl LocalTxBuf {
     /// Create a new instance of LocalTxBuf.
     pub fn new(buf_size: u32) -> Self {
         Self {
-            buf: vec![0; buf_size as usize],
+            buf: Vec::new(),
+            buf_size,
             head: Wrapping(0),
             tail: Wrapping(0),
         }
@@ -28,7 +31,7 @@ impl LocalTxBuf {
 
     /// Get the buffer size
     pub fn get_buf_size(&self) -> u32 {
-        self.buf.len() as u32
+        self.buf_size
     }
 
     /// Check if the buf is empty.
@@ -39,9 +42,17 @@ impl LocalTxBuf {
     /// Add new data to the tx buffer, push all or none.
     /// Returns LocalTxBufFull error if space not sufficient.
     pub fn push<B: BitmapSlice>(&mut self, data_buf: &VolatileSlice<B>) -> Result<()> {
+        if data_buf.is_empty() {
+            return Ok(());
+        }
+
         if self.get_buf_size() as usize - self.len() < data_buf.len() {
             // Tx buffer is full
             return Err(Error::LocalTxBufFull);
+        }
+
+        if self.buf.is_empty() {
+            self.buf.resize(self.buf_size as usize, 0);
         }
 
         // Get index into buffer at which data can be inserted
@@ -145,6 +156,13 @@ mod tests {
         // SAFETY: Safe as the buffer is guaranteed to be valid here.
         let data = unsafe { VolatileSlice::new(buf.as_mut_ptr(), buf.len()) };
 
+        // push empty slice should be a no-op and keep buffer unallocated
+        let mut empty_buf = [0u8; 0];
+        // SAFETY: Safe as empty_buf is valid.
+        let empty_data = unsafe { VolatileSlice::new(empty_buf.as_mut_ptr(), 0) };
+        loc_tx_buf.push(&empty_data).unwrap();
+        assert!(loc_tx_buf.buf.is_empty());
+
         // push data into empty tx buffer
         let res_push = loc_tx_buf.push(&data);
         res_push.unwrap();
@@ -242,7 +260,7 @@ mod tests {
 
         assert_eq!(
             format!("{loc_tx_buf:?}"),
-            "LocalTxBuf { buf: [0], head: 0, tail: 0 }"
+            "LocalTxBuf { buf: [], buf_size: 1, head: 0, tail: 0 }"
         );
     }
 }

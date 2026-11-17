@@ -253,6 +253,27 @@ impl VsockThreadBackend {
         !self.backend_rxq.is_empty()
     }
 
+    /// Push a connection key to backend_rxq if not already queued.
+    pub fn push_backend_rxq(&mut self, key: ConnMapKey) {
+        if let Some(conn) = self.conn_map.get_mut(&key) {
+            if !conn.in_backend_rxq {
+                conn.in_backend_rxq = true;
+                self.backend_rxq.push_back(key);
+            }
+        }
+    }
+
+    /// Mute EPOLLIN on connections that still have pending RX ops when guest RX vring is full.
+    pub fn mute_pending_rx_epoll(&mut self) {
+        for key in &self.backend_rxq {
+            if let Some(conn) = self.conn_map.get_mut(key) {
+                if conn.rx_queue.contains(RxOps::Rw.bitmask()) {
+                    conn.update_epoll(false, conn.tx_epoll_enabled);
+                }
+            }
+        }
+    }
+
     /// Checks if there are pending raw vsock packets to be sent to the guest.
     pub fn pending_raw_pkts(&self) -> bool {
         !self.raw_pkts_queue.read().unwrap().is_empty()
@@ -264,53 +285,64 @@ impl VsockThreadBackend {
     /// - `Ok(())` if the packet was successfully filled in
     /// - `Err(Error::EmptyBackendRxQ) if there was no available data
     pub fn recv_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
-        // Pop an event from the backend_rxq
-        let key = self.backend_rxq.pop_front().ok_or(Error::EmptyBackendRxQ)?;
-        let conn = match self.conn_map.get_mut(&key) {
-            Some(conn) => conn,
-            None => {
-                // assume that the connection does not exist
+        while let Some(key) = self.backend_rxq.pop_front() {
+            let conn = match self.conn_map.get_mut(&key) {
+                Some(conn) => conn,
+                None => {
+                    // assume that the connection does not exist
+                    return Ok(());
+                }
+            };
+            conn.in_backend_rxq = false;
+
+            if conn.rx_queue.contains(RxOps::Reset.bitmask()) {
+                // Handle RST events here
+                let conn = self.conn_map.remove(&key).unwrap();
+                self.listener_map.remove(&conn.stream.as_raw_fd());
+                self.stream_map.remove(&conn.stream.as_raw_fd());
+                self.local_port_set.remove(&conn.local_port);
+                VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
+                    .unwrap_or_else(|err| {
+                        if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound)
+                        {
+                            return;
+                        }
+                        warn!(
+                            "Could not remove epoll listener for fd {:?}: {:?}",
+                            conn.stream.as_raw_fd(),
+                            err
+                        )
+                    });
+
+                // Initialize the packet header to contain a VSOCK_OP_RST operation
+                pkt.set_op(VSOCK_OP_RST)
+                    .set_src_cid(VSOCK_HOST_CID)
+                    .set_dst_cid(conn.guest_cid)
+                    .set_src_port(conn.local_port)
+                    .set_dst_port(conn.peer_port)
+                    .set_len(0)
+                    .set_type(VSOCK_TYPE_STREAM)
+                    .set_flags(0)
+                    .set_buf_alloc(0)
+                    .set_fwd_cnt(0);
+
                 return Ok(());
             }
-        };
 
-        if conn.rx_queue.peek() == Some(RxOps::Reset) {
-            // Handle RST events here
-            let conn = self.conn_map.remove(&key).unwrap();
-            self.listener_map.remove(&conn.stream.as_raw_fd());
-            self.stream_map.remove(&conn.stream.as_raw_fd());
-            self.local_port_set.remove(&conn.local_port);
-            VhostUserVsockThread::epoll_unregister(conn.epoll_fd, conn.stream.as_raw_fd())
-                .unwrap_or_else(|err| {
-                    if matches!(&err, Error::EpollRemove(e) if e.kind() == ErrorKind::NotFound) {
-                        return;
-                    }
-                    warn!(
-                        "Could not remove epoll listener for fd {:?}: {:?}",
-                        conn.stream.as_raw_fd(),
-                        err
-                    )
-                });
+            // Handle other packet types per connection
+            let res = conn.recv_pkt(pkt);
+            if conn.rx_queue.pending_rx() {
+                self.push_backend_rxq(key);
+            }
 
-            // Initialize the packet header to contain a VSOCK_OP_RST operation
-            pkt.set_op(VSOCK_OP_RST)
-                .set_src_cid(VSOCK_HOST_CID)
-                .set_dst_cid(conn.guest_cid)
-                .set_src_port(conn.local_port)
-                .set_dst_port(conn.peer_port)
-                .set_len(0)
-                .set_type(VSOCK_TYPE_STREAM)
-                .set_flags(0)
-                .set_buf_alloc(0)
-                .set_fwd_cnt(0);
-
-            return Ok(());
+            match res {
+                Ok(()) => return Ok(()),
+                Err(Error::NoRequestRx) => continue,
+                Err(e) => return Err(e),
+            }
         }
 
-        // Handle other packet types per connection
-        conn.recv_pkt(pkt)?;
-
-        Ok(())
+        Err(Error::EmptyBackendRxQ)
     }
 
     /// Deliver a guest generated packet to its destination in the backend.
@@ -418,7 +450,7 @@ impl VsockThreadBackend {
 
         if conn.rx_queue.pending_rx() {
             // Required if the connection object adds new rx operations
-            self.backend_rxq.push_back(key);
+            self.push_backend_rxq(key);
         }
 
         Ok(())
@@ -504,17 +536,12 @@ impl VsockThreadBackend {
 
         self.conn_map
             .insert(ConnMapKey::new(pkt.dst_port(), pkt.src_port()), conn);
-        self.backend_rxq
-            .push_back(ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
+        self.push_backend_rxq(ConnMapKey::new(pkt.dst_port(), pkt.src_port()));
 
         self.stream_map.insert(stream_fd, stream);
         self.local_port_set.insert(pkt.dst_port());
 
-        VhostUserVsockThread::epoll_register(
-            self.epoll_fd,
-            stream_fd,
-            epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-        )?;
+        VhostUserVsockThread::epoll_register(self.epoll_fd, stream_fd, epoll::Events::EPOLLIN)?;
         Ok(())
     }
 
@@ -592,6 +619,7 @@ mod tests {
 
         packet.set_op(VSOCK_OP_RW);
         vtp.send_pkt(&packet).unwrap();
+        vtp.mute_pending_rx_epoll();
 
         packet.set_op(VSOCK_OP_RST);
         vtp.send_pkt(&packet).unwrap();

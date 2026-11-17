@@ -35,6 +35,7 @@ pub(crate) type RawPktsQ = VecDeque<RawVsockPacket>;
 pub(crate) struct RawVsockPacket {
     pub header: [u8; PKT_HEADER_SIZE],
     pub data: Vec<u8>,
+    pub offset: usize,
 }
 
 impl RawVsockPacket {
@@ -42,6 +43,7 @@ impl RawVsockPacket {
         let mut raw_pkt = Self {
             header: [0; PKT_HEADER_SIZE],
             data: vec![0; pkt.len() as usize],
+            offset: 0,
         };
 
         pkt.header_slice().copy_to(&mut raw_pkt.header);
@@ -431,19 +433,26 @@ impl VsockThreadBackend {
     /// - `Ok(())` if packet was successfully filled in
     /// - `Err(Error::EmptyRawPktsQueue)` if there was no available data
     pub fn recv_raw_pkt<B: BitmapSlice>(&mut self, pkt: &mut VsockPacket<B>) -> Result<()> {
-        let raw_vsock_pkt = self
-            .raw_pkts_queue
-            .write()
-            .unwrap()
-            .pop_front()
-            .ok_or(Error::EmptyRawPktsQueue)?;
+        let mut queue = self.raw_pkts_queue.write().unwrap();
+        let raw_vsock_pkt = queue.front_mut().ok_or(Error::EmptyRawPktsQueue)?;
 
         pkt.set_header_from_raw(&raw_vsock_pkt.header).unwrap();
         if !raw_vsock_pkt.data.is_empty() {
             let buf = pkt.data_slice().ok_or(Error::PktBufMissing)?;
-            buf.copy_from(&raw_vsock_pkt.data);
+            if buf.is_empty() {
+                return Err(Error::PktBufMissing);
+            }
+            let remaining = &raw_vsock_pkt.data[raw_vsock_pkt.offset..];
+            let chunk_len = std::cmp::min(remaining.len(), buf.len());
+            buf.copy_from(&remaining[..chunk_len]);
+            pkt.set_len(chunk_len as u32);
+            raw_vsock_pkt.offset += chunk_len;
+            if raw_vsock_pkt.offset < raw_vsock_pkt.data.len() {
+                return Ok(());
+            }
         }
 
+        queue.pop_front();
         Ok(())
     }
 
@@ -786,6 +795,34 @@ mod tests {
         assert_eq!(recvd_data_raw[1], 0xFEu8);
         assert_eq!(recvd_data_raw[2], 0xBAu8);
         assert_eq!(recvd_data_raw[3], 0xBEu8);
+
+        // Verify a packet larger than the receiver's RX buffer (2 * DATA_LEN) is split
+        // across two recv_raw_pkt calls with pkt.len() capped to DATA_LEN each time.
+        let large_payload: [u8; DATA_LEN * 2] = core::array::from_fn(|i| i as u8);
+        let mut large_pkt_raw = [0u8; PKT_HEADER_SIZE + DATA_LEN * 2];
+        let (large_hdr, large_data) = large_pkt_raw.split_at_mut(PKT_HEADER_SIZE);
+        // SAFETY: large_hdr and large_data are valid slices.
+        let mut large_pkt = unsafe { VsockPacket::new(large_hdr, Some(large_data)).unwrap() };
+        large_pkt
+            .set_type(VSOCK_TYPE_STREAM)
+            .set_src_cid(CID)
+            .set_dst_cid(SIBLING_CID)
+            .set_dst_port(SIBLING_LISTENING_PORT)
+            .set_op(VSOCK_OP_RW)
+            .set_len((DATA_LEN * 2) as u32);
+        large_pkt.data_slice().unwrap().copy_from(&large_payload);
+        vtp.send_pkt(&large_pkt).unwrap();
+
+        for chunk in large_payload.chunks(DATA_LEN) {
+            sibling_backend.threads[0]
+                .lock()
+                .unwrap()
+                .thread_backend
+                .recv_raw_pkt(&mut recvd_packet)
+                .unwrap();
+            assert_eq!(recvd_packet.len(), DATA_LEN as u32);
+            assert_eq!(&recvd_data_raw[..DATA_LEN], chunk);
+        }
 
         test_dir.close().unwrap();
     }

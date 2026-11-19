@@ -30,6 +30,10 @@ pub enum CapsetName {
     #[cfg(feature = "backend-virgl")]
     Venus = GpuCapset::VENUS.bits(),
 
+    /// [virglrenderer] DRM native context
+    #[cfg(feature = "backend-virgl")]
+    DRM = GpuCapset::DRM.bits(),
+
     /// [gfxstream] Vulkan implementation (partial support only){n}
     /// NOTE: Can only be used for 2D display output for now, there is no
     /// hardware acceleration yet

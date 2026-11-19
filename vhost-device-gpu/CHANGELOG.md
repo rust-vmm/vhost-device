@@ -3,6 +3,7 @@
 
 ### Added
 
+- [[#1027]] (https://github.com/rust-vmm/vhost-device/pull/1027) vhost-device-gpu: Add VIRTIO_GPU_CAPSET_DRM support
 - [[#988]] (https://github.com/rust-vmm/vhost-device/pull/988) vhost-device-gpu: Add blob resource support and Venus capset for virglrenderer backend
 - [[#945]] (https://github.com/rust-vmm/vhost-device/pull/945) Implement RESOURCE_ASSIGN_UUID command
 - [[#932]] (https://github.com/rust-vmm/vhost-device/pull/932) vhost-device-gpu: Add support for GPU device path

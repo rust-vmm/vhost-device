@@ -213,11 +213,17 @@ impl GpioDevice for PhysDevice {
         let state = self.state[gpio as usize].lock().unwrap();
 
         if let Some(request) = &state.request {
-            Ok(request
+            // `line::Value` lists `Active` first, so casting it would turn an
+            // active line into 0. Map the variants explicitly.
+            let value = request
                 .lock()
                 .unwrap()
                 .value(gpio as u32)
-                .map_err(Error::GpiodFailed)? as u8)
+                .map_err(Error::GpiodFailed)?;
+            Ok(match value {
+                line::Value::Active => 1,
+                line::Value::InActive => 0,
+            })
         } else {
             Err(Error::GpioDirectionInvalid(
                 VIRTIO_GPIO_DIRECTION_NONE as u32,

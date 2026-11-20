@@ -10,6 +10,8 @@
 
 ### Changed
 
+- [[#1026]] (https://github.com/rust-vmm/vhost-device/pull/1026) vhost-device-gpu: Set num_scanouts to 0 in headless mode
+
 ### Fixed
 - [[#969] (https://github.com/rust-vmm/vhost-device/pull/970) vhost-device-gpu: Fix get_capset_info parameter
 - [[#967] (https://github.com/rust-vmm/vhost-device/pull/967) vhost-device-gpu: Fix DRM device selection with --gpu-device option

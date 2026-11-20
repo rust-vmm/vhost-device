@@ -89,8 +89,7 @@ use crate::{
         GpuResponse::{ErrInvalidParameter, ErrUnspec},
         GpuResponseEncodeError, VirtioGpuConfig, VirtioGpuResult, CONTROL_QUEUE, CURSOR_QUEUE,
         NUM_QUEUES, POLL_EVENT, QUEUE_SIZE, VIRTIO_GPU_BIND_RENDER_TARGET, VIRTIO_GPU_FLAG_FENCE,
-        VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_F_BLOB_ALIGNMENT, VIRTIO_GPU_MAX_SCANOUTS,
-        VIRTIO_GPU_TEXTURE_2D,
+        VIRTIO_GPU_FLAG_INFO_RING_IDX, VIRTIO_GPU_F_BLOB_ALIGNMENT, VIRTIO_GPU_TEXTURE_2D,
     },
     renderer::Renderer,
     GpuConfig, GpuMode,
@@ -178,7 +177,7 @@ impl VhostUserGpuBackend {
             virtio_cfg: VirtioGpuConfig {
                 events_read: 0.into(),
                 events_clear: 0.into(),
-                num_scanouts: Le32::from(VIRTIO_GPU_MAX_SCANOUTS),
+                num_scanouts: Le32::from(gpu_config.num_scanouts()),
                 num_capsets: Le32::from(gpu_config.capsets().num_capsets()),
                 // SAFETY: sysconf(_SC_PAGESIZE) is always safe and returns the page size.
                 blob_alignment: Le32::from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u32),

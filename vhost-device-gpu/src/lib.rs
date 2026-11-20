@@ -41,7 +41,7 @@ use thiserror::Error as ThisError;
 use vhost_user_backend::VhostUserDaemon;
 use vm_memory::{GuestMemoryAtomic, GuestMemoryMmap};
 
-use crate::device::VhostUserGpuBackend;
+use crate::{device::VhostUserGpuBackend, protocol::VIRTIO_GPU_MAX_SCANOUTS};
 
 #[cfg(feature = "backend-virgl")]
 pub const DEFAULT_VIRGLRENDER_CAPSET_MASK: GpuCapset = GpuCapset::ALL_VIRGLRENDERER_CAPSETS;
@@ -139,6 +139,7 @@ pub struct GpuConfig {
     gpu_mode: GpuMode,
     capset: GpuCapset,
     flags: GpuFlags,
+    num_scanouts: u32,
     #[cfg(feature = "backend-virgl")]
     gpu_device_fd: Option<OwnedFd>,
 }
@@ -233,10 +234,17 @@ impl GpuConfigBuilder {
             None
         };
 
+        let num_scanouts = if flags.headless {
+            0
+        } else {
+            VIRTIO_GPU_MAX_SCANOUTS
+        };
+
         Ok(GpuConfig {
             gpu_mode,
             capset,
             flags,
+            num_scanouts,
             #[cfg(feature = "backend-virgl")]
             gpu_device_fd,
         })
@@ -296,6 +304,10 @@ impl GpuConfig {
 
     pub const fn flags(&self) -> &GpuFlags {
         &self.flags
+    }
+
+    pub const fn num_scanouts(&self) -> u32 {
+        self.num_scanouts
     }
 
     #[cfg(feature = "backend-virgl")]

@@ -2241,6 +2241,7 @@ dependencies = [
  "assert_matches",
  "clap",
  "env_logger",
+ "libc",
  "log",
  "queues",
  "socketcan",

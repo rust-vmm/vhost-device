@@ -1530,9 +1530,8 @@ mod tests {
     }
 
     #[test]
-    fn test_virtio_can_tx_device_started_test_send_fail() {
-        let controller =
-            CanController::new("nonexistent_can".to_string()).expect("Could not build controller");
+    fn test_virtio_can_tx_device_started_test_send_success() {
+        let controller = CanController::new_test().expect("Could not build controller");
         let controller = Arc::new(RwLock::new(controller));
         let mut vu_can_backend =
             VhostUserCanBackend::new(controller.clone()).expect("Could not build vhucan device");
@@ -1584,7 +1583,7 @@ mod tests {
             .map_err(|_| Error::DescriptorReadFailed)
             .unwrap();
 
-        assert_eq!(VIRTIO_CAN_RESULT_NOT_OK, can_frame_res);
+        assert_eq!(VIRTIO_CAN_RESULT_OK, can_frame_res);
     }
 
     #[test]

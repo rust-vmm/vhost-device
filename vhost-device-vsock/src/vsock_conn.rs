@@ -6,7 +6,7 @@ use std::{
     os::unix::prelude::{AsRawFd, RawFd},
 };
 
-use log::{error, info};
+use log::info;
 use virtio_vsock::packet::{VsockPacket, PKT_HEADER_SIZE};
 use vm_memory::{bitmap::BitmapSlice, ReadVolatile, VolatileSlice, WriteVolatile};
 
@@ -54,6 +54,12 @@ pub(crate) struct VsockConnection<S> {
     pub tx_buf: LocalTxBuf,
     /// Local tx buffer size
     tx_buffer_size: u32,
+    /// Whether EPOLLIN is currently enabled for this connection.
+    pub rx_epoll_enabled: bool,
+    /// Whether EPOLLOUT is currently enabled for this connection.
+    pub tx_epoll_enabled: bool,
+    /// Whether this connection is currently queued in `backend_rxq`.
+    pub in_backend_rxq: bool,
 }
 
 impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockConnection<S> {
@@ -84,6 +90,9 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             epoll_fd,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
             tx_buffer_size,
+            rx_epoll_enabled: false,
+            tx_epoll_enabled: false,
+            in_backend_rxq: false,
         }
     }
 
@@ -118,6 +127,33 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             epoll_fd,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
             tx_buffer_size,
+            rx_epoll_enabled: true,
+            tx_epoll_enabled: false,
+            in_backend_rxq: false,
+        }
+    }
+
+    /// Update epoll registration state only when the desired event mask changes.
+    pub fn update_epoll(&mut self, rx: bool, tx: bool) {
+        if self.rx_epoll_enabled == rx && self.tx_epoll_enabled == tx {
+            return;
+        }
+        self.rx_epoll_enabled = rx;
+        self.tx_epoll_enabled = tx;
+        let mut evset = epoll::Events::empty();
+        if rx {
+            evset |= epoll::Events::EPOLLIN;
+        }
+        if tx {
+            evset |= epoll::Events::EPOLLOUT;
+        }
+        if evset.is_empty() {
+            let _ = VhostUserVsockThread::epoll_unregister(self.epoll_fd, self.stream.as_raw_fd());
+        } else if VhostUserVsockThread::epoll_modify(self.epoll_fd, self.stream.as_raw_fd(), evset)
+            .is_err()
+        {
+            let _ =
+                VhostUserVsockThread::epoll_register(self.epoll_fd, self.stream.as_raw_fd(), evset);
         }
     }
 
@@ -149,6 +185,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
                 // Check if peer has space for receiving data
                 if self.need_credit_update_from_peer() {
+                    self.update_epoll(false, self.tx_epoll_enabled);
                     self.last_fwd_cnt = self.fwd_cnt;
                     pkt.set_op(VSOCK_OP_CREDIT_REQUEST);
                     return Ok(());
@@ -163,43 +200,65 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                     .subslice(0, max_read_len)
                     .expect("subslicing should work since length was checked");
                 // Read data from the stream directly into the buffer
-                if let Ok(read_cnt) = self.stream.read_volatile(&mut buf) {
-                    if read_cnt == 0 {
+                let read_res = loop {
+                    match self.stream.read_volatile(&mut buf) {
+                        Err(vm_memory::VolatileMemoryError::IOError(ref e))
+                            if e.kind() == ErrorKind::Interrupted =>
+                        {
+                            continue;
+                        }
+                        res => break res,
+                    }
+                };
+                match read_res {
+                    Ok(0) => {
                         // If no data was read then the stream was closed down unexpectedly.
                         // Send a shutdown packet to the guest-side application.
+                        self.update_epoll(false, false);
                         pkt.set_op(VSOCK_OP_SHUTDOWN)
                             .set_flag(VSOCK_FLAGS_SHUTDOWN_RCV)
                             .set_flag(VSOCK_FLAGS_SHUTDOWN_SEND);
-                    } else {
+                        self.last_fwd_cnt = self.fwd_cnt;
+                        Ok(())
+                    }
+                    Ok(read_cnt) => {
                         // If data was read, then set the length field in the packet header
                         // to the amount of data that was read.
                         pkt.set_op(VSOCK_OP_RW).set_len(read_cnt as u32);
 
-                        // Re-register the stream file descriptor for read and write events
-                        if VhostUserVsockThread::epoll_modify(
-                            self.epoll_fd,
-                            self.stream.as_raw_fd(),
-                            epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                        )
-                        .is_err()
-                        {
-                            if let Err(e) = VhostUserVsockThread::epoll_register(
-                                self.epoll_fd,
-                                self.stream.as_raw_fd(),
-                                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                            ) {
-                                // TODO: let's move this logic out of this func, and handle it
-                                // properly
-                                error!("epoll_register failed: {e:?}, but proceed further.");
-                            }
-                        };
-                    }
+                        // Update the rx_cnt with the amount of data in the vsock packet.
+                        self.rx_cnt += Wrapping(pkt.len());
+                        self.last_fwd_cnt = self.fwd_cnt;
+                        self.rx_queue.remove(RxOps::CreditUpdate);
 
-                    // Update the rx_cnt with the amount of data in the vsock packet.
-                    self.rx_cnt += Wrapping(pkt.len());
-                    self.last_fwd_cnt = self.fwd_cnt;
+                        if read_cnt == max_read_len {
+                            if self.need_credit_update_from_peer() {
+                                self.update_epoll(false, self.tx_epoll_enabled);
+                            } else {
+                                self.rx_queue.enqueue(RxOps::Rw);
+                            }
+                        } else {
+                            self.update_epoll(true, self.tx_epoll_enabled);
+                        }
+                        Ok(())
+                    }
+                    Err(vm_memory::VolatileMemoryError::IOError(e))
+                        if e.kind() == ErrorKind::WouldBlock =>
+                    {
+                        self.update_epoll(true, self.tx_epoll_enabled);
+                        if self.rx_queue.pending_rx() {
+                            self.recv_pkt(pkt)
+                        } else {
+                            Err(Error::NoRequestRx)
+                        }
+                    }
+                    Err(_) => {
+                        self.update_epoll(false, false);
+                        self.rx_queue = RxQueue::new();
+                        self.rx_queue.enqueue(RxOps::Reset);
+                        Err(Error::NoRequestRx)
+                    }
                 }
-                Ok(())
             }
             Some(RxOps::Response) => {
                 // A response has been received to a newly initiated host-side connection
@@ -225,34 +284,30 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
     /// Returns:
     /// - always `Ok(())` to indicate that the packet has been consumed
     pub fn send_pkt<B: BitmapSlice>(&mut self, pkt: &VsockPacket<B>) -> Result<()> {
+        let prev_credit = self.peer_avail_credit();
         // Update peer credit information
         self.peer_buf_alloc = pkt.buf_alloc();
         self.peer_fwd_cnt = Wrapping(pkt.fwd_cnt());
+        if (!self.rx_epoll_enabled || prev_credit == 0)
+            && !self.need_credit_update_from_peer()
+            && self.connect
+        {
+            self.rx_queue.enqueue(RxOps::Rw);
+        }
 
         match pkt.op() {
             VSOCK_OP_RESPONSE => {
                 if self.stream.is_hybrid_vsock() {
                     // Confirmation for a host initiated connection
-                    // TODO: Handle stream write error in a better manner
                     let response = format!("OK {}\n", self.peer_port);
-                    self.stream.write_all(response.as_bytes()).unwrap();
-                }
-                self.connect = true;
-                if VhostUserVsockThread::epoll_register(
-                    self.epoll_fd,
-                    self.stream.as_raw_fd(),
-                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                )
-                .is_err()
-                {
-                    if let Err(e) = VhostUserVsockThread::epoll_modify(
-                        self.epoll_fd,
-                        self.stream.as_raw_fd(),
-                        epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                    ) {
-                        error!("epoll_modify failed: {e:?}, but proceed further.");
+                    if let Err(err) = self.stream.write_all(response.as_bytes()) {
+                        log::debug!("Error writing confirmation to stream: {err:?}");
+                        self.rx_queue.enqueue(RxOps::Reset);
+                        return Ok(());
                     }
                 }
+                self.connect = true;
+                self.update_epoll(true, self.tx_epoll_enabled);
             }
             VSOCK_OP_RW => {
                 // Data has to be written to the host-side stream
@@ -274,24 +329,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
                 }
             }
             VSOCK_OP_CREDIT_UPDATE => {
-                // Already updated the credit
-
-                // Re-register the stream file descriptor for read and write events
-                if let Err(e) = VhostUserVsockThread::epoll_modify(
-                    self.epoll_fd,
-                    self.stream.as_raw_fd(),
-                    epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                )
-                .or_else(|_| {
-                    VhostUserVsockThread::epoll_register(
-                        self.epoll_fd,
-                        self.stream.as_raw_fd(),
-                        epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-                    )
-                }) {
-                    // TODO: let's move this logic out of this func, and handle it properly
-                    error!("epoll_register failed: {e:?}, but proceed further.");
-                }
+                // Already updated the credit at the start of send_pkt.
             }
             VSOCK_OP_CREDIT_REQUEST => {
                 // Send back this connection's credit information
@@ -361,15 +399,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
         if written_count != buf.len() {
             // Try to re-enable EPOLLOUT in case it is disabled when txbuf is empty.
-            if VhostUserVsockThread::epoll_modify(
-                self.epoll_fd,
-                self.stream.as_raw_fd(),
-                epoll::Events::EPOLLIN | epoll::Events::EPOLLOUT,
-            )
-            .is_err()
-            {
-                error!("Failed to re-enable EPOLLOUT");
-            }
+            self.update_epoll(self.rx_epoll_enabled, true);
             return self.tx_buf.push(&buf.offset(written_count).unwrap());
         }
 
@@ -817,13 +847,15 @@ mod tests {
         let op_zero_read = conn_local.recv_pkt(&mut pkt);
         op_zero_read.unwrap();
         assert_eq!(pkt.op(), VSOCK_OP_RW);
-        assert!(!conn_local.rx_queue.pending_rx());
         assert_eq!(conn_local.rx_cnt, Wrapping(payload.len() as u32));
         assert_eq!(conn_local.last_fwd_cnt, Wrapping(1024));
         assert_eq!(pkt.len(), 5);
         let buf = &mut [0u8; 5];
         pkt.data_slice().unwrap().read_slice(buf, 0).unwrap();
         assert_eq!(buf, b"hello");
+        // Subsequent read hits EOF on the test file and clears pending RxOps::Rw
+        conn_local.recv_pkt(&mut pkt).unwrap();
+        assert!(!conn_local.rx_queue.pending_rx());
 
         // VSOCK_OP_RESPONSE: response from a locally initiated connection
         conn_local.rx_queue.enqueue(RxOps::Response);

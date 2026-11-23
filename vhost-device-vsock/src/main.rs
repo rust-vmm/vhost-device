@@ -79,7 +79,7 @@ use crate::vhu_vsock::VsockProxyInfo;
 use crate::vhu_vsock::{BackendType, CidMap, VhostUserVsockBackend, VsockConfig};
 
 const DEFAULT_GUEST_CID: u64 = 3;
-const DEFAULT_TX_BUFFER_SIZE: u32 = 64 * 1024;
+const DEFAULT_TX_BUFFER_SIZE: u32 = 256 * 1024;
 const DEFAULT_QUEUE_SIZE: usize = 1024;
 const DEFAULT_GROUP_NAME: &str = "default";
 
@@ -716,7 +716,7 @@ mod tests {
             config.get_backend_info(),
             BackendType::UnixDomainSocket(uds_paths[0].clone())
         );
-        assert_eq!(config.get_tx_buffer_size(), 65536);
+        assert_eq!(config.get_tx_buffer_size(), DEFAULT_TX_BUFFER_SIZE);
         assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
 
@@ -796,7 +796,7 @@ mod tests {
             config.get_backend_info(),
             BackendType::UnixDomainSocket(uds_paths[0].clone())
         );
-        assert_eq!(config.get_tx_buffer_size(), 65536);
+        assert_eq!(config.get_tx_buffer_size(), DEFAULT_TX_BUFFER_SIZE);
         assert_eq!(config.get_queue_size(), 1024);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
 
@@ -835,7 +835,7 @@ mod tests {
                 listen_ports: vec![1234, 4321]
             })
         );
-        assert_eq!(config.get_tx_buffer_size(), 65536);
+        assert_eq!(config.get_tx_buffer_size(), DEFAULT_TX_BUFFER_SIZE);
         assert_eq!(config.get_queue_size(), 2048);
         assert_eq!(config.get_groups(), vec![DEFAULT_GROUP_NAME.to_string()]);
 

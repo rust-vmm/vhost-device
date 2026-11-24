@@ -8,6 +8,7 @@
 ### Changed
 
 ### Fixed
+- [#1022](https://github.com/rust-vmm/vhost-device/pull/1022) vsock: split large sibling-VM packets in recv_raw_pkt
 - [#992](https://github.com/rust-vmm/vhost-device/pull/992) vsock: forward-listen stream polling after guest accepts
 - [#936](https://github.com/rust-vmm/vhost-device/pull/936) vsock: Access virtqueues only if they are ready
 

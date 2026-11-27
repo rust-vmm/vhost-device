@@ -8,6 +8,7 @@
 ### Changed
 
 ### Fixed
+- [#1021](https://github.com/rust-vmm/vhost-device/pull/1021) vsock: forward a guest's write shutdown to the host stream
 - [#992](https://github.com/rust-vmm/vhost-device/pull/992) vsock: forward-listen stream polling after guest accepts
 - [#936](https://github.com/rust-vmm/vhost-device/pull/936) vsock: Access virtqueues only if they are ready
 

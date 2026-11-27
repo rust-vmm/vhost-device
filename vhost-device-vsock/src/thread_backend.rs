@@ -185,6 +185,20 @@ pub(crate) trait IsHybridVsock {
     fn is_hybrid_vsock(&self) -> bool;
 }
 
+pub(crate) trait ShutdownWrite {
+    fn shutdown_write(&self) -> std::io::Result<()>;
+}
+
+impl ShutdownWrite for StreamType {
+    fn shutdown_write(&self) -> std::io::Result<()> {
+        match self {
+            StreamType::Unix(stream) => stream.shutdown(std::net::Shutdown::Write),
+            #[cfg(feature = "backend_vsock")]
+            StreamType::Vsock(stream) => stream.shutdown(std::net::Shutdown::Write),
+        }
+    }
+}
+
 impl IsHybridVsock for StreamType {
     fn is_hybrid_vsock(&self) -> bool {
         matches!(self, StreamType::Unix(_))

@@ -13,7 +13,7 @@ use vm_memory::{bitmap::BitmapSlice, ReadVolatile, VolatileSlice, WriteVolatile}
 use crate::{
     rxops::*,
     rxqueue::*,
-    thread_backend::IsHybridVsock,
+    thread_backend::{IsHybridVsock, ShutdownWrite},
     txbuf::*,
     vhu_vsock::{
         Error, Result, VSOCK_FLAGS_SHUTDOWN_RCV, VSOCK_FLAGS_SHUTDOWN_SEND,
@@ -54,9 +54,14 @@ pub(crate) struct VsockConnection<S> {
     pub tx_buf: LocalTxBuf,
     /// Local tx buffer size
     tx_buffer_size: u32,
+    /// The guest will send no more data, so the host-side stream is shut for
+    /// writing once `tx_buf` drains.
+    peer_shutdown_send: bool,
 }
 
-impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockConnection<S> {
+impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock + ShutdownWrite>
+    VsockConnection<S>
+{
     /// Create a new vsock connection object for locally i.e host-side
     /// inititated connections.
     pub fn new_local_init(
@@ -84,6 +89,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             epoll_fd,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
             tx_buffer_size,
+            peer_shutdown_send: false,
         }
     }
 
@@ -118,6 +124,7 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
             epoll_fd,
             tx_buf: LocalTxBuf::new(tx_buffer_size),
             tx_buffer_size,
+            peer_shutdown_send: false,
         }
     }
 
@@ -304,12 +311,26 @@ impl<S: AsRawFd + ReadVolatile + Write + WriteVolatile + IsHybridVsock> VsockCon
 
                 if recv_off && send_off && self.tx_buf.is_empty() {
                     self.rx_queue.enqueue(RxOps::Reset);
+                } else if send_off {
+                    self.peer_shutdown_send = true;
+                    self.shutdown_write_once_drained();
                 }
             }
             _ => {}
         }
 
         Ok(())
+    }
+
+    /// Shut the host-side stream for writing if the guest has shut its
+    /// sending side and every byte it sent has reached the stream, so the
+    /// host application reads end of stream.
+    pub fn shutdown_write_once_drained(&mut self) {
+        if self.peer_shutdown_send && self.tx_buf.is_empty() {
+            if let Err(e) = self.stream.shutdown_write() {
+                log::debug!("shutdown_write error: {e:?}");
+            }
+        }
     }
 
     /// Write data to the host-side stream.
@@ -534,6 +555,7 @@ mod tests {
     struct VsockDummySocket {
         read_buffer: Arc<Mutex<VecDeque<u8>>>,
         write_buffer: Arc<Mutex<VecDeque<u8>>>,
+        write_shut: Arc<Mutex<bool>>,
     }
 
     impl VsockDummySocket {
@@ -548,6 +570,7 @@ mod tests {
             VsockDummySocket {
                 read_buffer,
                 write_buffer,
+                write_shut: Arc::new(Mutex::new(false)),
             }
         }
 
@@ -563,10 +586,12 @@ mod tests {
                 VsockDummySocket {
                     read_buffer: buf1.clone(),
                     write_buffer: buf2.clone(),
+                    write_shut: Arc::new(Mutex::new(false)),
                 },
                 VsockDummySocket {
                     read_buffer: buf2.clone(),
                     write_buffer: buf1.clone(),
+                    write_shut: Arc::new(Mutex::new(false)),
                 },
             )
         }
@@ -633,6 +658,40 @@ mod tests {
         fn is_hybrid_vsock(&self) -> bool {
             true
         }
+    }
+
+    impl ShutdownWrite for VsockDummySocket {
+        fn shutdown_write(&self) -> IoResult<()> {
+            *self.write_shut.lock().unwrap() = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_vsock_conn_guest_send_shutdown_shuts_host_writes() {
+        let head_params = HeadParams::new(PKT_HEADER_SIZE, 5);
+        let (_host_socket, backend_socket) = VsockDummySocket::pair();
+        let mut conn_local = VsockConnection::new_local_init(
+            backend_socket,
+            VSOCK_HOST_CID,
+            5000,
+            3,
+            5001,
+            -1,
+            CONN_TX_BUF_SIZE,
+        );
+        let (mem, mut descr_chain) = prepare_desc_chain_vsock(false, &head_params, 1, 5);
+        let mem = mem.memory();
+        let mut pkt =
+            VsockPacket::from_tx_virtq_chain(mem.deref(), &mut descr_chain, CONN_TX_BUF_SIZE)
+                .unwrap();
+
+        pkt.set_op(VSOCK_OP_SHUTDOWN);
+        pkt.set_flags(VSOCK_FLAGS_SHUTDOWN_SEND);
+        conn_local.send_pkt(&pkt).unwrap();
+
+        assert!(*conn_local.stream.write_shut.lock().unwrap());
+        assert!(!conn_local.rx_queue.contains(RxOps::Reset.bitmask()));
     }
 
     #[test]
